@@ -4,13 +4,15 @@ import XCTest
 /// column at the window's trailing edge, and the draft puts Send in the same column while the
 /// keyboard is up, on the keyboard's top (`ComposerPlacement`). In each kind of conversation that
 /// takes posts, no symbol of the bar may meet Send, nor the capsule. Only a channel is measured
-/// without Back: a thread always has it, to its channel when Chat came from nowhere else.
+/// without Back: a thread always has it, to its channel when Chat came from nowhere else. A decided
+/// proposal's thread takes no posts, so it has no draft to meet.
 final class BarUITests: ShellTestCase {
   /// A task at a gate that waits on the user, and one whose stage eng-1 holds.
   private let exportView = "00000000000000000000000010"
   private let emptyState = "00000000000000000000000012"
-  /// A reallocation that waits on the user.
+  /// A reallocation and a channel proposal, each waiting on the user.
   private let reallocation = "00000000000000000000000008"
+  private let channelProposal = "00000000000000000000000006"
 
   /// The tabs, which the side column holds below the bar's symbols, under the keyboard while it
   /// is up.
@@ -21,6 +23,7 @@ final class BarUITests: ShellTestCase {
     case taskYours = "task-yours"
     case task
     case proposalYours = "proposal-yours"
+    case proposalDecided = "proposal-decided"
   }
 
   /// #general on a fresh start, with no Back, then each other kind of conversation from a fresh
@@ -31,13 +34,27 @@ final class BarUITests: ShellTestCase {
     signIn(app)
     expectGeneral(app)
     var met = measure(app, "general", ready: app.buttons["new-thread"].firstMatch)
+    var waiting: [String] = []
     for kind in Kind.allCases {
       app.terminate()
       app = launch(reset: false)
       expectGeneral(app)
-      met += measure(app, kind.rawValue, ready: open(kind, in: app))
+      let ready = open(kind, in: app)
+      switch kind {
+      case .proposalDecided:
+        XCTAssertTrue(draft(app).waitForNonExistence(timeout: 20), "a decided proposal takes posts")
+        keep(app, kind.rawValue, "down", column(app), [:])
+      case .proposalYours:
+        waiting = measure(app, kind.rawValue, ready: ready)
+      default:
+        met += measure(app, kind.rawValue, ready: ready)
+      }
     }
     XCTAssertTrue(met.isEmpty, "the bar meets the draft: " + met.joined(separator: "; "))
+    // Back, Approve, Reject and Charter: the third and the fourth stand where Send does.
+    XCTExpectFailure("a proposal waiting on the user has four symbols in its bar") {
+      XCTAssertTrue(waiting.isEmpty, "the bar meets the draft: " + waiting.joined(separator: "; "))
+    }
   }
 
   /// Opens a conversation of `kind` in Chat, and gives what shows once its bar is complete.
@@ -66,6 +83,17 @@ final class BarUITests: ShellTestCase {
       tab(app, "Needs you")
       pick(app, "proposal-\(reallocation)")
       return app.buttons["approve"].firstMatch
+    case .proposalDecided:
+      tab(app, "Needs you")
+      pick(app, "proposal-\(channelProposal)")
+      let strip = app.buttons["proposal-strip"].firstMatch
+      XCTAssertTrue(strip.waitForExistence(timeout: 20), "the proposal's thread shows no strip")
+      pick(app, "approve")
+      pick(app, "decision-confirm")
+      let decided = expectation(
+        for: NSPredicate(format: "label CONTAINS %@", "Approved by"), evaluatedWith: strip)
+      wait(for: [decided], timeout: 20)
+      return strip
     }
   }
 

@@ -209,10 +209,11 @@ test("the user pauses a runner, and one CLI on it apart from it, then resumes ea
   page,
 }) => {
   const board = await fakeBoard(page);
-  // Registered after the fake board, so it answers first: the board takes a moment to answer, as
-  // a live one may, and the control is on its way meanwhile.
+  // Registered after the fake board, so it answers first: the first change waits until the test
+  // lets it go, as a slow board's would, and the rest are answered at once.
+  const answer = Promise.withResolvers<void>();
   await page.route(/\/api\/runners\/[^/]+\/(pause|resume)/, async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    await answer.promise;
     await route.fallback();
   });
   await page.goto("/runners");
@@ -227,6 +228,9 @@ test("the user pauses a runner, and one CLI on it apart from it, then resumes ea
   await claude.focus();
   await page.keyboard.press("Enter");
   await page.keyboard.press("Enter");
+  await expect(claude).toHaveAttribute("aria-disabled", "true");
+  await expect(claude).toBeFocused();
+  answer.resolve();
   await expect(claude).toHaveAccessibleName("Resume claude on pod");
   await expect(claude).toBeFocused();
   await expect(claude).toHaveAttribute("aria-disabled", "false");
@@ -535,10 +539,12 @@ test("an answer that comes once the focus left the red Remove puts the controls 
   page,
 }) => {
   const board = await fakeBoard(page, { archived: true });
-  // Registered after the fake board, so it answers first: each removal answers 300 ms late.
+  // Registered after the fake board, so it answers first: each removal waits until the test lets
+  // it go, once the focus has moved on.
+  let answer = Promise.withResolvers<void>();
   await page.route(/\/api\/runners\/[^/]+$/, async (route) => {
     if (route.request().method() === "DELETE") {
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      await answer.promise;
     }
     await route.fallback();
   });
@@ -563,6 +569,7 @@ test("an answer that comes once the focus left the red Remove puts the controls 
   await remove.click();
   await page.getByRole("heading", { name: "Runners" }).click();
   await expect(remove).toHaveAttribute("aria-disabled", "true");
+  answer.resolve();
   await expect(laptop.getByRole("alert")).toHaveText(refusal);
   await expect(remove).toHaveCount(0);
   await expect(bin).toBeVisible();
@@ -573,22 +580,28 @@ test("an answer that comes once the focus left the red Remove puts the controls 
   await expect(laptop.getByRole("alert")).toHaveCount(0);
 
   // Tab away while the board answers: the same, and the focus stays where Tab took it.
+  answer = Promise.withResolvers<void>();
   await expect(remove).toHaveAttribute("aria-disabled", "false");
   await page.keyboard.press("Enter");
   await page.keyboard.press("Tab");
+  await expect(remove).toHaveAttribute("aria-disabled", "true");
   const tabbed = await focused();
   expect(tabbed).not.toBe("Remove laptop");
+  answer.resolve();
   await expect(laptop.getByRole("alert")).toHaveText(refusal);
   await expect(remove).toHaveCount(0);
   expect(await focused()).toBe(tabbed);
 
   // Escape while the board answers keeps the board open, and its refusal puts the controls back,
   // the refusal under them and the focus on the bin.
+  answer = Promise.withResolvers<void>();
   await bin.click();
   await expect(remove).toHaveAttribute("aria-disabled", "false");
   await remove.click();
   await page.keyboard.press("Escape");
+  await expect(remove).toHaveAttribute("aria-disabled", "true");
   await expect(page).toHaveURL("/runners");
+  answer.resolve();
   await expect(laptop.getByRole("alert")).toHaveText(refusal);
   await expect(remove).toHaveCount(0);
   await expect(bin).toBeFocused();
@@ -600,10 +613,13 @@ test("an answer that comes once the focus left the red Remove puts the controls 
   await studio.getByRole("button", { name: "Remove studio…" }).click();
   const removeStudio = studio.getByRole("button", { name: "Remove studio", exact: true });
   await expect(removeStudio).toHaveAttribute("aria-disabled", "false");
+  answer = Promise.withResolvers<void>();
   await removeStudio.click();
   await rows.nth(0).getByRole("button", { name: "Rename pod…" }).click();
   const field = page.getByRole("form", { name: "Rename pod" }).getByRole("textbox");
   await expect(field).toBeFocused();
+  await expect(rows).toHaveCount(3);
+  answer.resolve();
   await expect(rows).toHaveCount(2);
   await expect(field).toBeFocused();
   await expect(page.getByRole("form", { name: "Rename pod" })).toBeVisible();
@@ -620,8 +636,11 @@ test("an answer that comes once the focus left the red Remove puts the controls 
   await pod.getByRole("button", { name: "Remove pod…" }).click();
   const removePod = pod.getByRole("button", { name: "Remove pod", exact: true });
   await expect(removePod).toHaveAttribute("aria-disabled", "false");
+  answer = Promise.withResolvers<void>();
   await removePod.click();
   await page.keyboard.press("Escape");
+  await expect(removePod).toHaveAttribute("aria-disabled", "true");
+  answer.resolve();
   await expect(rows).toHaveCount(1);
   await expect(page).toHaveURL("/runners");
   await expect(page.getByRole("list", { name: "Registered" })).toBeFocused();

@@ -3,6 +3,8 @@ import {
   ASK_NARROWEST,
   CONTENT_MIN,
   askBoxPlacement,
+  besidePanel,
+  besideSky,
   contentWidth,
   defaultContentWidth,
   readBoardLayout,
@@ -15,7 +17,11 @@ import {
 
 /** Where the ask box goes at a window's width, with the content at its default. */
 function placed(window: number, layout: BoardLayout) {
-  return askBoxPlacement(window, skyRoom(layout, contentWidth(window, null, layout)), layout);
+  return askBoxPlacement(
+    window,
+    skyRoom(layout, contentWidth(window, null, layout), window),
+    layout,
+  );
 }
 
 /** A local storage of the test's own, whose items it hands back. */
@@ -71,13 +77,48 @@ describe("the content's width", () => {
   });
 });
 
+describe("the panel beside the sky", () => {
+  it("holds the navigator and the content while both fit inside the window's margins", () => {
+    expect(besidePanel(1440, 576)).toEqual({ folded: false, content: 576, width: 256 + 576 });
+    // 708 px is the narrowest window for the narrowest content.
+    expect(besidePanel(708, 420)).toEqual({ folded: false, content: 420, width: 676 });
+    expect(besidePanel(1440, 1152)).toEqual({ folded: false, content: 1152, width: 1408 });
+  });
+
+  it("in a narrower window, folds the navigator to its rail, and the content narrows once the window can't hold it", () => {
+    expect(besidePanel(707, 420)).toEqual({ folded: true, content: 420, width: 44 + 420 });
+    // 496 px holds the rail and 420 px of content inside its margins, and no more.
+    expect(besidePanel(496, 420)).toEqual({ folded: true, content: 420, width: 464 });
+    expect(besidePanel(495, 420)).toEqual({ folded: true, content: 419, width: 463 });
+    expect(besidePanel(360, 420)).toEqual({ folded: true, content: 284, width: 328 });
+    expect(besidePanel(320, 420)).toEqual({ folded: true, content: 244, width: 288 });
+  });
+});
+
 describe("the sky's room", () => {
   it("around the sky, lies between the navigator island and the content island", () => {
-    expect(skyRoom("around", 576)).toEqual({ left: 256 + 32, right: 576 + 32 });
+    expect(skyRoom("around", 576, 1440)).toEqual({ left: 256 + 32, right: 576 + 32 });
   });
 
   it("beside the sky, lies right of the panel, out to the window's edge", () => {
-    expect(skyRoom("beside", 576)).toEqual({ left: 256 + 576 + 32, right: 0 });
+    expect(skyRoom("beside", 576, 1440)).toEqual({ left: 256 + 576 + 32, right: 0 });
+    // The rail and the content, then 16 px; the window's edge, or past it, when they fill it.
+    expect(skyRoom("beside", 420, 600)).toEqual({ left: 44 + 420 + 32, right: 0 });
+    expect(skyRoom("beside", 420, 360)).toEqual({ left: 360, right: 0 });
+  });
+
+  it("beside the sky, holds the hint from 32 px and 15.5 root ems, and the camera's buttons from 4.25 root ems", () => {
+    // At a 16 px root: 280 and 68 px.
+    expect(besideSky(988, skyRoom("beside", 420, 988), 16)).toEqual({ hint: true, camera: true });
+    expect(besideSky(987, skyRoom("beside", 420, 987), 16)).toEqual({ hint: false, camera: true });
+    expect(besideSky(776, skyRoom("beside", 420, 776), 16).camera).toBe(true);
+    expect(besideSky(775, skyRoom("beside", 420, 775), 16).camera).toBe(false);
+    // At a 20 px root, 342 and 85 px.
+    expect(besideSky(1050, skyRoom("beside", 420, 1050), 20).hint).toBe(true);
+    expect(besideSky(1049, skyRoom("beside", 420, 1049), 20).hint).toBe(false);
+    // In a narrow window, beside the rail and the content.
+    expect(besideSky(600, skyRoom("beside", 420, 600), 16)).toEqual({ hint: false, camera: true });
+    expect(besideSky(360, skyRoom("beside", 420, 360), 16)).toEqual({ hint: false, camera: false });
   });
 });
 
@@ -101,8 +142,8 @@ describe("the ask box", () => {
   it("beside the sky, keeps inside the room at every width it fits, and to the window's right margin once it can't", () => {
     const wrong = [];
     const seen = { fits: 0, narrowest: 0 };
-    for (let window = 700; window <= 2560; window += 1) {
-      const room = skyRoom("beside", contentWidth(window, null, "beside"));
+    for (let window = 320; window <= 2560; window += 1) {
+      const room = skyRoom("beside", contentWidth(window, null, "beside"), window);
       const sky = window - room.left;
       const { left, width } = placed(window, "beside");
       const fits = sky - 32 >= ASK_NARROWEST;
@@ -118,7 +159,7 @@ describe("the ask box", () => {
     }
     expect(wrong).toEqual([]);
     // Both cases were met: the box fits from 1020 up and keeps to the margin below.
-    expect(seen).toEqual({ fits: 2560 - 1020 + 1, narrowest: 1020 - 700 });
+    expect(seen).toEqual({ fits: 2560 - 1020 + 1, narrowest: 1020 - 320 });
   });
 });
 

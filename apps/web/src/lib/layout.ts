@@ -5,6 +5,8 @@
  */
 export const ISLAND_MARGIN = 16;
 export const NAVIGATOR_WIDTH = 256;
+/** Beside the sky, the navigator folded to a column of its three buttons, in a window too narrow for it. */
+export const RAIL_WIDTH = 44;
 /** The narrowest the content island goes, which still holds a plan, a composer, and a header. */
 export const CONTENT_MIN = 420;
 /** The ask box's widest, and its narrowest, which still holds the composer's row. */
@@ -12,6 +14,19 @@ export const ASK_WIDEST = 560;
 export const ASK_NARROWEST = 280;
 /** The sky's room below which, around the sky, the ask box leaves it for the window's middle. */
 const ASK_ROOM = 460;
+/**
+ * Beside the sky, the sky's room right of the panel that holds the ask hint in its middle, clear of
+ * the camera's buttons at its right foot: 32 px and 15.5 root ems. That is two sides of 16 px and
+ * 2.75 root ems (`HINT_SIDE`: the buttons' 2.25 root ems, 16 px in from the window's edge, and a
+ * gap of half an em), and 10 root ems for the hint at its narrowest, an unread answer's with its
+ * news cut to nothing: 141 px at a 16 px root and 170 at 20, under 10 root ems from 12 to 24 px,
+ * since its key's 11 px text doesn't follow the root font.
+ */
+const HINT_ROOM_EMS = 15.5;
+/** Each side of the hint's row beside the sky, which keeps it clear of the camera's buttons. */
+export const HINT_SIDE = "calc(16px + 2.75rem)";
+/** The room that holds the camera's buttons, 16 px clear of the panel and of the window's edge. */
+const CAMERA_ROOM_EMS = 4.25;
 
 /**
  * Where the open board sits: `around` the sky, the navigator island on the left and the content
@@ -66,11 +81,50 @@ export function toggledWidth(
     : "widest";
 }
 
+/** The panel beside the sky: whether its navigator is folded to the rail, and its columns' widths. */
+export interface BesidePanel {
+  readonly folded: boolean;
+  readonly content: number;
+  readonly width: number;
+}
+
+/**
+ * The panel beside the sky: the navigator and the content while both fit inside the window's
+ * margins, from 708 px at the narrowest content; in a narrower window, the navigator folded to its
+ * rail beside the content, which keeps its width while the window holds it and narrows with the
+ * window once it doesn't.
+ */
+export function besidePanel(window: number, content: number): BesidePanel {
+  const inside = window - 2 * ISLAND_MARGIN;
+  if (NAVIGATOR_WIDTH + content <= inside) {
+    return { folded: false, content, width: NAVIGATOR_WIDTH + content };
+  }
+  const column = Math.max(0, Math.min(content, inside - RAIL_WIDTH));
+  return { folded: true, content: column, width: RAIL_WIDTH + column };
+}
+
 /** The room the open board leaves the sky, which centers in the rest. */
-export function skyRoom(layout: BoardLayout, content: number): SkyRoom {
+export function skyRoom(layout: BoardLayout, content: number, window: number): SkyRoom {
   return layout === "around"
     ? { left: NAVIGATOR_WIDTH + 2 * ISLAND_MARGIN, right: content + 2 * ISLAND_MARGIN }
-    : { left: NAVIGATOR_WIDTH + content + 2 * ISLAND_MARGIN, right: 0 };
+    : { left: besidePanel(window, content).width + 2 * ISLAND_MARGIN, right: 0 };
+}
+
+/**
+ * Beside the sky, what the sky's room right of the panel holds, at a root font of `rootPx`: the
+ * ask hint in its middle, which a narrower room leaves out, as Space still opens the ask box; and
+ * the camera's buttons, which hide where the panel would cover them.
+ */
+export function besideSky(
+  window: number,
+  room: SkyRoom,
+  rootPx: number,
+): { hint: boolean; camera: boolean } {
+  const sky = window - room.left;
+  return {
+    hint: sky >= 2 * ISLAND_MARGIN + HINT_ROOM_EMS * rootPx,
+    camera: sky >= CAMERA_ROOM_EMS * rootPx,
+  };
 }
 
 /**

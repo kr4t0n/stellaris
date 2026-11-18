@@ -96,10 +96,10 @@ private struct TabLabel: View {
 
 /// The conversation Chat holds, with Back to the one it came from. A channel that takes posts has
 /// New thread in the bar, which the bar keeps longest as it runs out of room. A task's thread has
-/// Advance pinned at the bar's end while its stage waits on the user, then Plan; a proposal's has
-/// Approve pinned while it waits on the user, then Reject, then Charter. The plan or the charter
-/// opens in a column beside the thread where both have room, and in a sheet otherwise; the forms
-/// open in system sheets, which iOS moves off a fold.
+/// Advance pinned at the bar's end while its stage waits on the user, and nothing more, since its
+/// strip opens the plan; a proposal's has Approve pinned while it waits on the user, then Reject,
+/// then Charter. The plan or the charter opens in a column beside the thread where both have room,
+/// and in a sheet otherwise; the forms open in system sheets, which iOS moves off a fold.
 struct ChatView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.horizontalSizeClass) private var sizeClass
@@ -159,15 +159,6 @@ struct ChatView: View {
                   .accessibilityIdentifier("advance")
                 }
               }
-              ToolbarItem(placement: .primaryAction) {
-                Button {
-                  toggleInspector(task.id)
-                } label: {
-                  Label("Plan", systemImage: "list.number")
-                }
-                .accessibilityIdentifier("plan")
-              }
-              .visibilityPriority(.high)
             }
             if case .proposal(let proposal)? = subject {
               if waitingOnYou(proposal) {

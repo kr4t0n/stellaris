@@ -2,7 +2,8 @@ import XCTest
 
 /// Tasks and proposals: the strip above a task's or a proposal's thread, Advance at a stage that
 /// waits on the user and none at one another citizen holds, Approve and Reject with a reason kept
-/// through a swipe away, the plan and the charter from the bar, and a project's dashboard and tasks.
+/// through a swipe away, the plan from the strip and the charter from the bar, and a project's
+/// dashboard and tasks.
 final class SubjectUITests: ShellTestCase {
   /// A task at a gate that waits on the user, "Approve the design".
   private let exportView = "00000000000000000000000010"
@@ -45,7 +46,8 @@ final class SubjectUITests: ShellTestCase {
     keepScreen("advanced")
   }
 
-  /// A task whose stage another citizen holds shows its strip and Plan, and no Advance.
+  /// A task whose stage another citizen holds shows its strip, and neither Advance nor Plan in the
+  /// bar: the strip opens the plan.
   @MainActor func testOffersNoAdvanceAtAStageThatIsNotYours() {
     let app = launch()
     signIn(app)
@@ -55,7 +57,7 @@ final class SubjectUITests: ShellTestCase {
     let strip = app.buttons["task-strip"].firstMatch
     XCTAssertTrue(strip.waitForExistence(timeout: 20), "the task's thread shows no strip")
     XCTAssertTrue(strip.label.contains("held by eng-1"), "the strip names no holder: \(strip.label)")
-    XCTAssertTrue(app.buttons["plan"].waitForExistence(timeout: 20), "the bar has no Plan")
+    XCTAssertFalse(app.buttons["plan"].exists, "the bar has Plan")
     XCTAssertFalse(app.buttons["advance"].exists, "Advance at a stage eng-1 holds")
     keepScreen("task-not-yours")
   }
@@ -115,7 +117,7 @@ final class SubjectUITests: ShellTestCase {
     keepScreen("approved")
   }
 
-  /// Plan opens a task's stages, and Charter a proposal's charter, in a sheet with no button,
+  /// The strip opens a task's stages, and Charter a proposal's charter, in a sheet with no button,
   /// each closed again by a drag down.
   @MainActor func testOpensThePlanAndTheCharter() {
     let app = launch()
@@ -123,9 +125,9 @@ final class SubjectUITests: ShellTestCase {
     expectGeneral(app)
     tab(app, "Needs you")
     pick(app, "stage-\(exportView)")
-    pick(app, "plan")
+    openFromTheStrip(app)
     let stage = app.descendants(matching: .any)["stage-s2"].firstMatch
-    XCTAssertTrue(stage.waitForExistence(timeout: 20), "Plan shows no stages")
+    XCTAssertTrue(stage.waitForExistence(timeout: 20), "the strip shows no stages")
     XCTAssertTrue(stage.label.contains("gate"), "the stage doesn't say it is a gate")
     keepScreen("plan")
     XCTAssertFalse(app.buttons["Done"].exists, "the plan's sheet has a Done")
@@ -180,9 +182,9 @@ final class SubjectUITests: ShellTestCase {
     }
     XCTAssertTrue(shown(), "the stage isn't on screen in Needs you")
     row.tap()
-    pick(app, "plan")
+    openFromTheStrip(app)
     let stage = app.descendants(matching: .any)["stage-s2"].firstMatch
-    XCTAssertTrue(stage.waitForExistence(timeout: 20), "Plan shows no stages")
+    XCTAssertTrue(stage.waitForExistence(timeout: 20), "the strip shows no stages")
     keepScreen("plan-largest")
     // At this size a drag from the sheet's bar left it where it was, so it starts in the content.
     dragAway(app, app.navigationBars["Plan"].firstMatch, from: CGVector(dx: 0.5, dy: 1.6))

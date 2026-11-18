@@ -69,6 +69,15 @@ class ShellTestCase: XCTestCase {
     row.tap()
   }
 
+  /// Opens the plan, or the charter, from the strip above a task's or a proposal's thread, with a
+  /// tap at its trailing end: on the outer display its middle is inside the status bar's frame at
+  /// the window's top-leading corner, where a tap reaches nothing below it.
+  @MainActor func openFromTheStrip(_ app: XCUIApplication, _ identifier: String = "task-strip") {
+    let strip = app.buttons[identifier].firstMatch
+    XCTAssertTrue(strip.waitForExistence(timeout: 20), "the thread shows no \(identifier)")
+    strip.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+  }
+
   /// Closes a sheet by dragging it down to the window's foot from `start`, a point relative to its
   /// bar: by default on the bar, right of the status bar's frame at the top-leading corner, which
   /// takes touches there.

@@ -214,6 +214,7 @@ The app's tests run in CI on the iPhone Duo simulator, which boots closed, doesn
 - The keyboard covers the side bar, its tabs included, until a scroll puts it away.
 - With the keyboard up, the keyboard's rounded corners, at its top and at the display's foot, show the ground above each corner, never black: the chat's gray in Chat, behind the New thread, Advance, and Reject sheets, and with the chat under the sky on the inner display. Beside the sky, the corners on the sky's side show the sky's own darker ground. CI checks every case but the one beside the sky, on the simulator's outer display.
 - At rest, the composer is a capsule with no Send, and its bottom sits on the same line as the side bar's foot, as Safari's address bar does beside its own bar. The app places it 24 points above the window's foot, where iOS draws the bar on the simulator, since iOS gives no way to move the bar.
+- With the keyboard up in a task's thread at a stage of yours, Back and Advance stand above Send in the side column and Send shows whole. On the simulator the column's third place starts at 299 points and Send at 314, so a third symbol would cover it; whether a device's column stands the same is unchecked.
 - Tapping the composer shows a round Send in the side bar's column, where Safari shows its ×, while the keyboard covers the bar. Send is dim while the draft is empty or an image uploads, and a tap on it posts. Return adds a line. A scroll puts the keyboard away and hides Send, and the draft stays.
 - With a hardware keyboard (a Bluetooth one, or the Simulator's I/O > Keyboard > Connect Hardware Keyboard), tapping the composer shows Send at the capsule's trailing end, clear of the side bar's tabs, and the capsule rises 12 points above the safe area while the field has the focus. CI types with the software keyboard only.
 - While the post goes, Send shows a spinner, and VoiceOver reads it as "Sending". No picture in CI catches that moment.
@@ -253,7 +254,7 @@ The app's tests run in CI on the iPhone Duo simulator, which boots closed, doesn
 
 - A real task's plan, scrolled to its end: Files lists what its branch changed as a tree, each file with what happened to it and who touched it last, a deleted one struck through. A folder opens and closes in place. CI lists only the fake board's six changes.
 - A file's change on a real branch: removed lines red, added ones green, long lines wrapping, and a tap on a line's number opening the whole file at that line. Whole file opens it at its top. A long patch scrolls smoothly, and one the board cut says so at its foot.
-- On the inner display in portrait, the plan's column beside the thread: a file's change opens in the column, with Back to the plan in the column's own bar, and the thread's bar keeps Plan and Advance. Fold or turn the phone with a change open: it stays open, moving between the column and the sheet. CI resizes a window in place of the fold, and draws the column only in that window.
+- On the inner display in portrait, the plan's column beside the thread: a file's change opens in the column, with Back to the plan in the column's own bar, and the thread's bar keeps Advance. Fold or turn the phone with a change open: it stays open, moving between the column and the sheet. CI resizes a window in place of the fold, and draws the column only in that window.
 
 **Text**
 
@@ -267,6 +268,7 @@ The app's tests run in CI on the iPhone Duo simulator, which boots closed, doesn
 - Links, images, and task lists in messages. An image is read by its alt text.
 - The two-finger scrub closes the plan's, the charter's, and Settings' sheets.
 - A task's or a proposal's strip at the accessibility text sizes is read in full.
+- A task's strip is read as a button that shows the plan, and a double tap opens it: with no Plan in the bar, it is the one way there.
 
 **Over the network**
 

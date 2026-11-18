@@ -34,7 +34,6 @@ final class BarUITests: ShellTestCase {
     signIn(app)
     expectGeneral(app)
     var met = measure(app, "general", ready: app.buttons["new-thread"].firstMatch)
-    var waiting: [String] = []
     for kind in Kind.allCases {
       app.terminate()
       app = launch(reset: false)
@@ -44,17 +43,11 @@ final class BarUITests: ShellTestCase {
       case .proposalDecided:
         XCTAssertTrue(draft(app).waitForNonExistence(timeout: 20), "a decided proposal takes posts")
         keep(app, kind.rawValue, "down", column(app), [:])
-      case .proposalYours:
-        waiting = measure(app, kind.rawValue, ready: ready)
       default:
         met += measure(app, kind.rawValue, ready: ready)
       }
     }
     XCTAssertTrue(met.isEmpty, "the bar meets the draft: " + met.joined(separator: "; "))
-    // Back, Approve, Reject and Charter: the third and the fourth stand where Send does.
-    XCTExpectFailure("a proposal waiting on the user has four symbols in its bar") {
-      XCTAssertTrue(waiting.isEmpty, "the bar meets the draft: " + waiting.joined(separator: "; "))
-    }
   }
 
   /// Opens a conversation of `kind` in Chat, and gives what shows once its bar is complete.
@@ -82,13 +75,13 @@ final class BarUITests: ShellTestCase {
     case .proposalYours:
       tab(app, "Needs you")
       pick(app, "proposal-\(reallocation)")
-      return app.buttons["approve"].firstMatch
+      return app.buttons["decide"].firstMatch
     case .proposalDecided:
       tab(app, "Needs you")
       pick(app, "proposal-\(channelProposal)")
       let strip = app.buttons["proposal-strip"].firstMatch
       XCTAssertTrue(strip.waitForExistence(timeout: 20), "the proposal's thread shows no strip")
-      pick(app, "approve")
+      pick(app, "decide")
       pick(app, "decision-confirm")
       let decided = expectation(
         for: NSPredicate(format: "label CONTAINS %@", "Approved by"), evaluatedWith: strip)

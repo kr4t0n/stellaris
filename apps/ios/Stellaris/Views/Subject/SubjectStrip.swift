@@ -3,8 +3,8 @@ import SwiftUI
 
 /// What a task's or a proposal's thread is about, in a strip above its messages: a task's plan as
 /// segments, the stage it is at, who may hold it and who does, and whether it is a gate; or a
-/// proposal's status and who decides it. A tap opens the plan, which a task's bar leaves out, or
-/// the charter, as Charter in the bar does.
+/// proposal's status and who decides it. A tap opens the plan or the charter, which the bar
+/// leaves out.
 struct SubjectStrip: View {
   @Environment(AppModel.self) private var model
   let subject: Subject

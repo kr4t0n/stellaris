@@ -488,6 +488,15 @@ enum SignInFailure: Error, Equatable {
     }
   }
 
+  /// Opens the decision sheet of a proposal that waits on the user: on Reject while a rejection's
+  /// reason is kept, so a sheet swiped away mid-rejection comes back to it, and on Approve
+  /// otherwise.
+  func openDecision(_ proposal: String) {
+    let reject = Verdict(proposal: proposal, choice: .reject)
+    let kept = !(reasons[reject] ?? "").isEmpty
+    deciding = kept ? reject : Verdict(proposal: proposal, choice: .approve)
+  }
+
   /// Approves or rejects the proposal as the user, with the reason its sheet holds, which a
   /// rejection needs, as the web's decision bar does; then reads the proposals and the thread,
   /// which the decision closes, again. Only a proposal that waits on the user is decided here, and

@@ -1,9 +1,9 @@
 import XCTest
 
 /// Tasks and proposals: the strip above a task's or a proposal's thread, Advance at a stage that
-/// waits on the user and none at one another citizen holds, Approve and Reject with a reason kept
-/// through a swipe away, the plan from the strip and the charter from the bar, and a project's
-/// dashboard and tasks.
+/// waits on the user and none at one another citizen holds, Decide turned to Approve or to Reject
+/// with a reason kept through a swipe away, the plan and the charter from the strip, and a
+/// project's dashboard and tasks.
 final class SubjectUITests: ShellTestCase {
   /// A task at a gate that waits on the user, "Approve the design".
   private let exportView = "00000000000000000000000010"
@@ -62,8 +62,10 @@ final class SubjectUITests: ShellTestCase {
     keepScreen("task-not-yours")
   }
 
-  /// Reject asks for a reason, with the chat's ground behind the keyboard, and a swipe away keeps
-  /// it; the rejection shows in the strip, and closes the proposal's thread.
+  /// A proposal waiting on the user has Decide alone in the bar. Turned to Reject, its sheet asks
+  /// for a reason, with the chat's ground behind the keyboard, and a swipe away keeps the reason,
+  /// with which Decide opens on Reject again; the rejection shows in the strip, and closes the
+  /// proposal's thread.
   @MainActor func testRejectsAProposalWithItsReason() {
     let app = launch()
     signIn(app)
@@ -73,30 +75,46 @@ final class SubjectUITests: ShellTestCase {
     let strip = app.buttons["proposal-strip"].firstMatch
     XCTAssertTrue(strip.waitForExistence(timeout: 20), "the proposal's thread shows no strip")
     XCTAssertTrue(strip.label.contains("for you to decide"), "the strip: \(strip.label)")
-    XCTAssertTrue(app.buttons["approve"].waitForExistence(timeout: 20), "the bar has no Approve")
+    XCTAssertTrue(app.buttons["decide"].waitForExistence(timeout: 20), "the bar has no Decide")
+    for gone in ["approve", "reject", "charter"] {
+      XCTAssertFalse(app.buttons[gone].exists, "the bar has \(gone)")
+    }
     keepScreen("proposal")
-    pick(app, "reject")
+    pick(app, "decide")
     let reason = app.textFields["decision-reason"].firstMatch
-    XCTAssertTrue(reason.waitForExistence(timeout: 20), "Reject opens no sheet")
+    XCTAssertTrue(reason.waitForExistence(timeout: 20), "Decide opens no sheet")
+    let confirm = app.buttons["decision-confirm"].firstMatch
+    XCTAssertEqual(confirm.label, "Approve", "Decide doesn't open on Approve")
+    keepScreen("decide")
+    // The switch's frame, against the status bar's at the top-leading corner, which takes touches.
+    let choice = app.segmentedControls.firstMatch
+    print("decision-choice: \(choice.frame)")
+    for way in ["Reject", "Approve", "Reject"] {
+      choice.buttons[way].tap()
+      let turned = expectation(
+        for: NSPredicate(format: "label == %@", way), evaluatedWith: confirm)
+      wait(for: [turned], timeout: 20)
+    }
     reason.tap()
     reason.typeText("One reviewer keeps up for now.")
     expectTheGroundBehindTheKeyboard(app, beside: reason, "reject")
-    dragAway(app, app.navigationBars["Reject"].firstMatch)
+    dragAway(app, app.navigationBars["Decide"].firstMatch)
     XCTAssertTrue(reason.waitForNonExistence(timeout: 20), "the sheet doesn't go")
-    pick(app, "reject")
-    XCTAssertTrue(reason.waitForExistence(timeout: 20), "Reject opens no sheet again")
+    pick(app, "decide")
+    XCTAssertTrue(reason.waitForExistence(timeout: 20), "Decide opens no sheet again")
+    XCTAssertEqual(confirm.label, "Reject", "Decide doesn't open on the kept rejection")
     XCTAssertEqual(reason.value as? String, "One reviewer keeps up for now.")
-    expectInTheSideColumn(app, app.buttons["decision-confirm"].firstMatch)
+    expectInTheSideColumn(app, confirm)
     pick(app, "decision-confirm")
     let decided = expectation(
       for: NSPredicate(format: "label CONTAINS %@", "Rejected by"), evaluatedWith: strip)
     wait(for: [decided], timeout: 20)
-    XCTAssertFalse(app.buttons["approve"].exists, "Approve stays once the proposal is decided")
+    XCTAssertFalse(app.buttons["decide"].exists, "Decide stays once the proposal is decided")
     XCTAssertFalse(draft(app).exists, "the decided proposal's thread still takes posts")
     keepScreen("rejected")
   }
 
-  /// Approve, pinned in the bar, approves with no reason needed.
+  /// Decide, pinned in the bar, opens on Approve, which needs no reason.
   @MainActor func testApprovesAProposal() {
     let app = launch()
     signIn(app)
@@ -105,20 +123,22 @@ final class SubjectUITests: ShellTestCase {
     pick(app, "proposal-\(channelProposal)")
     let strip = app.buttons["proposal-strip"].firstMatch
     XCTAssertTrue(strip.waitForExistence(timeout: 20), "the proposal's thread shows no strip")
-    pick(app, "approve")
+    pick(app, "decide")
     XCTAssertTrue(
-      app.textFields["decision-reason"].waitForExistence(timeout: 20), "Approve opens no sheet")
-    expectInTheSideColumn(app, app.buttons["decision-confirm"].firstMatch)
+      app.textFields["decision-reason"].waitForExistence(timeout: 20), "Decide opens no sheet")
+    let confirm = app.buttons["decision-confirm"].firstMatch
+    XCTAssertEqual(confirm.label, "Approve", "Decide doesn't open on Approve")
+    expectInTheSideColumn(app, confirm)
     pick(app, "decision-confirm")
     let decided = expectation(
       for: NSPredicate(format: "label CONTAINS %@", "Approved by"), evaluatedWith: strip)
     wait(for: [decided], timeout: 20)
-    XCTAssertFalse(app.buttons["approve"].exists, "Approve stays once the proposal is decided")
+    XCTAssertFalse(app.buttons["decide"].exists, "Decide stays once the proposal is decided")
     keepScreen("approved")
   }
 
-  /// The strip opens a task's stages, and Charter a proposal's charter, in a sheet with no button,
-  /// each closed again by a drag down.
+  /// The strip opens a task's stages, and a proposal's charter, in a sheet with no button, each
+  /// closed again by a drag down.
   @MainActor func testOpensThePlanAndTheCharter() {
     let app = launch()
     signIn(app)
@@ -136,9 +156,10 @@ final class SubjectUITests: ShellTestCase {
 
     tab(app, "Needs you")
     pick(app, "proposal-\(memberProposal)")
-    pick(app, "charter")
+    openFromTheStrip(app, "proposal-strip")
+    XCTAssertFalse(app.buttons["charter"].exists, "the bar has Charter")
     let charter = app.descendants(matching: .any)["charter-\(memberProposal)"].firstMatch
-    XCTAssertTrue(charter.waitForExistence(timeout: 20), "Charter shows no charter")
+    XCTAssertTrue(charter.waitForExistence(timeout: 20), "the strip shows no charter")
     let field = charter.descendants(matching: .any)
       .matching(NSPredicate(format: "label CONTAINS %@", "CLI and model")).firstMatch
     XCTAssertTrue(field.waitForExistence(timeout: 20), "the charter shows no member's fields")

@@ -76,17 +76,28 @@ struct AdvanceSheet: View {
   }
 }
 
-/// Approving or rejecting a proposal that waits on the user, as the web's decision bar does: a
-/// reason, which a rejection needs, then the decision. What the reason says lives in the model by
-/// proposal and choice until the proposal is decided or the reason cancelled, and whether the
-/// decision is on its way and why it didn't go by proposal; Cancel drops the reason and why it
-/// didn't go, and leaves a decision on its way to go on.
+/// Approving or rejecting a proposal that waits on the user, as the web's decision bar does: which
+/// way, chosen at the top, a reason, which a rejection needs, then the decision. Which way lives in
+/// the model with the open sheet (`AppModel.deciding`), and what each way's reason says by proposal
+/// and choice until the proposal is decided or the reason cancelled, and whether the decision is on
+/// its way and why it didn't go by proposal; Cancel drops the reason and why it didn't go, and
+/// leaves a decision on its way to go on.
 struct DecisionSheet: View {
   @Environment(AppModel.self) private var model
   @FocusState private var focused: Bool
+  /// The decision the sheet opened with, which the model's open one replaces once it is turned.
   let verdict: Verdict
 
+  /// The decision as the model has it now, turned at the top or as it opened.
+  private var current: Verdict {
+    guard let open = model.deciding, open.proposal == verdict.proposal else {
+      return verdict
+    }
+    return open
+  }
+
   var body: some View {
+    let verdict = current
     let reason = Binding(
       get: { model.reasons[verdict] ?? "" },
       set: { model.reasons[verdict] = $0 })
@@ -94,8 +105,20 @@ struct DecisionSheet: View {
     let missing =
       !approving && reason.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     let sending = model.underWay.contains(verdict.proposal)
+    let choice = Binding(
+      get: { verdict.choice },
+      set: { model.deciding = Verdict(proposal: verdict.proposal, choice: $0) })
     NavigationStack {
       Form {
+        Section {
+          Picker("Decision", selection: choice) {
+            Text("Approve").tag(Verdict.Choice.approve)
+            Text("Reject").tag(Verdict.Choice.reject)
+          }
+          .pickerStyle(.segmented)
+          .disabled(sending)
+          .accessibilityIdentifier("decision-choice")
+        }
         Section {
           if let proposal = model.store.proposal(verdict.proposal) {
             Text(model.store.titled(proposal.title))
@@ -116,7 +139,7 @@ struct DecisionSheet: View {
           }
         }
       }
-      .navigationTitle(approving ? "Approve" : "Reject")
+      .navigationTitle("Decide")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
@@ -145,6 +168,7 @@ struct DecisionSheet: View {
 
   /// Sends the decision; the model keeps whether it is on its way and why it didn't go.
   private func send() {
+    let verdict = current
     Task { try? await model.decide(verdict) }
   }
 }

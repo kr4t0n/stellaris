@@ -96,10 +96,11 @@ private struct TabLabel: View {
 
 /// The conversation Chat holds, with Back to the one it came from. A channel that takes posts has
 /// New thread in the bar, which the bar keeps longest as it runs out of room. A task's thread has
-/// Advance pinned at the bar's end while its stage waits on the user, and nothing more, since its
-/// strip opens the plan; a proposal's has Approve pinned while it waits on the user, then Reject,
-/// then Charter. The plan or the charter opens in a column beside the thread where both have room,
-/// and in a sheet otherwise; the forms open in system sheets, which iOS moves off a fold.
+/// Advance pinned at the bar's end while its stage waits on the user, and a proposal's has Decide
+/// pinned while it waits on the user, and nothing more, since the strip opens the plan or the
+/// charter: on the outer display a third symbol stands where Send does while the keyboard is up.
+/// The plan or the charter opens in a column beside the thread where both have room, and in a
+/// sheet otherwise; the forms open in system sheets, which iOS moves off a fold.
 struct ChatView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.horizontalSizeClass) private var sizeClass
@@ -164,31 +165,13 @@ struct ChatView: View {
               if waitingOnYou(proposal) {
                 ToolbarItem(placement: .topBarPinnedTrailing) {
                   Button {
-                    model.deciding = Verdict(proposal: proposal.id, choice: .approve)
+                    model.openDecision(proposal.id)
                   } label: {
-                    Label("Approve", systemImage: "checkmark.seal")
+                    Label("Decide", systemImage: "checkmark.seal")
                   }
                   .disabled(model.underWay.contains(proposal.id))
-                  .accessibilityIdentifier("approve")
+                  .accessibilityIdentifier("decide")
                 }
-                ToolbarItem(placement: .primaryAction) {
-                  Button {
-                    model.deciding = Verdict(proposal: proposal.id, choice: .reject)
-                  } label: {
-                    Label("Reject", systemImage: "xmark.seal")
-                  }
-                  .disabled(model.underWay.contains(proposal.id))
-                  .accessibilityIdentifier("reject")
-                }
-                .visibilityPriority(.high)
-              }
-              ToolbarItem(placement: .primaryAction) {
-                Button {
-                  toggleInspector(proposal.id)
-                } label: {
-                  Label("Charter", systemImage: "doc.text")
-                }
-                .accessibilityIdentifier("charter")
               }
             }
           }
@@ -216,8 +199,8 @@ struct ChatView: View {
         NewThreadSheet(channel: channel)
       case .advance(let task):
         AdvanceSheet(taskId: task)
-      case .decide(let verdict):
-        DecisionSheet(verdict: verdict)
+      case .decide(let proposal):
+        DecisionSheet(verdict: model.deciding ?? Verdict(proposal: proposal, choice: .approve))
       case .files:
         FileSheet()
       case .inspect:
@@ -259,10 +242,6 @@ struct ChatView: View {
     return id
   }
 
-  private func toggleInspector(_ id: String) {
-    model.inspecting = model.inspecting == id ? nil : id
-  }
-
   /// Whether the plan or the charter shows in its column beside the thread.
   private var columnShown: Bool {
     inspectorFits && subjectId != nil && model.inspecting == subjectId
@@ -301,7 +280,7 @@ struct ChatView: View {
       return .advance(task)
     }
     if let verdict = model.deciding {
-      return .decide(verdict)
+      return .decide(verdict.proposal)
     }
     // Before the plan, since a file a link in the plan opened takes the plan's sheet.
     if let browse = model.browsing {
@@ -325,7 +304,8 @@ struct ChatView: View {
 enum ChatSheet: Hashable, Identifiable {
   case newThread(String)
   case advance(String)
-  case decide(Verdict)
+  /// A proposal's decision, by the proposal alone, so turning it the other way keeps the sheet up.
+  case decide(String)
   /// A file or a folder on a branch a link opened.
   case files(FilePlace)
   case inspect(String)

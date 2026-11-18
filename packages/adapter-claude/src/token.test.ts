@@ -166,7 +166,9 @@ describe("the Claude Code the SDK ships", () => {
       statusSchema: { type: "object" },
     };
 
-    // A home of its own, so the CLI reads no login of the machine's, and a key the stub takes.
+    // A home of its own, so the CLI reads no login of the machine's, a key the stub takes, and a
+    // proxy where nothing listens for every address but 127.0.0.1, so nothing else leaves. Each
+    // in both cases: the CLI reads a lowercase name, as the machine's may set, before the other.
     await new ClaudeAgentBackend({
       env: {
         HOME: dir,
@@ -176,6 +178,14 @@ describe("the Claude Code the SDK ships", () => {
         DISABLE_AUTOUPDATER: "1",
         DISABLE_TELEMETRY: "1",
         DISABLE_ERROR_REPORTING: "1",
+        HTTPS_PROXY: "http://127.0.0.1:9",
+        HTTP_PROXY: "http://127.0.0.1:9",
+        ALL_PROXY: "http://127.0.0.1:9",
+        NO_PROXY: "127.0.0.1",
+        https_proxy: "http://127.0.0.1:9",
+        http_proxy: "http://127.0.0.1:9",
+        all_proxy: "http://127.0.0.1:9",
+        no_proxy: "127.0.0.1",
       },
     })
       .runTurn(request)

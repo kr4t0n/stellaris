@@ -150,7 +150,9 @@ struct DecisionSheet: View {
           }
           .accessibilityIdentifier("decision-cancel")
         }
-        ToolbarItem(placement: .confirmationAction) {
+        // In the primary place, drawn plain as Cancel is: the confirming place tints it blue, and
+        // the switch at the top already says which way the sheet decides.
+        ToolbarItem(placement: .primaryAction) {
           Button {
             send()
           } label: {

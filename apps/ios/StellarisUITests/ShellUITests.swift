@@ -106,6 +106,30 @@ class ShellTestCase: XCTestCase {
       "\(button.label) stands \(Int(edge - button.frame.maxX)) pt short of the window's edge")
   }
 
+  /// Checks from a picture of the screen whether `button`, a bar's symbol, is drawn in the blue
+  /// iOS gives the confirming place, or plain: four points of its glass, left of the symbol, right
+  /// of it, above and below, each blue where its blue outweighs its red by more than 100.
+  @MainActor func expectTinted(_ app: XCUIApplication, _ button: XCUIElement, _ tinted: Bool) {
+    XCTAssertTrue(button.waitForExistence(timeout: 20))
+    // Once the sheet has finished rising.
+    RunLoop.current.run(until: .now.addingTimeInterval(1))
+    let frame = button.frame
+    guard let pixels = ScreenPixels(XCUIScreen.main.screenshot().image) else {
+      return XCTFail("the picture of the screen can't be read")
+    }
+    let reach = min(frame.width, frame.height) * 0.4
+    let offsets: [(CGFloat, CGFloat)] = [(-reach, 0), (reach, 0), (0, -reach), (0, reach)]
+    let colours = offsets.compactMap { pixels.colour(x: frame.midX + $0.0, y: frame.midY + $0.1) }
+    let blue = colours.filter { $0.blue - $0.red > 100 }
+    let seen = colours.map(String.init(describing:)).joined(separator: ", ")
+    XCTAssertEqual(colours.count, offsets.count, "\(button.label) lies off the picture")
+    if tinted {
+      XCTAssertEqual(blue.count, colours.count, "\(button.label) isn't blue: \(seen)")
+    } else {
+      XCTAssertTrue(blue.isEmpty, "\(button.label) is blue: \(seen)")
+    }
+  }
+
   /// A message of #general, looked for in the conversation alone, which keeps XCTest's walk of
   /// the app small.
   @MainActor func message(_ app: XCUIApplication, _ number: Int) -> XCUIElement {

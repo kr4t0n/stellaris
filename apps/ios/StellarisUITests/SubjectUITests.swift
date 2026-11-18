@@ -35,6 +35,8 @@ final class SubjectUITests: ShellTestCase {
     note.typeText("The design is approved.")
     expectTheGroundBehindTheKeyboard(app, beside: note, "advance")
     expectInTheSideColumn(app, app.buttons["advance-confirm"].firstMatch)
+    // Advance keeps the confirming place's blue, which shows the check sees blue where it is.
+    expectTinted(app, app.buttons["advance-confirm"].firstMatch, true)
     pick(app, "advance-confirm")
     let posted = app.scrollViews["messages"].staticTexts
       .matching(NSPredicate(format: "label == %@", "The design is approved.")).firstMatch
@@ -105,6 +107,7 @@ final class SubjectUITests: ShellTestCase {
     XCTAssertEqual(confirm.label, "Reject", "Decide doesn't open on the kept rejection")
     XCTAssertEqual(reason.value as? String, "One reviewer keeps up for now.")
     expectInTheSideColumn(app, confirm)
+    expectTinted(app, confirm, false)
     pick(app, "decision-confirm")
     let decided = expectation(
       for: NSPredicate(format: "label CONTAINS %@", "Rejected by"), evaluatedWith: strip)
@@ -114,7 +117,8 @@ final class SubjectUITests: ShellTestCase {
     keepScreen("rejected")
   }
 
-  /// Decide, pinned in the bar, opens on Approve, which needs no reason.
+  /// Decide, pinned in the bar, opens on Approve, which needs no reason, sent with a button drawn
+  /// plain as Cancel is.
   @MainActor func testApprovesAProposal() {
     let app = launch()
     signIn(app)
@@ -129,6 +133,7 @@ final class SubjectUITests: ShellTestCase {
     let confirm = app.buttons["decision-confirm"].firstMatch
     XCTAssertEqual(confirm.label, "Approve", "Decide doesn't open on Approve")
     expectInTheSideColumn(app, confirm)
+    expectTinted(app, confirm, false)
     pick(app, "decision-confirm")
     let decided = expectation(
       for: NSPredicate(format: "label CONTAINS %@", "Approved by"), evaluatedWith: strip)

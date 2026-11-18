@@ -1,4 +1,6 @@
+import { once } from "node:events";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer, type Server } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import type { TurnRequest } from "@stellaris/runner-core";
@@ -84,5 +86,102 @@ describe("the board token a Claude turn starts with", () => {
     expect(config.mcpServers.board.headers.Authorization).toBe("Bearer ${STELLARIS_AGENT_TOKEN}");
     expect(started.agentToken).toBe(TURN_TOKEN);
     expect(started.runnerToken).toBeNull();
+  });
+});
+
+/** A server on a free port of 127.0.0.1, answering every request with `answer`. */
+async function listen(
+  answer: (request: { method: string; authorization: string | undefined }) => {
+    status: number;
+    body: string;
+  },
+): Promise<{ server: Server; url: string }> {
+  const server = createServer((request, response) => {
+    request.resume();
+    request.on("end", () => {
+      const { status, body } = answer({
+        method: request.method ?? "",
+        authorization: request.headers.authorization,
+      });
+      response.writeHead(status, { "content-type": "application/json" }).end(body);
+    });
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("the stub server has no port");
+  }
+  return { server, url: `http://127.0.0.1:${address.port}` };
+}
+
+describe("the Claude Code the SDK ships", () => {
+  const servers: Server[] = [];
+  let dir: string | undefined;
+
+  afterEach(async () => {
+    for (const server of servers.splice(0)) {
+      server.close();
+    }
+    if (dir !== undefined) {
+      await rm(dir, { recursive: true, force: true });
+      dir = undefined;
+    }
+  });
+
+  it("fills the board header in from its environment as it connects", async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "stellaris-claude-cli-"));
+    // The model's API refuses every request, so the turn ends before any model call answers.
+    const api = await listen(({ method }) =>
+      method === "GET"
+        ? { status: 200, body: '{"data":[]}' }
+        : {
+            status: 400,
+            body: '{"type":"error","error":{"type":"invalid_request_error","message":"stub"}}',
+          },
+    );
+    const received: Array<string | undefined> = [];
+    const board = await listen(({ authorization }) => {
+      received.push(authorization);
+      return { status: 401, body: "" };
+    });
+    servers.push(api.server, board.server);
+    const request: TurnRequest = {
+      spec: {
+        agent: "eng-1",
+        project: "demo",
+        cli: "claude",
+        runner: "server",
+        cwd: dir,
+        repoDir: dir,
+        configHome: dir,
+        boardDir: dir,
+      },
+      session: "4f1d6c4e-2b8a-4c3e-9a51-7d0f3e6b2c19",
+      newSession: true,
+      prompt: "Digest.",
+      instructions: "# eng-1",
+      mcp: { url: `${board.url}/mcp`, token: TURN_TOKEN },
+      limits: { timeoutMs: 25_000, maxTurns: 2 },
+      statusSchema: { type: "object" },
+    };
+
+    // A home of its own, so the CLI reads no login of the machine's, and a key the stub takes.
+    await new ClaudeAgentBackend({
+      env: {
+        HOME: dir,
+        ANTHROPIC_BASE_URL: api.url,
+        ANTHROPIC_API_KEY: "sk-ant-stub",
+        ANTHROPIC_AUTH_TOKEN: undefined,
+        DISABLE_AUTOUPDATER: "1",
+        DISABLE_TELEMETRY: "1",
+        DISABLE_ERROR_REPORTING: "1",
+      },
+    })
+      .runTurn(request)
+      .catch(() => undefined);
+
+    expect(received.length).toBeGreaterThan(0);
+    expect(new Set(received)).toEqual(new Set([`Bearer ${TURN_TOKEN}`]));
   });
 });

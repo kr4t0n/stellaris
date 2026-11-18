@@ -63,7 +63,7 @@ So the host carries a change, one way for both CLIs. Every turn record keeps `se
 
 ### Nested-session markers are stripped from the subprocess environment
 
-`CLAUDECODE` and every `CLAUDE_CODE_*` variable are removed before spawning, because the board server may itself be started from inside a Claude Code session. The SDK's `env` option replaces the environment entirely, so `process.env` is spread first. Both adapters then set `CLI_ENV` from `runner-core`, `HUSKY=0`, over whatever the runner's environment holds (see [the default-branch guard](workspaces.md#a-merge-projects-default-branch-moves-only-by-the-runner)).
+`CLAUDECODE` and every `CLAUDE_CODE_*` variable are removed before spawning, because the board server may itself be started from inside a Claude Code session. The SDK's `env` option replaces the environment entirely, so `process.env` is spread first. Both adapters then set `CLI_ENV` from `runner-core`, `HUSKY=0`, over whatever the runner's environment holds (see [the default-branch guard](workspaces.md#a-merge-projects-default-branch-moves-only-by-the-runner)). They also drop the runner's own `STELLARIS_RUNNER_TOKEN`, and set the turn's board token as `STELLARIS_AGENT_TOKEN`, the only place a CLI gets it: Claude's MCP header names the variable rather than holding the token, since the SDK writes that config onto the CLI's command line ([a runner is one trust domain](runners.md#a-turns-token-reaches-its-cli-only-by-its-environment-and-a-runner-is-one-trust-domain)).
 
 ### A warm Claude turn the API refused once counted as completed, and a warm session whose CLI had ended stayed
 

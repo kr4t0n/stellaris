@@ -31,6 +31,7 @@ import {
   AGENT_TOKEN_ENV,
   capOutput,
   mergeQuota,
+  RUNNER_TOKEN_ENV,
   type AgentEvent,
   type CliQuota,
   type ModelOption,
@@ -337,7 +338,7 @@ function turnUsage(state: TurnState, soFar: Usage | undefined): Usage {
 
 /**
  * The subprocess environment: inherit, add the runner's settings for every CLI and the board
- * token, and drop nested-session markers.
+ * token, and drop nested-session markers and the runner's own token, which no turn is given.
  */
 export function subprocessEnv(
   base: Readonly<Record<string, string | undefined>>,
@@ -346,7 +347,7 @@ export function subprocessEnv(
 ): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = {};
   for (const [key, value] of Object.entries({ ...base, ...extra })) {
-    if (key === "CLAUDECODE" || key.startsWith("CLAUDE_CODE_")) {
+    if (key === "CLAUDECODE" || key.startsWith("CLAUDE_CODE_") || key === RUNNER_TOKEN_ENV) {
       continue;
     }
     env[key] = value;
@@ -1200,7 +1201,9 @@ export class ClaudeAgentBackend implements AgentBackend {
         board: {
           type: "http",
           url: request.mcp.url,
-          headers: { Authorization: `Bearer ${request.mcp.token}` },
+          // The CLI fills the token in from its environment as it connects, so the command line
+          // the SDK starts it with names the variable, never the token.
+          headers: { Authorization: `Bearer \${${AGENT_TOKEN_ENV}}` },
           alwaysLoad: true,
         },
       },

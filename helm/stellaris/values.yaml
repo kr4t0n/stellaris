@@ -344,6 +344,8 @@ runner:
 
   # The image runs as stellaris (uid 1000) in the shared `users` group (gid 100), which fsGroup
   # gives the volume; OnRootMismatch skips the recursive chown of a volume that is already right.
+  # Every turn runs as that one user too, so a turn can read the board tokens of the others in its
+  # pod and the runner's own: a pod is one trust domain.
   podSecurityContext:
     fsGroup: 100
     fsGroupChangePolicy: OnRootMismatch

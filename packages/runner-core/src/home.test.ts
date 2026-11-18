@@ -1,8 +1,8 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { execa } from "execa";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HomeSync } from "./home.js";
 import { RunnerLayout } from "./layout.js";
 
@@ -126,5 +126,49 @@ describe("HomeSync", () => {
     const board = await readFile(core(server), "utf8");
     expect(board).toContain("- two from b");
     expect(board).toContain("- four, half written");
+  });
+
+  it("gives git the runner's authorization in its environment, never in its arguments", async () => {
+    const header = "Authorization: Bearer stl_runner_token_of_this_test";
+    // A git first on PATH that writes down each call's arguments and the header git would send.
+    const real = (await execa("sh", ["-c", "command -v git"])).stdout.trim();
+    const bin = path.join(dir, "bin");
+    const calls = path.join(dir, "git-calls.log");
+    await mkdir(bin);
+    await writeFile(
+      path.join(bin, "git"),
+      [
+        "#!/bin/sh",
+        `printf 'argv %s\\n' "$*" >> '${calls}'`,
+        `printf 'header %s\\n' "$('${real}' config --get http.extraHeader)" >> '${calls}'`,
+        `exec '${real}' "$@"`,
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await chmod(path.join(bin, "git"), 0o755);
+    const sync = new HomeSync(layoutA, { url: () => server, authorization: header });
+    vi.stubEnv("PATH", `${bin}${path.delimiter}${process.env["PATH"] ?? ""}`);
+    try {
+      // The first turn clones and pushes; the next one fetches.
+      await sync.prepare("desk");
+      await edit(layoutA.agent("desk"), "- one", "- one, learned");
+      await sync.publish("desk", TURN_A);
+      await sync.prepare("desk");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+
+    const lines = (await readFile(calls, "utf8")).trim().split("\n");
+    const invocations = lines
+      .filter((line) => line.startsWith("argv "))
+      .map((line, index) => ({ argv: line, header: lines[index * 2 + 1] ?? "" }));
+    expect(invocations.filter(({ argv }) => argv.includes("stl_"))).toEqual([]);
+    const network = invocations.filter(({ argv }) => /\b(clone|fetch|push)\b/.test(argv));
+    expect(network.map(({ argv }) => argv.split(" ")[1])).toEqual(["clone", "push", "fetch"]);
+    for (const { header: sent } of network) {
+      expect(sent).toBe(`header ${header}`);
+    }
+    expect(await readFile(core(server), "utf8")).toContain("- one, learned");
   });
 });

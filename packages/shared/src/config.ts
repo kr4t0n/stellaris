@@ -81,6 +81,9 @@ function list(value: string | undefined): string[] {
 /** Environment variable every agent's config home reads its board token from. */
 export const AGENT_TOKEN_ENV = "STELLARIS_AGENT_TOKEN";
 
+/** Environment variable a runner reads its own token from, which no CLI it starts is given. */
+export const RUNNER_TOKEN_ENV = "STELLARIS_RUNNER_TOKEN";
+
 /**
  * GitHub sign-in from the environment: all three variables, or none of them, and the iOS app only
  * beside them.
@@ -157,7 +160,7 @@ export function loadRunnerConfig(env: Readonly<Record<string, string | undefined
   const clis = list(env["STELLARIS_CLIS"]);
   return RunnerConfigSchema.parse({
     serverUrl: (env["STELLARIS_SERVER_URL"] ?? "http://127.0.0.1:4700").replace(/\/+$/, ""),
-    token: env["STELLARIS_RUNNER_TOKEN"]?.trim() || null,
+    token: env[RUNNER_TOKEN_ENV]?.trim() || null,
     dataDir: env["STELLARIS_RUNNER_DIR"] ?? "./runner-data",
     logLevel: env["STELLARIS_LOG_LEVEL"] ?? "info",
     slots: limit(env["STELLARIS_CONCURRENCY"], 2),

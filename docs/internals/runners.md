@@ -161,6 +161,14 @@ The runner saves `{serverUrl, name, token}` as `credentials.json` (mode 0600) in
 
 `stellaris user token --rotate` (`Board.rotateUserToken`) replaces the user token's hash and prints the new token once.
 
+### A turn's token reaches its CLI only by its environment, and a runner is one trust domain
+
+A turn's board token reaches its CLI only as `STELLARIS_AGENT_TOKEN` in the CLI's environment, never on a command line, which every process on the machine can read, whatever its user. Codex is started with `bearer_token_env_var` naming the variable. Claude Code is given an MCP header of `Bearer ${STELLARIS_AGENT_TOKEN}`, which it fills in from its environment as it connects: on Claude Code 2.1.312, a stub MCP endpoint received the token with the variable set and the literal text with it unset. `token.test.ts` in `adapter-claude` starts a stand-in CLI through the Agent SDK and holds its command line to no token. No CLI is given the runner's own token: both adapters drop `STELLARIS_RUNNER_TOKEN` (`RUNNER_TOKEN_ENV`) from the environment they pass on. The runner's own git, which clones, fetches, and pushes each citizen's home with that token around every turn, takes its header through `GIT_CONFIG_COUNT` and its pairs (`configEnv`), as a move's does, never with `-c`; a test in `home.test.ts` puts a `git` first on `PATH` that writes down each call's arguments and holds them to no token.
+
+That keeps tokens out of `ps`, and so out of the turn transcripts a tool's output is kept in, which is how they leaked. It does not keep turns apart. Every turn on a runner runs as the runner's own user, so a turn can read another running turn's environment (`/proc/<pid>/environ`) and act on the board as that citizen while its token lives, a warm session's for as long as the session, on a stage that citizen holds too, gated or not. It can read the runner's token from the runner's environment or `credentials.json` as well. Two turns of the real CLI on a throwaway board showed both reads on 2026-11-18, when Claude's token was still on its command line too.
+
+This is accepted. Every turn also holds the runner's logins (GitHub, SSH, the model CLIs) and can write every other citizen's worktree and home, so a runner is one trust domain. A uid per citizen, or a sandbox per turn with a `/proc` of its own, would keep turns apart, at the cost of file ownership across homes, worktrees, and logins, or of the runner pod's AppArmor confinement.
+
 ## Models and effort
 
 ### A citizen's model is a setting, the CLI's list is the menu

@@ -203,15 +203,23 @@ export function Playground() {
       saveChosenWidth(chosen);
     }
   };
-  const toggleContentWidth = (): void => {
-    const chosen = toggledWidth(width, chosenWidth, layout);
-    setChosenWidth(chosen);
-    saveChosenWidth(chosen);
-  };
   // Beside the sky, a window too narrow for the navigator and the content folds the navigator to
   // its rail, whose channels open over the content until the address changes or they close.
   const panel = besidePanel(width, contentWidth);
   const folded = beside && panel.folded;
+  // The handle's range: in the rail, the width the window holds, and otherwise the chosen width's.
+  const shownWidth = folded ? panel.content : contentWidth;
+  const narrowest = Math.min(CONTENT_MIN, shownWidth);
+  const widest = folded ? panel.content : widestContentWidth(width, layout);
+  // A toggle with no range to move in keeps the choice, as a move the window has no room for does.
+  const toggleContentWidth = (): void => {
+    if (widest <= narrowest) {
+      return;
+    }
+    const chosen = toggledWidth(width, chosenWidth, layout);
+    setChosenWidth(chosen);
+    saveChosenWidth(chosen);
+  };
   const [channelsAt, setChannelsAt] = useState<string | null>(null);
   // The list closes as the navigator unfolds, so a narrow window later finds it closed.
   if (!folded && channelsAt !== null) {
@@ -479,9 +487,9 @@ export function Playground() {
                   >
                     <ResizeHandle
                       edge={beside ? "right" : "left"}
-                      width={folded ? panel.content : contentWidth}
-                      min={Math.min(CONTENT_MIN, folded ? panel.content : contentWidth)}
-                      max={folded ? panel.content : widestContentWidth(width, layout)}
+                      width={shownWidth}
+                      min={narrowest}
+                      max={widest}
                       onResize={resizeContent}
                       onToggle={toggleContentWidth}
                     />

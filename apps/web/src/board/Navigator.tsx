@@ -421,15 +421,21 @@ export function NavigatorRail({
         onClose();
       }
     };
+    // A choice closes the list once its click has reached the router: closed at once, the list
+    // would leave the page before React's own listener, at the root, hands the link's click to the
+    // router, and the browser would follow the link as a new page load. A new address closes it
+    // anyway; this closes it for the address already open.
+    let chosen: number | undefined;
     const onChoose = (event: MouseEvent): void => {
       if (event.target instanceof Element && event.target.closest("a") !== null) {
-        onClose();
+        chosen = window.setTimeout(onClose, 0);
       }
     };
     document.addEventListener("pointerdown", onElsewhere, { capture: true });
     document.addEventListener("focusin", onElsewhere);
     list.addEventListener("click", onChoose);
     return () => {
+      window.clearTimeout(chosen);
       document.removeEventListener("pointerdown", onElsewhere, { capture: true });
       document.removeEventListener("focusin", onElsewhere);
       list.removeEventListener("click", onChoose);

@@ -936,11 +936,17 @@ test("the rail's channels, left open as the window widens past 708 px, are close
   await expect(page.getByRole("region", { name: "Board navigator" })).toHaveCount(0);
 });
 
-for (const stored of [null, "600"]) {
-  test(`a handle that can't move in a narrow window keeps the width this browser chose (${stored ?? "none"})`, async ({
+for (const { window, stored } of [
+  { window: 600, stored: null },
+  { window: 600, stored: "600" },
+  { window: 600, stored: "widest" },
+  { window: 708, stored: "600" },
+  { window: 708, stored: "widest" },
+]) {
+  test(`a handle with no room to move keeps the width this browser chose (${window} px, ${stored ?? "none"} stored)`, async ({
     page,
   }) => {
-    await page.setViewportSize({ width: 600, height: 800 });
+    await page.setViewportSize({ width: window, height: 800 });
     await besideTheSky(page);
     if (stored !== null) {
       await page.addInitScript((chosen) => {
@@ -951,20 +957,75 @@ for (const stored of [null, "600"]) {
     await page.goto("/c/general");
     const handle = page.getByRole("button", { name: /^Width of the board's content/ });
     await handle.focus();
-    for (const key of ["ArrowRight", "ArrowLeft", "End", "Home"]) {
+    for (const key of ["ArrowRight", "ArrowLeft", "End", "Home", "Enter"]) {
       await page.keyboard.press(key);
     }
+    await handle.dblclick();
     // A drag that ends where it began, as the handle can't move here.
     const edge = await boxOf(handle);
     await page.mouse.move(edge.x + 4, edge.y + edge.height / 2);
     await page.mouse.down();
-    await page.mouse.move(edge.x + 120, edge.y + edge.height / 2);
+    await page.mouse.move(edge.x + 12, edge.y + edge.height / 2);
     await page.mouse.up();
     expect(await page.evaluate(() => localStorage.getItem("stellaris.contentWidth"))).toBe(stored);
     // A wide window then gives the content the default, or the width chosen.
     await page.setViewportSize({ width: 1440, height: 800 });
     await expect
       .poll(async () => (await boxOf(page.getByRole("region", { name: "Board content" }))).width)
-      .toBe(stored === null ? 576 : 600);
+      .toBe(stored === null ? 576 : stored === "widest" ? 1440 - 256 - 32 : 600);
+  });
+}
+
+for (const { by, address } of [
+  { by: "mouse", address: "the open one" },
+  { by: "mouse", address: "another" },
+  { by: "keyboard", address: "the open one" },
+  { by: "keyboard", address: "another" },
+]) {
+  test(`a choice in the rail's channels by ${by}, of ${address}, goes there inside the page, keeping what the page holds`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 600, height: 800 });
+    await besideTheSky(page);
+    await fakeBoard(page);
+    await page.goto("/c/general");
+    const box = page.getByRole("textbox", { name: "Message #general" });
+    await box.fill("a draft");
+    await page.evaluate(() => Reflect.set(window, "kept", 42));
+    let loads = 0;
+    page.on("request", (request) => {
+      if (request.resourceType() === "document") {
+        loads += 1;
+      }
+    });
+    const channels = page.getByRole("button", { name: "Show the board's channels" });
+    const navigator = page.getByRole("region", { name: "Board navigator" });
+    if (by === "mouse") {
+      await channels.click();
+    } else {
+      await channels.focus();
+      await page.keyboard.press("Enter");
+    }
+    const link =
+      address === "another"
+        ? navigator.getByRole("link", { name: /^needs you/ })
+        : navigator.getByRole("link", { name: /^#?\s*general/ }).first();
+    if (by === "mouse") {
+      await link.click();
+    } else {
+      await link.focus();
+      await page.keyboard.press("Enter");
+    }
+    await expect(page).toHaveURL(address === "another" ? /\/needs-you$/ : /\/c\/general$/);
+    await expect(navigator).toHaveCount(0);
+    expect(loads).toBe(0);
+    expect(await page.evaluate(() => Reflect.get(window, "kept"))).toBe(42);
+    if (address === "the open one") {
+      await expect(box).toHaveValue("a draft");
+    }
+    // A choice from the keyboard leaves the focus on the channels' button, as Escape does.
+    if (by === "keyboard") {
+      await expect(channels).toBeFocused();
+    }
   });
 }

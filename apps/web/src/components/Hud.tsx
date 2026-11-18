@@ -1,10 +1,5 @@
 interface HudProps {
   readonly society: string | undefined;
-  /**
-   * How many things wait in the board: what needs the user, runners to approve, and crons
-   * failing. An amber dot follows the society's name while any do.
-   */
-  readonly waiting: number;
   readonly paused: boolean;
   /** Pauses or resumes the scheduler; while the request runs the switch waits. */
   readonly onTogglePause: () => void;
@@ -67,13 +62,12 @@ function SignOutMark() {
 }
 
 /**
- * The frame around the sky: the app's icon, the society's name with a dot while something waits
- * in the board, and two icons, the pause switch and the way out. A click on the sky opens the
- * board; the keyboard has a button of its own for it, shown only while it has focus.
+ * The frame around the sky: the app's icon, the society's name, and two icons, the pause switch
+ * and the way out. A click on the sky opens the board; the keyboard has a button of its own for
+ * it, shown only while it has focus.
  */
 export function Hud({
   society,
-  waiting,
   paused,
   onTogglePause,
   pauseBusy,
@@ -81,7 +75,6 @@ export function Hud({
   onOpenBoard,
   onSignOut,
 }: HudProps) {
-  const said = `${waiting} waiting in the board`;
   return (
     <header className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-5">
       <div className="flex items-center gap-2.5">
@@ -96,12 +89,6 @@ export function Hud({
           className="size-7 shrink-0"
         />
         {society === undefined ? null : <span className="text-meta">{society}</span>}
-        {waiting === 0 ? null : (
-          <span title={said} className="pointer-events-auto flex items-center">
-            <span aria-hidden="true" className="size-1.5 rounded-full bg-amber-300" />
-            <span className="sr-only">{said}</span>
-          </span>
-        )}
       </div>
       <div className="pointer-events-auto flex items-center gap-1">
         {boardOpen ? null : (

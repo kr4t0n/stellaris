@@ -19,6 +19,7 @@ import { entityIndex } from "./lib/entities.js";
 import { followBoardEvents, refreshFor } from "./lib/events.js";
 import {
   CONTENT_MIN,
+  HINT_SIDE,
   askBoxPlacement,
   besidePanel,
   besideSky,
@@ -190,7 +191,14 @@ export function Playground() {
   const contentWidth = widthFor(width, chosenWidth, layout);
   const resizeContent = (next: number, done: boolean): void => {
     const held = widthFor(width, next, layout);
-    const chosen = held >= widestContentWidth(width, layout) ? "widest" : held;
+    // A move the window leaves no room for keeps the choice as it was, so a handle that can't
+    // move, as in a narrow window, never stores the widest for the next wide one.
+    const chosen =
+      held === contentWidth
+        ? chosenWidth
+        : held >= widestContentWidth(width, layout)
+          ? "widest"
+          : held;
     setChosenWidth(chosen);
     if (done) {
       saveChosenWidth(chosen);
@@ -206,6 +214,10 @@ export function Playground() {
   const panel = besidePanel(width, contentWidth);
   const folded = beside && panel.folded;
   const [channelsAt, setChannelsAt] = useState<string | null>(null);
+  // The list closes as the navigator unfolds, so a narrow window later finds it closed.
+  if (!folded && channelsAt !== null) {
+    setChannelsAt(null);
+  }
   const channelsOpen = folded && channelsAt === href;
   const closeChannels = useCallback(() => setChannelsAt(null), []);
   const insets = useMemo<Insets>(
@@ -485,9 +497,15 @@ export function Playground() {
               {askOpen ? (
                 <AskBox left={askBox.left} width={askBox.width} onClose={closeAsk} />
               ) : sky?.hint === false ? null : (
+                // Beside the sky, its sides keep the hint, however long an unread answer makes it,
+                // clear of the camera's buttons at the room's right foot.
                 <div
-                  className={`pointer-events-none absolute bottom-5 flex justify-center ${sky === null ? "px-16" : "px-4"}`}
-                  style={{ left: insets.left, right: insets.right }}
+                  className={`pointer-events-none absolute bottom-5 flex justify-center ${sky === null ? "px-16" : ""}`}
+                  style={{
+                    left: insets.left,
+                    right: insets.right,
+                    ...(sky === null ? {} : { paddingLeft: HINT_SIDE, paddingRight: HINT_SIDE }),
+                  }}
                 >
                   <AskHint unread={unread} onOpen={() => setAskAt(pathname)} />
                 </div>

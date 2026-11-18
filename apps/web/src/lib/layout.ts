@@ -15,12 +15,16 @@ export const ASK_NARROWEST = 280;
 /** The sky's room below which, around the sky, the ask box leaves it for the window's middle. */
 const ASK_ROOM = 460;
 /**
- * Beside the sky, the sky's room right of the panel, in root ems, that holds the ask hint in its
- * middle clear of the camera's buttons at its right foot: at a 16 px root the hint is 110 px and the
- * buttons 36 px, 16 px in from the window's edge. Both are drawn in rems, so the room follows the
- * root font.
+ * Beside the sky, the sky's room right of the panel that holds the ask hint in its middle, clear of
+ * the camera's buttons at its right foot: 32 px and 15.5 root ems. That is two sides of 16 px and
+ * 2.75 root ems (`HINT_SIDE`: the buttons' 2.25 root ems, 16 px in from the window's edge, and a
+ * gap of half an em), and 10 root ems for the hint at its narrowest, an unread answer's with its
+ * news cut to nothing: 141 px at a 16 px root and 170 at 20, under 10 root ems from 12 to 24 px,
+ * since its key's 11 px text doesn't follow the root font.
  */
-const HINT_ROOM_EMS = 14.5;
+const HINT_ROOM_EMS = 15.5;
+/** Each side of the hint's row beside the sky, which keeps it clear of the camera's buttons. */
+export const HINT_SIDE = "calc(16px + 2.75rem)";
 /** The room that holds the camera's buttons, 16 px clear of the panel and of the window's edge. */
 const CAMERA_ROOM_EMS = 4.25;
 
@@ -117,7 +121,10 @@ export function besideSky(
   rootPx: number,
 ): { hint: boolean; camera: boolean } {
   const sky = window - room.left;
-  return { hint: sky >= HINT_ROOM_EMS * rootPx, camera: sky >= CAMERA_ROOM_EMS * rootPx };
+  return {
+    hint: sky >= 2 * ISLAND_MARGIN + HINT_ROOM_EMS * rootPx,
+    camera: sky >= CAMERA_ROOM_EMS * rootPx,
+  };
 }
 
 /**

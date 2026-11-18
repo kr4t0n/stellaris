@@ -107,15 +107,15 @@ describe("the sky's room", () => {
     expect(skyRoom("beside", 420, 360)).toEqual({ left: 360, right: 0 });
   });
 
-  it("beside the sky, holds the hint from 14.5 root ems and the camera's buttons from 4.25", () => {
-    // At a 16 px root: 232 and 68 px.
-    expect(besideSky(940, skyRoom("beside", 420, 940), 16)).toEqual({ hint: true, camera: true });
-    expect(besideSky(939, skyRoom("beside", 420, 939), 16)).toEqual({ hint: false, camera: true });
+  it("beside the sky, holds the hint from 32 px and 15.5 root ems, and the camera's buttons from 4.25 root ems", () => {
+    // At a 16 px root: 280 and 68 px.
+    expect(besideSky(988, skyRoom("beside", 420, 988), 16)).toEqual({ hint: true, camera: true });
+    expect(besideSky(987, skyRoom("beside", 420, 987), 16)).toEqual({ hint: false, camera: true });
     expect(besideSky(776, skyRoom("beside", 420, 776), 16).camera).toBe(true);
     expect(besideSky(775, skyRoom("beside", 420, 775), 16).camera).toBe(false);
-    // At a 20 px root, 290 and 85 px.
-    expect(besideSky(998, skyRoom("beside", 420, 998), 20).hint).toBe(true);
-    expect(besideSky(997, skyRoom("beside", 420, 997), 20).hint).toBe(false);
+    // At a 20 px root, 342 and 85 px.
+    expect(besideSky(1050, skyRoom("beside", 420, 1050), 20).hint).toBe(true);
+    expect(besideSky(1049, skyRoom("beside", 420, 1049), 20).hint).toBe(false);
     // In a narrow window, beside the rail and the content.
     expect(besideSky(600, skyRoom("beside", 420, 600), 16)).toEqual({ hint: false, camera: true });
     expect(besideSky(360, skyRoom("beside", 420, 360), 16)).toEqual({ hint: false, camera: false });

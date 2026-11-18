@@ -653,6 +653,13 @@ async function fitsBeside(page: Page, width: number, height: number, hint: boole
   if (buttons !== null) {
     inside(buttons);
     expect(overlap(buttons, panel)).toBe(false);
+    // Nothing lies over them: a press on the middle of Fit reaches Fit.
+    const fit = await boxOf(page.getByRole("button", { name: "Fit the whole sky" }));
+    const reached = await page.evaluate(
+      ({ x, y }) => document.elementFromPoint(x, y)?.closest("button")?.getAttribute("aria-label"),
+      { x: fit.x + fit.width / 2, y: fit.y + fit.height / 2 },
+    );
+    expect(reached).toBe("Fit the whole sky");
   }
   const hintButton = page.getByRole("button", { name: /to ask$/ });
   if (hint) {
@@ -749,18 +756,47 @@ for (const width of [708, 783, 800, 1024, 1440]) {
 test("beside the sky at the default width, the hint shows once the sky beside the panel holds it, and in its middle", async ({
   page,
 }) => {
-  await page.setViewportSize({ width: 939, height: 800 });
+  await page.setViewportSize({ width: 987, height: 800 });
   await besideTheSky(page);
   await fakeBoard(page);
   await page.goto("/c/general");
-  await fitsBeside(page, 939, 800, false);
-  // At 940 px the sky beside the panel is 232 px.
-  await page.setViewportSize({ width: 940, height: 800 });
+  await fitsBeside(page, 987, 800, false);
+  // At 988 px the sky beside the panel is 280 px.
+  await page.setViewportSize({ width: 988, height: 800 });
   await expect(page.getByRole("button", { name: /to ask$/ })).toBeVisible();
-  await fitsBeside(page, 940, 800, true);
+  await fitsBeside(page, 988, 800, true);
   const hint = await hintText(page);
-  expect(hint.x + hint.width / 2).toBeCloseTo((708 + 940) / 2, 0);
+  expect(hint.x + hint.width / 2).toBeCloseTo((708 + 988) / 2, 0);
 });
+
+for (const { root, width } of [
+  // The narrowest window that shows the hint at each root, and wider ones at 16 px.
+  { root: 16, width: 988 },
+  { root: 16, width: 1024 },
+  { root: 16, width: 1215 },
+  { root: 12, width: 926 },
+  { root: 20, width: 1050 },
+  { root: 24, width: 1153 },
+]) {
+  test(`beside the sky in a ${width} px window at a ${root} px root font, an unread answer widens the hint only as far as it stays clear of the camera's buttons`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await page.addInitScript((size) => {
+      document.addEventListener("DOMContentLoaded", () => {
+        document.documentElement.style.fontSize = `${size}px`;
+      });
+      localStorage.setItem("stellaris.boardLayout", "beside");
+    }, root);
+    await fakeBoard(page, { asks: true });
+    await page.goto("/c/general");
+    await expect(page.getByRole("button", { name: /answered .* to ask$/ })).toBeVisible();
+    expect(await page.evaluate(() => getComputedStyle(document.documentElement).fontSize)).toBe(
+      `${root}px`,
+    );
+    await fitsBeside(page, width, 800, true);
+  });
+}
 
 test("the rail's channels open over the view, and close on Escape, on the button again, on a choice, and on a press beside them", async ({
   page,
@@ -851,3 +887,84 @@ test("a window narrowing past 708 px beside the sky folds the navigator and keep
   await expect(rail).toHaveCount(0);
   await expect(box).toHaveValue("a draft");
 });
+
+test("Tab past the rail's open channels closes them, so the focus never goes to what they cover", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 800 });
+  await besideTheSky(page);
+  await fakeBoard(page);
+  await page.goto("/c/general");
+  const channels = page.getByRole("button", { name: "Show the board's channels" });
+  const navigator = page.getByRole("region", { name: "Board navigator" });
+  await channels.focus();
+  await page.keyboard.press("Enter");
+  await expect(navigator).toBeVisible();
+  // Tab walks the list, which stays open while the focus is in it.
+  await page.keyboard.press("Tab");
+  await expect(navigator).toBeVisible();
+  const inList = () =>
+    page.evaluate(() =>
+      Boolean(document.activeElement?.closest('section[aria-label="Board navigator"]')),
+    );
+  expect(await inList()).toBe(true);
+  for (let step = 0; step < 60 && (await inList()); step += 1) {
+    await page.keyboard.press("Tab");
+  }
+  // Past its last link, the focus is on the rail's next button, and the list is closed.
+  await expect(navigator).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Put the board around the sky", exact: true }),
+  ).toBeFocused();
+  await expect(channels).toHaveAttribute("aria-expanded", "false");
+});
+
+test("the rail's channels, left open as the window widens past 708 px, are closed when it narrows again", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 600, height: 800 });
+  await besideTheSky(page);
+  await fakeBoard(page);
+  await page.goto("/c/general");
+  const channels = page.getByRole("button", { name: "Show the board's channels" });
+  await channels.click();
+  await expect(page.getByRole("region", { name: "Board navigator" })).toBeVisible();
+  await page.setViewportSize({ width: 800, height: 800 });
+  await expect(page.getByRole("region", { name: "Board", exact: true })).toHaveCount(0);
+  await page.setViewportSize({ width: 600, height: 800 });
+  await expect(channels).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByRole("region", { name: "Board navigator" })).toHaveCount(0);
+});
+
+for (const stored of [null, "600"]) {
+  test(`a handle that can't move in a narrow window keeps the width this browser chose (${stored ?? "none"})`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 600, height: 800 });
+    await besideTheSky(page);
+    if (stored !== null) {
+      await page.addInitScript((chosen) => {
+        localStorage.setItem("stellaris.contentWidth", chosen);
+      }, stored);
+    }
+    await fakeBoard(page);
+    await page.goto("/c/general");
+    const handle = page.getByRole("button", { name: /^Width of the board's content/ });
+    await handle.focus();
+    for (const key of ["ArrowRight", "ArrowLeft", "End", "Home"]) {
+      await page.keyboard.press(key);
+    }
+    // A drag that ends where it began, as the handle can't move here.
+    const edge = await boxOf(handle);
+    await page.mouse.move(edge.x + 4, edge.y + edge.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(edge.x + 120, edge.y + edge.height / 2);
+    await page.mouse.up();
+    expect(await page.evaluate(() => localStorage.getItem("stellaris.contentWidth"))).toBe(stored);
+    // A wide window then gives the content the default, or the width chosen.
+    await page.setViewportSize({ width: 1440, height: 800 });
+    await expect
+      .poll(async () => (await boxOf(page.getByRole("region", { name: "Board content" }))).width)
+      .toBe(stored === null ? 576 : 600);
+  });
+}

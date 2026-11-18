@@ -383,8 +383,9 @@ export function Navigator({
 /**
  * The navigator folded beside the sky, in a window too narrow for it beside the content: a column
  * of its three buttons, the channels, the layout switch, and Close. The channels open the
- * navigator over the content, which closes again on the channels' button, on a choice in it, or on
- * a press anywhere else; the Playground's Escape closes it too, before the board. Its `children`
+ * navigator over the content, which closes again on the channels' button, on a choice in it, on a
+ * press anywhere else, or on the focus moving anywhere else, as Tab past its last link does; the
+ * Playground's Escape closes it too, before the board. Its `children`
  * are the navigator while it is open, placed against the panel, so the content keeps its place
  * among the panel's columns and its view stays mounted.
  */
@@ -412,7 +413,9 @@ export function NavigatorRail({
     if (!open || list === null) {
       return undefined;
     }
-    const onPress = (event: PointerEvent): void => {
+    // A press or the focus anywhere but the list and its button closes the list, so nothing it
+    // covers is used, or focused, unseen.
+    const onElsewhere = (event: Event): void => {
       const target = event.target instanceof Node ? event.target : null;
       if (target !== null && !list.contains(target) && !channels.current?.contains(target)) {
         onClose();
@@ -423,10 +426,12 @@ export function NavigatorRail({
         onClose();
       }
     };
-    document.addEventListener("pointerdown", onPress, { capture: true });
+    document.addEventListener("pointerdown", onElsewhere, { capture: true });
+    document.addEventListener("focusin", onElsewhere);
     list.addEventListener("click", onChoose);
     return () => {
-      document.removeEventListener("pointerdown", onPress, { capture: true });
+      document.removeEventListener("pointerdown", onElsewhere, { capture: true });
+      document.removeEventListener("focusin", onElsewhere);
       list.removeEventListener("click", onChoose);
     };
   }, [open, onClose]);

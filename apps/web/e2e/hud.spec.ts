@@ -207,29 +207,34 @@ test("Sign out signs out", async ({ page }) => {
   await expect(page.getByLabel("Board token")).toBeVisible();
 });
 
-test("an amber dot follows the society's name while anything waits, read as how many, and no button", async ({
+test("nothing follows the society's name while things wait in the board, open or closed", async ({
   page,
 }) => {
   await fakeBoard(page, { enrolling: true, asked: true });
-  await page.goto("/");
-  // 3 need you, 1 runner to approve, 1 cron failing.
-  await expect(hud(page).getByText("5 waiting in the board")).toBeAttached();
-  await expect(hud(page).getByTitle("5 waiting in the board")).toBeVisible();
-  await expect(hud(page).getByRole("button", { name: /waiting/ })).toHaveCount(0);
-});
-
-test("with nothing waiting, nothing follows the society's name", async ({ page }) => {
-  await fakeBoard(page);
-  for (const read of ["requests", "proposals", "crons", "projects/*/tasks"]) {
-    await page.route(`**/api/${read}`, (route) => route.fulfill({ json: [] }));
-  }
   await page.goto("/c/general");
+  // Wait until what waits has been read: 3 need you, 1 runner to approve, 1 cron failing.
+  const navigator = page.getByRole("region", { name: "Board navigator" });
   await expect(
-    page
-      .getByRole("region", { name: "Board navigator" })
-      .getByRole("link", { name: "Status", exact: true }),
+    navigator.getByRole("link", { name: /^needs you/ }).getByTitle("3 waiting on you"),
   ).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(hud(page).getByText("fixture", { exact: true })).toBeVisible();
-  await expect(hud(page).getByText(/waiting in the board/)).toHaveCount(0);
+  await expect(
+    navigator.getByRole("link", {
+      name: "Status, 1 runner waiting for approval, 1 cron failing",
+    }),
+  ).toBeVisible();
+  const icon = hud(page).getByRole("img", { name: "Stellaris", exact: true });
+  for (const open of [true, false]) {
+    if (!open) {
+      await page.keyboard.press("Escape");
+      await expect(page).toHaveURL("/");
+    }
+    // The corner holds the icon and the name alone, and nothing in the HUD counts what waits.
+    await expect(icon).toBeVisible();
+    await expect(hud(page).getByText("fixture", { exact: true })).toBeVisible();
+    await expect(icon.locator("..").locator(":scope > *")).toHaveCount(2);
+    await expect(hud(page).getByText(/waiting/)).toHaveCount(0);
+    await expect(hud(page).getByTitle(/waiting/)).toHaveCount(0);
+    await expect(hud(page).getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+    await expect(hud(page).getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
+  }
 });

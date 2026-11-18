@@ -29,6 +29,8 @@ interface SkyProps {
   readonly live: LiveStore;
   /** Shown beside what is hovered and moved with it every frame. */
   readonly card: ReactNode;
+  /** Whether the camera's buttons show: not where the open board leaves them too little sky. */
+  readonly camera?: boolean | undefined;
 }
 
 /**
@@ -88,6 +90,7 @@ export function Sky({
   onSelectSky,
   live,
   card,
+  camera = true,
 }: SkyProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -264,6 +267,7 @@ export function Sky({
       <fieldset
         className="card absolute bottom-4 flex flex-col gap-0.5 p-1"
         style={{ right: insets.right + 16 }}
+        hidden={!camera}
       >
         <legend className="sr-only">Camera</legend>
         <button

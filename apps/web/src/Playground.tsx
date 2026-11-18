@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Outlet, useNavigate, useRouter, useRouterState, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { asksOf, hasUnseenReply } from "./board/asks.js";
-import { Navigator, type GovernanceView } from "./board/Navigator.js";
+import { Navigator, NavigatorRail, type GovernanceView } from "./board/Navigator.js";
 import { StatusTabs, statusViewOf, useStatusCounts } from "./board/StatusTabs.js";
 import { useNeedsYou } from "./board/useNeedsYou.js";
 import { AskBox, AskHint } from "./components/AskBox.js";
@@ -19,8 +19,9 @@ import { entityIndex } from "./lib/entities.js";
 import { followBoardEvents, refreshFor } from "./lib/events.js";
 import {
   CONTENT_MIN,
-  NAVIGATOR_WIDTH,
   askBoxPlacement,
+  besidePanel,
+  besideSky,
   contentWidth as widthFor,
   readBoardLayout,
   readChosenWidth,
@@ -63,6 +64,11 @@ function useWindowWidth(): number {
     return () => window.removeEventListener("resize", update);
   }, []);
   return width;
+}
+
+/** The root font's size in pixels, which a browser's font setting chooses, as the rems are drawn. */
+function rootFontSize(): number {
+  return Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
 }
 
 /** The part of a path after a prefix, when the path has that prefix. */
@@ -195,10 +201,20 @@ export function Playground() {
     setChosenWidth(chosen);
     saveChosenWidth(chosen);
   };
+  // Beside the sky, a window too narrow for the navigator and the content folds the navigator to
+  // its rail, whose channels open over the content until the address changes or they close.
+  const panel = besidePanel(width, contentWidth);
+  const folded = beside && panel.folded;
+  const [channelsAt, setChannelsAt] = useState<string | null>(null);
+  const channelsOpen = folded && channelsAt === href;
+  const closeChannels = useCallback(() => setChannelsAt(null), []);
   const insets = useMemo<Insets>(
-    () => (boardOpen ? skyRoom(layout, contentWidth) : NO_INSETS),
-    [boardOpen, layout, contentWidth],
+    () => (boardOpen ? skyRoom(layout, contentWidth, width) : NO_INSETS),
+    [boardOpen, layout, contentWidth, width],
   );
+  // Beside the sky, a room too narrow for the hint leaves it out, and one too narrow for the
+  // camera's buttons hides them, since the panel would cover them.
+  const sky = beside && boardOpen ? besideSky(width, insets, rootFontSize()) : null;
   // What the open route is about: a channel, directly or through a thread, or a project's tasks,
   // directly or through a task. The navigator highlights it and the sky focuses its project.
   const threadId = after(pathname, "/thread/");
@@ -263,6 +279,8 @@ export function Playground() {
       // What floats over the board closes first.
       if (askOpen) {
         setAskAt(null);
+      } else if (channelsOpen) {
+        setChannelsAt(null);
       } else if (boardOpen) {
         void navigate({ to: "/" });
       }
@@ -273,7 +291,7 @@ export function Playground() {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("pointerdown", onPointer);
     };
-  }, [boardOpen, askOpen, pathname, navigate]);
+  }, [boardOpen, askOpen, channelsOpen, pathname, navigate]);
 
   const rejected = [society, members, projects, scheduler].some(
     (query) => query.error instanceof ApiError && query.error.status === 401,
@@ -375,6 +393,7 @@ export function Playground() {
                   }
                 }}
                 live={live}
+                camera={sky?.camera ?? true}
                 card={
                   mark !== undefined ? (
                     <TaskCard
@@ -406,19 +425,44 @@ export function Playground() {
                       ? `absolute top-[72px] bottom-[16px] left-[16px] flex overflow-clip ${ISLAND_SURFACE}`
                       : "contents"
                   }
-                  style={beside ? { width: NAVIGATOR_WIDTH + contentWidth } : undefined}
+                  style={beside ? { width: panel.width } : undefined}
                 >
-                  <Navigator
-                    layout={layout}
-                    onLayout={chooseLayout}
-                    activeChannel={activeChannel}
-                    activeTasks={activeTasks}
-                    activeCitizen={activeCitizen}
-                    activeScope={activeScope}
-                    activeGovernance={activeGovernance}
-                    activeOverview={activeOverview}
-                    activeView={activeView}
-                  />
+                  {folded ? (
+                    <NavigatorRail
+                      layout={layout}
+                      onLayout={chooseLayout}
+                      open={channelsOpen}
+                      onToggle={() => setChannelsAt(channelsOpen ? null : href)}
+                      onClose={closeChannels}
+                    >
+                      {channelsOpen ? (
+                        <Navigator
+                          over
+                          layout={layout}
+                          onLayout={chooseLayout}
+                          activeChannel={activeChannel}
+                          activeTasks={activeTasks}
+                          activeCitizen={activeCitizen}
+                          activeScope={activeScope}
+                          activeGovernance={activeGovernance}
+                          activeOverview={activeOverview}
+                          activeView={activeView}
+                        />
+                      ) : null}
+                    </NavigatorRail>
+                  ) : (
+                    <Navigator
+                      layout={layout}
+                      onLayout={chooseLayout}
+                      activeChannel={activeChannel}
+                      activeTasks={activeTasks}
+                      activeCitizen={activeCitizen}
+                      activeScope={activeScope}
+                      activeGovernance={activeGovernance}
+                      activeOverview={activeOverview}
+                      activeView={activeView}
+                    />
+                  )}
                   <Island
                     label="Board content"
                     bare={beside}
@@ -427,9 +471,9 @@ export function Playground() {
                   >
                     <ResizeHandle
                       edge={beside ? "right" : "left"}
-                      width={contentWidth}
-                      min={CONTENT_MIN}
-                      max={widestContentWidth(width, layout)}
+                      width={folded ? panel.content : contentWidth}
+                      min={Math.min(CONTENT_MIN, folded ? panel.content : contentWidth)}
+                      max={folded ? panel.content : widestContentWidth(width, layout)}
                       onResize={resizeContent}
                       onToggle={toggleContentWidth}
                     />
@@ -440,9 +484,9 @@ export function Playground() {
               ) : null}
               {askOpen ? (
                 <AskBox left={askBox.left} width={askBox.width} onClose={closeAsk} />
-              ) : (
+              ) : sky?.hint === false ? null : (
                 <div
-                  className="pointer-events-none absolute bottom-5 flex justify-center px-16"
+                  className={`pointer-events-none absolute bottom-5 flex justify-center ${sky === null ? "px-16" : "px-4"}`}
                   style={{ left: insets.left, right: insets.right }}
                 >
                   <AskHint unread={unread} onOpen={() => setAskAt(pathname)} />

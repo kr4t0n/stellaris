@@ -99,7 +99,7 @@ With `STELLARIS_APPLE_APP_ID` set, the iOS app signs in on an `https` address of
 ### A runner
 
 - `STELLARIS_SERVER_URL` (`http://127.0.0.1:4700`): the board server, as this machine reaches it; its agents reach the MCP endpoint under the same address.
-- `STELLARIS_RUNNER_TOKEN` (none): a token `runner add` printed; without it the runner uses what an enrollment saved, or enrolls.
+- `STELLARIS_RUNNER_TOKEN` (none): a token `runner add` printed; without it the runner uses what an enrollment saved, or enrolls. No agent CLI is given it.
 - `STELLARIS_RUNNER_DIR` (`./runner-data`): its own data directory: the board mirror, agent homes, repositories, and worktrees, and the `credentials.json` an enrollment saves. It is resolved from the folder the runner starts in, `apps/runner` under `pnpm --filter`, where git ignores nothing of it, so give an absolute path outside the checkout.
 - `STELLARIS_LOG_LEVEL` (`info`): the runner's log level; `debug` also logs the CLI's stderr.
 - `STELLARIS_CONCURRENCY` (`2`): turns at once on its machine; a number or `unlimited`.
@@ -111,9 +111,11 @@ With `STELLARIS_APPLE_APP_ID` set, the iOS app signs in on an `https` address of
 
 ### Set by the runner
 
-- `STELLARIS_AGENT_TOKEN`: set per turn in the agent CLI's environment by the runner.
+- `STELLARIS_AGENT_TOKEN`: set per turn in the agent CLI's environment by the runner, the only place the CLI gets its turn token; neither CLI's command line holds it.
 - `HUSKY` (`0`): set in every agent CLI's environment by the runner, so husky neither points the clone away from the default branch's guard nor runs its hooks.
 
 ### Tokens
 
-Tokens are minted once and stored only as hashes: the user's, each runner's, each agent's, and each GitHub sign-in's. Agents receive short-lived turn tokens that live only in the server's memory. Never commit a real one, nor the GitHub client secret.
+Tokens are minted once and stored only as hashes: the user's, each runner's, each agent's, and each GitHub sign-in's. Agents receive short-lived turn tokens, which the server keeps only as hashes in memory. Never commit a real token, nor the GitHub client secret.
+
+On a runner, a turn's token is in its CLI's environment, where any other turn on that runner can read it, as it can the runner's own token, since every turn there runs as the runner's user: treat a runner as one trust domain ([why](../internals/runners.md#a-turns-token-reaches-its-cli-only-by-its-environment-and-a-runner-is-one-trust-domain)).

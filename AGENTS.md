@@ -189,6 +189,7 @@ One long-running process, the board server, hosts the only writer of the data di
 - Browser tests are `apps/web/e2e/*.spec.ts`, run by Playwright against the built interface with every `/api` request answered by the fake board, except the `society` project's, `*society.spec.ts`: the exit test and `resend.society.spec.ts`, each starting a board server of its own per test.
 - A browser test that checks the page while a request is on its way holds that request until the test lets it go, never for a fixed time ([holding an answer](./docs/internals/testing.md#the-fake-board)).
 - A test that imports another workspace package reads that package's `dist/`, so run `pnpm build` before testing a change another package's tests cover.
+- A wait for a turn on a test society's runner to reach its CLI passes `TURN_START_WAIT` (`apps/server/src/testing/harness.ts`), since the runner's git work before it outlasts Vitest's 1 s default under load; every other wait keeps the default ([the wait](./docs/internals/testing.md#a-wait-for-a-turn-to-start-takes-turn_start_wait)).
 
 ## Gotchas
 

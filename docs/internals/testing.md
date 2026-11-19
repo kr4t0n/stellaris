@@ -40,6 +40,12 @@ Vitest 5 shows no console output from a test that passes; pass `--silent=false` 
 
 `vitest.config.ts` sets `testTimeout: 30_000` for the whole suite rather than per test, since which git-heavy tests run past Vitest's 5 s default depends on the machine's load; the slowest take up to about 20 s on a loaded 4-CPU machine. `hookTimeout` keeps Vitest's 10 s. A test that times out under load is no regression until the base's version, run beside it at the same load, passes.
 
+### A wait for a turn to start takes `TURN_START_WAIT`
+
+A test that waits, with `vi.waitFor` or `expect.poll`, for a turn on a test society's runner to reach its CLI passes `TURN_START_WAIT` from `apps/server/src/testing/harness.ts`, 10 s, rather than Vitest's 1 s default. Before the CLI starts, the runner pulls the board's copy, clones the citizen's home from the server on the citizen's first turn there and fetches it after, and prepares the project's repository and worktree, all git processes. Timed phase by phase on a 4-CPU machine, a citizen's first turn on a fresh test society reached its CLI 0.5 to 1.9 s after `run` at load 2.2 to 2.7, most of it the home's clone, and 1.6 to 2.3 s with the test's process on one CPU shared with seven busy loops; its second turn took 0.2 to 0.3 s at that load. So a 1 s wait for a first turn failed even at load 2.4, in two runs of three. 10 s is about four times the slowest start measured, and leaves the test's 30 s to report the wait's own assertion when a turn never starts. Every other wait keeps the default, so a stop, a job's arrival, or a connection that stalls still fails within a second.
+
+A failed wait in `runner.test.ts` for a `LoggedBackend` turn also times out the `afterEach` hook at 10 s, since `society.stop()` waits for the turn the backend never ends; the wait's error is the one to read.
+
 ### `pnpm test -- --testTimeout=…` keeps the configured timeout
 
 pnpm passes the `--` on to Vitest, which ignores every option after it. Write `pnpm test --testTimeout=60000` or `pnpm exec vitest run --testTimeout=60000`.

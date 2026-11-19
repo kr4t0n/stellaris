@@ -6418,4 +6418,51 @@ describe("turns on a runner over the runner protocol", () => {
     });
     await expect(stranger.start()).rejects.toMatchObject({ status: 401 });
   });
+
+  it("records a connection under way before the hub closes, so nothing is written once it has", async () => {
+    const { board } = await Board.init(dir, { name: "attach" });
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: () => Promise.resolve(completed("done")),
+    };
+    const { hub, url } = await start(board, backend);
+    // The record of studio's connection is written only once the test lets it go, as a slow disk
+    // holds it, and the order says which came first, that write or the hub's close.
+    const order: string[] = [];
+    const { promise: held, resolve: release } = Promise.withResolvers<void>();
+    const { promise: written, resolve: wrote } = Promise.withResolvers<void>();
+    const markRunner = board.markRunner.bind(board);
+    vi.spyOn(board, "markRunner").mockImplementation(async (name, patch) => {
+      if (name !== "studio" || patch.status !== "connected") {
+        return markRunner(name, patch);
+      }
+      await held;
+      const marked = await markRunner(name, patch);
+      order.push("connected");
+      wrote();
+      return marked;
+    });
+    const { token } = await board.addRunner(USER, "studio");
+    const studio = createRunner({
+      serverUrl: url,
+      token,
+      dataDir: path.join(dir, "studio"),
+      backends: { claude: backend },
+      version: "test",
+      slots: 1,
+      retryMs: 50,
+    });
+    // The runner counts its stream open on the headers, which leave while the write waits, so it
+    // starts and stops with the write still under way.
+    await studio.start();
+    await studio.stop();
+    const closed = hub.close().then(() => order.push("closed"));
+    // Nothing else is under way, so a close that left the write out has ended by the event loop's
+    // next turn.
+    await new Promise((resolve) => setImmediate(resolve));
+    release();
+    await Promise.all([closed, written]);
+    expect(order).toEqual(["connected", "closed"]);
+  });
 });

@@ -188,6 +188,7 @@ One long-running process, the board server, hosts the only writer of the data di
 - Tests live beside the code as `*.test.ts`, and a script's under `scripts/` as `*.test.mjs`, and run with Vitest from the root. Board and scheduler tests use a temporary data directory and an injected clock. `apps/server`'s `integration.test.ts` and `runner.test.ts` run a server and a runner in one process over real HTTP with a scripted backend (`startTestSociety`).
 - Browser tests are `apps/web/e2e/*.spec.ts`, run by Playwright against the built interface with every `/api` request answered by the fake board, except the `society` project's, `*society.spec.ts`: the exit test and `resend.society.spec.ts`, each starting a board server of its own per test.
 - A browser test that checks the page while a request is on its way holds that request until the test lets it go, never for a fixed time ([holding an answer](./docs/internals/testing.md#the-fake-board)).
+- A browser test that presses again before one of the page's own timers fires moves the page's clock between the presses with `page.clock`, never waits a fixed time ([the page's clock](./docs/internals/testing.md#a-browser-test-that-races-one-of-the-pages-timers-runs-on-the-pages-clock)).
 - A test that imports another workspace package reads that package's `dist/`, so run `pnpm build` before testing a change another package's tests cover.
 
 ## Gotchas
@@ -197,7 +198,7 @@ One long-running process, the board server, hosts the only writer of the data di
 - Claude Code's structured-output validator rejects the 2020-12 JSON Schema dialect; `turnStatusJsonSchema` emits draft-7 and drops `$schema`.
 - Every test gets 30 s (`vitest.config.ts`); one that times out under load is no regression until the base's, run beside it at the same load, passes. `pnpm test -- --testTimeout=…` drops the flag: write `pnpm test --testTimeout=60000`. The resident-session test in `runner.test.ts` fails under heavy load whatever the timeout. A timed-out test can leave its `stellaris-*` temp folder, so point `TMPDIR` at a folder of your own.
 - Scheduler tests run the onboarding turns to completion first, record turns only with `setup({ record: true })`, and compare the runner's wall-clock `endedAt` with the scheduler's injected clock in the reflection rule.
-- Stop the hub (`RunnerHub.close`) before deleting a society's data directory: a runner's disconnect is written after its stream closes.
+- Stop the hub (`RunnerHub.close`) before deleting a society's data directory: a runner's connection is written after the runner counts its stream open, and its disconnect after the stream closes, and `close` waits for both.
 - Data directories are resolved to absolute paths (`BoardPaths`, `RunnerLayout`, `ExecaGit`).
 - A dispatch names its thread as `{id, task}`, while a turn record and its events carry the id alone.
 - YAML frontmatter turns unquoted timestamps into `Date`s, which `IsoDateTimeSchema` turns back into ISO strings. gray-matter caches what it parses and parses the body `stringify` is given, so `readMarkdown` passes an options object and `writeMarkdown` hands the body over as a file object.

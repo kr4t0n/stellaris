@@ -1,4 +1,4 @@
-import { expect, test, type Locator } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { ENROLLING_CODE, fakeBoard, TOKEN } from "./board.js";
 
 /** The time `ms` from now. */
@@ -9,6 +9,16 @@ function fromNow(ms: number): string {
 /** A runner row's cells, one a column. */
 function cellsOf(row: Locator): Locator {
   return row.locator(":scope > *");
+}
+
+/**
+ * Stops the page's clock, installed before the page loaded, so its timers fire only as the test
+ * moves it on: two presses `runFor(ms)` apart are that far apart on it, however slow the machine.
+ * It stops a few seconds ahead of the page's own time, which runs on while the test asks, since
+ * it stops no earlier than the time it has reached.
+ */
+async function stopClock(page: Page): Promise<void> {
+  await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 5_000);
 }
 
 test("a runner's link signs in with GitHub, comes back to the runner, and approves it", async ({
@@ -405,6 +415,7 @@ test("the user removes a runner from a red button in its row, which names what c
 }) => {
   // desk is pinned to pod and in a turn there; lab lives on laptop, and iphone, archived, did.
   const board = await fakeBoard(page, { inFlight: true, archived: true });
+  await page.clock.install();
   await page.goto("/runners");
   const list = page.getByRole("list", { name: "Registered" });
   const rows = list.getByRole("listitem");
@@ -413,15 +424,16 @@ test("the user removes a runner from a red button in its row, which names what c
 
   // The bin turns into a red Remove in the same cell, in place of the row's controls, named for
   // what it changes. It takes no press for its first moments, so a double click on the bin, its
-  // second click 150 ms later and landing on the Remove, removes nothing.
+  // second click 150 ms later on the page's clock and landing on the Remove, removes nothing.
   const laptop = rows.nth(2);
   const bin = laptop.getByRole("button", { name: "Remove laptop…" });
   const at = await bin.boundingBox();
   if (at === null) {
     throw new Error("the bin has no box");
   }
+  await stopClock(page);
   await page.mouse.click(at.x + at.width / 2, at.y + at.height / 2);
-  await page.waitForTimeout(150);
+  await page.clock.runFor(150);
   await page.mouse.click(at.x + at.width / 2, at.y + at.height / 2);
   const remove = laptop.getByRole("button", { name: "Remove laptop", exact: true });
   await expect(remove).toBeFocused();
@@ -436,6 +448,7 @@ test("the user removes a runner from a red button in its row, which names what c
   await expect(cellsOf(laptop).nth(7).getByRole("button")).toHaveCount(1);
   expect(removals()).toEqual([]);
   // Once it takes a press, the board refuses while lab lives there, on a line under the row.
+  await page.clock.resume();
   await expect(remove).toHaveAttribute("aria-disabled", "false");
   await remove.click();
   await expect(laptop.getByRole("alert")).toHaveText(
@@ -488,6 +501,7 @@ test("the user removes a runner from a red button in its row, which names what c
 
 test("a second press, or a held key, on the bin removes nothing", async ({ page }) => {
   const board = await fakeBoard(page);
+  await page.clock.install();
   await page.goto("/runners");
   const laptop = page.getByRole("list", { name: "Registered" }).getByRole("listitem").nth(2);
   const bin = laptop.getByRole("button", { name: "Remove laptop…" });
@@ -495,22 +509,24 @@ test("a second press, or a held key, on the bin removes nothing", async ({ page 
   const removals = () => board.writes.filter((write) => /^\/api\/runners\/[^/]+$/.test(write.path));
 
   // Reached by Tab, as a keyboard user does, so the bin takes Space as its own press. Enter twice,
-  // 150 ms apart: the second lands on the Remove before it takes presses.
+  // 150 ms apart on the page's clock: the second lands on the Remove before it takes presses.
   await laptop.getByRole("button", { name: "Rename laptop…" }).focus();
   await page.keyboard.press("Tab");
   await expect(bin).toBeFocused();
+  await stopClock(page);
   await page.keyboard.press("Enter");
-  await page.waitForTimeout(150);
+  await page.clock.runFor(150);
   await page.keyboard.press("Enter");
   await expect(remove).toBeFocused();
-  await page.waitForTimeout(300);
+  await page.clock.runFor(300);
   expect(removals()).toEqual([]);
-  // Enter held: its repeats, past the first moments, still press nothing.
+  // Enter held: its repeats, once the Remove takes presses, still press nothing.
   await page.keyboard.press("Escape");
   await expect(bin).toBeFocused();
   await page.keyboard.down("Enter");
   await expect(remove).toBeFocused();
-  await page.waitForTimeout(600);
+  await page.clock.runFor(600);
+  await expect(remove).toHaveAttribute("aria-disabled", "false");
   await page.keyboard.down("Enter");
   await page.keyboard.down("Enter");
   await page.keyboard.up("Enter");
@@ -518,13 +534,15 @@ test("a second press, or a held key, on the bin removes nothing", async ({ page 
   await page.keyboard.press("Escape");
   await expect(bin).toBeFocused();
   await page.keyboard.press(" ");
-  await page.waitForTimeout(150);
+  await page.clock.runFor(150);
   await page.keyboard.press(" ");
   await expect(remove).toBeFocused();
-  await page.waitForTimeout(300);
+  await page.clock.runFor(300);
   expect(removals()).toEqual([]);
   await expect(laptop.getByRole("alert")).toHaveCount(0);
-  // A deliberate press goes.
+  // A deliberate press goes. The clock runs again, since the view takes the board's answer in on
+  // a timer.
+  await page.clock.resume();
   await page.keyboard.press("Escape");
   await bin.press("Enter");
   await expect(remove).toHaveAttribute("aria-disabled", "false");

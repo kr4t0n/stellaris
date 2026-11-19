@@ -3,7 +3,7 @@ import { Link, useParams } from "@tanstack/react-router";
 import { z } from "zod";
 import { BackLink } from "../components/BackLink.js";
 import { Markdown } from "../components/Markdown.js";
-import { ApiError } from "../lib/api.js";
+import { namesNothing } from "../lib/api.js";
 import { ago } from "../lib/format.js";
 import {
   useMembers,
@@ -122,7 +122,7 @@ export function ProposalView() {
   if (proposal.data === undefined) {
     return (
       <PaneNote>
-        {proposal.error instanceof ApiError && proposal.error.status === 404
+        {namesNothing(proposal.error)
           ? `There is no proposal ${proposalId}.`
           : "Reading the proposal…"}
       </PaneNote>

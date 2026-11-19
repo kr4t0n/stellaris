@@ -93,6 +93,14 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Whether a read failed because its address names nothing the board holds: an id of nothing
+ * (404), or no id at all, as a typed address can hold, which the board refuses before it reads.
+ */
+export function namesNothing(error: unknown): boolean {
+  return error instanceof ApiError && (error.status === 404 || error.code === "VALIDATION");
+}
+
 const ActorSchema = z.object({
   name: NameSchema,
   role: NameSchema,

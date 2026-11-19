@@ -5,7 +5,7 @@ import { useId, useState, type ReactNode } from "react";
 import { BackLink } from "../components/BackLink.js";
 import { LinkedText } from "../components/Entities.js";
 import { Markdown } from "../components/Markdown.js";
-import { ApiError } from "../lib/api.js";
+import { namesNothing } from "../lib/api.js";
 import { ago, firstParagraph } from "../lib/format.js";
 import {
   useMembers,
@@ -438,9 +438,7 @@ export function TaskView() {
   if (task.data === undefined) {
     return (
       <PaneNote>
-        {task.error instanceof ApiError && task.error.status === 404
-          ? `There is no task ${taskId}.`
-          : "Reading the task…"}
+        {namesNothing(task.error) ? `There is no task ${taskId}.` : "Reading the task…"}
       </PaneNote>
     );
   }

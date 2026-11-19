@@ -320,3 +320,19 @@ test("a task with no thread to write in still gets Approve, alone", async ({ pag
     body: { task_id: STAGE_TASK },
   });
 });
+
+test("an address that names nothing says so, an id the board refuses unread included", async ({
+  page,
+}) => {
+  await fakeBoard(page);
+  for (const [address, note] of [
+    ["/task/01ARZ3NDEKTSV4RRFFQ69G5FAV", "There is no task 01ARZ3NDEKTSV4RRFFQ69G5FAV."],
+    ["/task/survey", "There is no task survey."],
+    ["/thread/survey", "There is no thread survey."],
+    ["/proposal/survey", "There is no proposal survey."],
+    ["/c/LAB/general", "There is no channel LAB/general."],
+  ] as const) {
+    await page.goto(address);
+    await expect(viewOf(page)).toContainText(note);
+  }
+});

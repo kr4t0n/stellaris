@@ -212,8 +212,9 @@ The app's tests run in CI on the iPhone Duo simulator, which boots closed, doesn
 - A link or an image in the top-leading part of Chat opens. On the simulator, a tap inside the status bar's frame there, 223 by 317 points from the window's corner, reaches no message and scrolls the conversation to its top instead.
 - At the largest text size (Settings > Accessibility > Display & Text Size > Larger Text), the plan's half-height sheet closes with a drag down on its bar, at its middle or its foot. In CI, only a drag on its content closed it.
 - The keyboard covers the side bar, its tabs included, until a scroll puts it away.
-- With the keyboard up, the keyboard's rounded corners, at its top and at the display's foot, show the ground above each corner, never black: the chat's gray in Chat, behind the New thread, Advance, and Reject sheets, and with the chat under the sky on the inner display. Beside the sky, the corners on the sky's side show the sky's own darker ground. CI checks every case but the one beside the sky, on the simulator's outer display.
+- With the keyboard up, the keyboard's rounded corners, at its top and at the display's foot, show the ground above each corner, never black: the chat's gray in Chat, behind the New thread and Advance sheets and Decide's turned to Reject, and with the chat under the sky on the inner display. Beside the sky, the corners on the sky's side show the sky's own darker ground. CI checks every case but the one beside the sky, on the simulator's outer display.
 - At rest, the composer is a capsule with no Send, and its bottom sits on the same line as the side bar's foot, as Safari's address bar does beside its own bar. The app places it 24 points above the window's foot, where iOS draws the bar on the simulator, since iOS gives no way to move the bar.
+- With the keyboard up in a task's thread at a stage of yours, Back and Advance stand above Send in the side column and Send shows whole, as Back and Decide do in a proposal waiting on you. On the simulator the column's third place starts at 299 points and Send at 314, so a third symbol would cover it; whether a device's column stands the same is unchecked.
 - Tapping the composer shows a round Send in the side bar's column, where Safari shows its ×, while the keyboard covers the bar. Send is dim while the draft is empty or an image uploads, and a tap on it posts. Return adds a line. A scroll puts the keyboard away and hides Send, and the draft stays.
 - With a hardware keyboard (a Bluetooth one, or the Simulator's I/O > Keyboard > Connect Hardware Keyboard), tapping the composer shows Send at the capsule's trailing end, clear of the side bar's tabs, and the capsule rises 12 points above the safe area while the field has the focus. CI types with the software keyboard only.
 - While the post goes, Send shows a spinner, and VoiceOver reads it as "Sending". No picture in CI catches that moment.
@@ -227,7 +228,7 @@ The app's tests run in CI on the iPhone Duo simulator, which boots closed, doesn
 - Turning the phone: the tab bar runs along the foot in portrait. In landscape, note whether the tabs beside the sky get the vertical bar, and whether it shows their titles. If they do, whether the composer's capsule meets that bar's foot, and whether Send stands in its column with the keyboard up. Beside a trailing side bar the app puts the capsule's bottom 24 points above the window's foot, as on the outer display, whatever the safe area there (20 points in the app's own model of this pose), and moves Send into the column only while the keyboard reaches higher than 186 points.
 - Unfolding brings the sky in with a fade, beside the chat in landscape and above it in portrait; folding takes it away. The chat stays where it was through both, with its draft and its scroll.
 - A partial fold, as when the phone stands half open on a table, moves nothing.
-- On a tabletop fold, whether the card below the fold, and Advance and Approve at the bar's trailing end, are easy to reach.
+- On a tabletop fold, whether the card below the fold, and Advance and Decide at the bar's trailing end, are easy to reach.
 - The fold's band: the sky's camera keeps it clear, and a card a tap opens stays clear of it and of the inner display's camera. The tests assume a band 21 points wide at the middle, and no camera.
 - In portrait on the inner display: whether the card a star opens covers the sphere it describes, and whether the whole sky shows the top of the first project's orbit.
 - A pan of the sky near an edge, against the system's edge swipes.
@@ -240,7 +241,7 @@ The app's tests run in CI on the iPhone Duo simulator, which boots closed, doesn
 - Paste from the draft's menu with text and a picture copied together, such as a selection in Notes or on a web page. The web pastes the text then; what iOS hands the draft is untested.
 - Ten large photos picked at once, such as 48-megapixel ones: the app should stay up while they upload.
 - New thread's sheet moves off the fold, and where its Cancel and Open thread sit on the open phone. In a test window wider than the outer display, iOS draws them mid-sheet, so CI can't show it.
-- The New thread, Advance, and Reject sheets keep their text through a fold, an unfold, and a turn, and the plan stays open.
+- The New thread and Advance sheets, and Decide's turned to Reject, keep their text through a fold, an unfold, and a turn, and the plan stays open.
 
 **A branch's files**
 
@@ -253,12 +254,13 @@ The app's tests run in CI on the iPhone Duo simulator, which boots closed, doesn
 
 - A real task's plan, scrolled to its end: Files lists what its branch changed as a tree, each file with what happened to it and who touched it last, a deleted one struck through. A folder opens and closes in place. CI lists only the fake board's six changes.
 - A file's change on a real branch: removed lines red, added ones green, long lines wrapping, and a tap on a line's number opening the whole file at that line. Whole file opens it at its top. A long patch scrolls smoothly, and one the board cut says so at its foot.
-- On the inner display in portrait, the plan's column beside the thread: a file's change opens in the column, with Back to the plan in the column's own bar, and the thread's bar keeps Plan and Advance. Fold or turn the phone with a change open: it stays open, moving between the column and the sheet. CI resizes a window in place of the fold, and draws the column only in that window.
+- On the inner display in portrait, the plan's column beside the thread: a file's change opens in the column, with Back to the plan in the column's own bar, and the thread's bar keeps Advance. Fold or turn the phone with a change open: it stays open, moving between the column and the sheet. CI resizes a window in place of the fold, and draws the column only in that window.
 
 **Text**
 
 - A New thread title pasted past 200 characters. The cap lives in the model, behind a binding, and is tested only there; a field that shows more than 200 opens a thread with the first 200.
 - A task's strip at 320 points wide and the largest text size: how tall it stands.
+- At the largest text sizes, Decide's Approve | Reject switch keeps its words at the default size, as iOS's segmented control does, while the rest of its sheet grows; CI's pictures show it at 320 and 410 points wide. Whether a long press on the switch shows its words large is for the device.
 
 **VoiceOver**
 
@@ -267,6 +269,8 @@ The app's tests run in CI on the iPhone Duo simulator, which boots closed, doesn
 - Links, images, and task lists in messages. An image is read by its alt text.
 - The two-finger scrub closes the plan's, the charter's, and Settings' sheets.
 - A task's or a proposal's strip at the accessibility text sizes is read in full.
+- A task's strip is read as a button that shows the plan, and a proposal's one that shows the charter, and a double tap opens it: with no Plan or Charter in the bar, it is the one way there.
+- Decide's switch at the top of its sheet reads as Approve and Reject, with the one chosen selected.
 
 **Over the network**
 

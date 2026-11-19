@@ -148,9 +148,9 @@ final class FoldTests: XCTestCase {
     XCTAssertEqual(model.newThreads["general"]?.title, "Half a title")
   }
 
-  /// The Advance sheet's note and the Reject sheet's reason, open over a task's and a proposal's
-  /// thread, stay with their sheets as the phone opens, turns, and folds: what they say lives in
-  /// the model.
+  /// The Advance sheet's note and the reason of Decide's sheet turned to Reject, open over a task's
+  /// and a proposal's thread, stay with their sheets as the phone opens, turns, and folds: what
+  /// they say lives in the model.
   @MainActor func testTheAdvanceNoteAndARejectionsReasonKeepTheirTextThroughTheFold() async throws {
     continueAfterFailure = false
     let model = try await signedIn()

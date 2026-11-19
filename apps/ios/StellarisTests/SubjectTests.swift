@@ -178,6 +178,25 @@ import Testing
     #expect(model.advancing == nil && model.deciding == nil && model.inspecting == nil)
   }
 
+  /// Decide opens a proposal's sheet on Approve, and on Reject while a rejection's reason is kept,
+  /// as after a sheet turned to Reject was swiped away; once Cancel drops the reason, on Approve.
+  @Test func opensTheDecisionOnRejectWhileARejectionsReasonIsKept() async throws {
+    let model = try await signedIn()
+    let approve = Verdict(proposal: member, choice: .approve)
+    let reject = Verdict(proposal: member, choice: .reject)
+    model.openDecision(member)
+    #expect(model.deciding == approve)
+    model.deciding = reject
+    model.reasons[reject] = "Half a reason"
+    // Swiped away, then opened again from the bar.
+    model.deciding = nil
+    model.openDecision(member)
+    #expect(model.deciding == reject)
+    model.cancelDecision(reject)
+    model.openDecision(member)
+    #expect(model.deciding == approve)
+  }
+
   @Test func namesAProposalAsTheWebDoes() async throws {
     let model = try await signedIn()
     let line = "member eng-2 as engineer on claude for demo"

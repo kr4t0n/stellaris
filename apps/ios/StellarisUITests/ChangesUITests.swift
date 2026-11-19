@@ -33,7 +33,7 @@ final class ChangesUITests: ShellTestCase {
     // change once more, and a line's number there opens the file at that line.
     dragAway(app, app.navigationBars["view.ts"].firstMatch)
     XCTAssertTrue(first.waitForNonExistence(timeout: 20), "a drag down leaves the file open")
-    pick(app, "plan")
+    openFromTheStrip(app)
     swipeTo(app, row)
     row.tap()
     XCTAssertTrue(nine.waitForExistence(timeout: 20), "the change didn't open again")
@@ -92,10 +92,10 @@ final class ChangesUITests: ShellTestCase {
     expectGeneral(app)
     tab(app, "Needs you")
     pick(app, "stage-\(exportView)")
-    pick(app, "plan")
+    openFromTheStrip(app)
     XCTAssertTrue(
       app.descendants(matching: .any)["stage-s2"].firstMatch.waitForExistence(timeout: 20),
-      "Plan shows no stages")
+      "the strip shows no stages")
     return app
   }
 }

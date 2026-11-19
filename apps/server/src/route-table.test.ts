@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { cp, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { ServerType } from "@hono/node-server";
@@ -38,13 +39,37 @@ const PUBLIC = new Map([
 const TERMINATORS = ["%0A", "%0D", "%E2%80%A8", "%E2%80%A9"];
 const CHECKED_TREES = ["/api/", "/runner/"];
 
-/** A request path for a route's pattern, with each parameter and wildcard filled. */
-function pathOf(pattern: string): string {
-  const filled = pattern.replace(/:[^/{}]+(?:\{[^}]*\})?/g, "x").replace(/\*$/, "x");
+/**
+ * A request path for a route's pattern, with each parameter filled from `values`, else with `x`,
+ * and a trailing wildcard with `x`.
+ */
+function pathOf(pattern: string, values: Record<string, string> = {}): string {
+  const filled = pattern
+    .replace(/:([^/{}]+)(?:\{[^}]*\})?/g, (_param, name: string) => values[name] ?? "x")
+    .replace(/\*$/, "x");
   return filled.startsWith("/") ? filled : `/${filled}`;
 }
 
+/** Every file under `folder`, by path, with a hash of its bytes. */
+async function filesUnder(folder: string): Promise<Map<string, string>> {
+  const files = new Map<string, string>();
+  for (const entry of await readdir(folder, { recursive: true, withFileTypes: true })) {
+    if (entry.isFile()) {
+      const file = path.join(entry.parentPath, entry.name);
+      files.set(
+        file,
+        createHash("sha256")
+          .update(await readFile(file))
+          .digest("hex"),
+      );
+    }
+  }
+  return files;
+}
+
 describe("the route table", () => {
+  /** A folder of the test's own, holding the data directory and what is planted beside it. */
+  let root: string;
   let dir: string;
   let board: Board;
   let hub: RunnerHub;
@@ -54,7 +79,8 @@ describe("the route table", () => {
   let userToken: string;
 
   beforeEach(async () => {
-    dir = await mkdtemp(path.join(os.tmpdir(), "stellaris-route-table-"));
+    root = await mkdtemp(path.join(os.tmpdir(), "stellaris-route-table-"));
+    dir = path.join(root, "data");
     const init = await Board.init(dir, { name: "routes" });
     board = init.board;
     userToken = init.userToken;
@@ -91,7 +117,7 @@ describe("the route table", () => {
       server.closeAllConnections();
     }
     await closed;
-    await rm(dir, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
   });
 
   /** Each route the table holds, middleware included, as `METHOD pattern`, once. */
@@ -146,7 +172,7 @@ describe("the route table", () => {
     const ask = async (key: string, slug: string) => {
       const [method = "", pattern = ""] = key.split(" ");
       const body = bodies.get(key);
-      const response = await fetch(`${url}${pathOf(pattern.replace(":slug", slug))}`, {
+      const response = await fetch(`${url}${pathOf(pattern, { slug })}`, {
         method,
         headers: {
           authorization: `Bearer ${userToken}`,
@@ -181,5 +207,101 @@ describe("the route table", () => {
         `${key} nothing-here: 404`,
       ]),
     );
+  });
+
+  it("refuses a malformed name on every route that takes one, reaching no file", async () => {
+    await board.addAgent(USER, {
+      name: "eng-1",
+      role: "engineer",
+      cli: "claude",
+      memberships: ["demo"],
+    });
+    // A citizen's home copied inside the data directory and outside it: an encoded slash in an
+    // unparsed name reached either, to read its memory or to rewrite its `agent.json`.
+    for (const folder of [path.join(dir, "outside-agent"), path.join(root, "outside-agent")]) {
+      await cp(path.join(dir, "agents", "eng-1"), folder, { recursive: true });
+      await writeFile(path.join(folder, "memory", "core.md"), "PLANTED-MEMORY\n");
+    }
+    // A body each write takes apart from its name, so its answer is the name's; null for a write
+    // that reads none.
+    const bodies = new Map<string, object | null>([
+      ["POST /api/agents/:name/retire", { reason: "done" }],
+      ["PUT /api/agents/:name/model", { model: "model-1" }],
+      ["PUT /api/agents/:name/effort", { effort: "high" }],
+      ["PUT /api/agents/:name/runner", { runner: null }],
+      ["PUT /api/roles/:name", { purpose: "Plans.", verbs: [] }],
+      ["PUT /api/runners/:name/name", { name: "runner-2" }],
+      ["DELETE /api/runners/:name", null],
+      ["POST /api/runners/:name/pause", null],
+      ["POST /api/runners/:name/pause/:cli", null],
+      ["POST /api/runners/:name/resume", null],
+      ["POST /api/runners/:name/resume/:cli", null],
+      ["POST /api/runners/:name/quota/:cli", null],
+    ]);
+    // What a well-formed name of nothing answers where that is not a 404, and why.
+    const missing = new Map<string, [number, string]>([
+      [
+        "PUT /api/roles/:name",
+        [200, "a charter's PUT writes the role, so a new name is a new role"],
+      ],
+      [
+        "POST /api/runners/:name/quota/:cli",
+        [503, "it asks the runner's connection, and none has"],
+      ],
+    ]);
+    const nameRoutes = [...routeKeys()].filter((key) => key.includes("/:name"));
+    expect(nameRoutes).toContain("GET /api/agents/:name/memory");
+    // A write the table gains takes a line in `bodies`, so it is asked as it would be, and a line
+    // whose route has gone leaves both lists.
+    expect(nameRoutes.filter((key) => !key.startsWith("GET ") && !bodies.has(key))).toEqual([]);
+    expect(
+      [...bodies.keys(), ...missing.keys()].filter((key) => !nameRoutes.includes(key)),
+    ).toEqual([]);
+    const ask = async (key: string, name: string) => {
+      const [method = "", pattern = ""] = key.split(" ");
+      const body = bodies.get(key) ?? null;
+      const response = await fetch(`${url}${pathOf(pattern, { name, cli: "claude" })}`, {
+        method,
+        headers: {
+          authorization: `Bearer ${userToken}`,
+          ...(body === null ? {} : { "content-type": "application/json" }),
+        },
+        ...(body === null ? {} : { body: JSON.stringify(body) }),
+      });
+      return { status: response.status, text: await response.text() };
+    };
+
+    const before = await filesUnder(root);
+    const answers: string[] = [];
+    for (const key of nameRoutes) {
+      for (const name of ["x%00", "..%2Foutside-agent", "..%2F..%2Foutside-agent", "USER"]) {
+        const { status, text } = await ask(key, name);
+        const named = text.includes(root) || text.includes("agents/");
+        const planted = text.includes("PLANTED-MEMORY");
+        answers.push(
+          `${key} ${name}: ${status} ${text.match(/"error":"\w+"/)?.[0] ?? ""}${named ? " names a path" : ""}${planted ? " reads the planted home" : ""}`,
+        );
+      }
+    }
+    // A refused name writes nothing, in the data directory or beside it.
+    const after = await filesUnder(root);
+    const touched = [...new Set([...before.keys(), ...after.keys()])]
+      .filter((file) => before.get(file) !== after.get(file))
+      .map((file) => path.relative(root, file));
+    for (const key of nameRoutes) {
+      answers.push(`${key} nothing-here: ${(await ask(key, "nothing-here")).status}`);
+    }
+
+    expect({ answers, touched }).toEqual({
+      answers: [
+        ...nameRoutes.flatMap((key) =>
+          ["x%00", "..%2Foutside-agent", "..%2F..%2Foutside-agent", "USER"].map(
+            (name) => `${key} ${name}: 400 "error":"VALIDATION"`,
+          ),
+        ),
+        ...nameRoutes.map((key) => `${key} nothing-here: ${missing.get(key)?.[0] ?? 404}`),
+      ],
+      touched: [],
+    });
   });
 });

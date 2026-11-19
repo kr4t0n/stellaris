@@ -12,7 +12,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@hono/node-server": "2.1.3",
+    "@hono/node-server": "2.1.9",
     "@stellaris/board-core": "workspace:*",
     "@stellaris/board-mcp": "workspace:*",
     "@stellaris/runner-core": "workspace:*",
@@ -20,7 +20,7 @@
     "@stellaris/shared": "workspace:*",
     "@stellaris/turn-host": "workspace:*",
     "execa": "10.0.1",
-    "hono": "4.13.13",
+    "hono": "4.13.19",
     "pino": "10.3.1",
     "zod": "4.6.7"
   },

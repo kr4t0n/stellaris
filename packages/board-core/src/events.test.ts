@@ -161,6 +161,79 @@ describe("EventLog", () => {
     expect(await log.readIds(written)).toEqual([null, null, null]);
   });
 
+  it("skips an event of a type it doesn't know in every read, saying so once for each type", async () => {
+    const warned: unknown[][] = [];
+    log = new EventLog(file, nextId, () => new Date("2026-10-12T07:00:00Z"), {
+      warn: (...args) => warned.push(args),
+    });
+    const unknown = (type: string) => ({
+      id: nextId(),
+      ts: "2026-10-12T07:00:01.000Z",
+      type,
+      actor: "user",
+      payload: { secret: "never logged" },
+    });
+    const [before] = await append();
+    const watered = unknown("garden.watered");
+    // As a newer board writes it, then one line with no leading fields, then another type.
+    const reordered = unknown("garden.watered");
+    const weeded = unknown("garden.weeded");
+    const { id: reorderedId, ...rest } = reordered;
+    await appendFile(
+      file,
+      [
+        JSON.stringify(watered),
+        JSON.stringify({ ...rest, id: reorderedId }),
+        JSON.stringify(weeded),
+      ]
+        .map((line) => `${line}\n`)
+        .join(""),
+      "utf8",
+    );
+    const [after] = await append();
+    if (before === undefined || after === undefined) {
+      throw new Error("nothing appended");
+    }
+
+    expect(await log.readSince(null)).toEqual([before, after]);
+    expect(await log.readSince(before.id)).toEqual([after]);
+    // A limit counts only the events returned, so a cursor never stops short of them.
+    expect(await log.readSince(before.id, 1)).toEqual([after]);
+    expect(await log.readSince(watered.id)).toEqual([after]);
+    expect(await log.readIds([before.id, watered.id, reorderedId, weeded.id, after.id])).toEqual([
+      before,
+      null,
+      null,
+      null,
+      after,
+    ]);
+    await appendFile(file, `${JSON.stringify(unknown("garden.watered"))}\n`, "utf8");
+    expect(await log.lastId()).toBe(after.id);
+    expect(warned).toEqual([
+      [{ type: "garden.watered" }, "skipping events of a type this board doesn't know"],
+      [{ type: "garden.weeded" }, "skipping events of a type this board doesn't know"],
+    ]);
+  });
+
+  it("still fails on a malformed event of a type it knows, with or without leading fields", async () => {
+    const [first] = ids(await append());
+    // No payload, as written first and, below, in another order.
+    const unpaid = {
+      id: nextId(),
+      ts: "2026-10-12T07:00:01.000Z",
+      type: "paused.changed",
+      actor: "user",
+    };
+    await appendFile(file, `${JSON.stringify(unpaid)}\n`, "utf8");
+    await expect(log.readSince(first ?? null)).rejects.toThrow(/payload/);
+
+    await rm(file);
+    await append();
+    const { id, ...rest } = { ...unpaid, id: nextId() };
+    await appendFile(file, `${JSON.stringify({ ...rest, id })}\n`, "utf8");
+    await expect(log.readSince(null)).rejects.toThrow(/payload/);
+  });
+
   it("tells each listener of every append until it stops listening", async () => {
     const heard: string[] = [];
     const stop = log.onAppend((event) => heard.push(event.id));

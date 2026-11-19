@@ -24,6 +24,17 @@ No verb accepts an author. Turn tokens map to an actor in memory and expire afte
 
 Cursors and "since" comparisons rely on this; never switch ids to a non-time-ordered scheme.
 
+### A reader skips an event of a type it doesn't know
+
+An event's type is one of a closed list in `shared` (`BOARD_EVENT_TYPES`), so a release that adds a type writes events an older build can't parse. Rolling 0.5.0 back to 0.4.3 showed what that did: once a 0.5.0 runner had connected, its `runner.synced` events failed 0.4.3's parse, every scheduler pass threw, so nothing woke, and `/api/events` answered 400. Every reader now skips an event whose type is a string it doesn't know (`unknownEventType`, `readBoardEvent`) and reads on, keeping the events around it whole; a known type's malformed event fails as before, and so does a type that isn't a string.
+
+- `EventLog`'s scan reads each line's type from its leading fields (`{"id":…,"ts":…,"type":…`, as `append` writes them) without parsing the line, parses whole only a line without them, and leaves a line of an unknown type out of its index. So no read returns one: `readSince`'s limit counts only the events it returns, and the scheduler's cursor and a stream's page never stop short on a run of them; `readIds` answers null for one's id; `lastId` names the newest known event. The server's log says so once per type and process, at warn, with the type alone (`skipping events of a type this board doesn't know`); the admin CLI says nothing. What those events recorded is lost to this build: the scheduler wakes nobody for them, and the Metrics view, the turn history, and the counters leave them out.
+- The server's `/api/events` and `/api/events/stream` read through that index, so they pass on only the types the server knows: it can't vouch for the shape of one it doesn't, and every client skips one anyway.
+- The web's stream (`followBoardEvents`) skips an event of a type the page doesn't know, as a page loaded before its server was upgraded receives, on the same connection. A known type's malformed event drops the connection as before, which resumes after the last event read.
+- BoardKit keeps an event's type a `String`, so an event a newer server adds reads as one that touches nothing (`staleKeys` gives none), and a frame that doesn't decode at all reads as a ping.
+
+Only a build with this rule skips: rolling back to a release from before it still fails on the newer types, which have to be taken out of the log first.
+
 ### YAML frontmatter turns unquoted timestamps into Date objects
 
 `IsoDateTimeSchema` in `shared` normalizes Dates back to ISO strings.

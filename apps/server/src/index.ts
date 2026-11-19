@@ -35,7 +35,7 @@ if (process.argv.includes("--help")) {
 
 const config = loadServerConfig(process.env);
 const log = pino({ level: config.logLevel });
-const board = await Board.open(config.dataDir);
+const board = await Board.open(config.dataDir, { log });
 const mcpUrl = `${config.publicUrl ?? SERVER_TOKEN}/mcp`;
 const turns = new TurnHub();
 // Timings are JSON in one variable, for example {"opsIntervalMs":60000}; unset keys keep their defaults.

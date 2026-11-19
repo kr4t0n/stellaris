@@ -116,7 +116,9 @@ export function runnerRoutes(
       };
       const detach = await hub.attach(runner, send, end);
       try {
-        // Headers go out with the first write, so the runner knows it is attached once this arrives.
+        // The headers went out as the answer started, a chunked answer's before any write, and the
+        // runner counted the stream open on them, so it may have stopped while `attach` wrote its
+        // record; `RunnerHub.close` waits for that write.
         await stream.write(": attached\n\n");
         while (!stream.aborted && !stream.closed && !ending.signal.aborted) {
           await flush();

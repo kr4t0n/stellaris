@@ -58,6 +58,13 @@ It runs with `residentIdleMs: 1_000`, so when more than a second passes between 
 
 Its body goes on running after Vitest gives up on it, so its cleanup races the test's own writes, may fail with `ENOTEMPTY`, and leaves the `stellaris-*` folder in the temp directory. Point `TMPDIR` at a folder of your own and delete it after the run.
 
+### A browser test that races one of the page's timers runs on the page's clock
+
+A real wait between two presses stretches under load. The red Remove takes no press for its first 500 ms, and `runners.spec.ts` pressed the bin twice 150 ms apart with `page.waitForTimeout`, which a loaded machine can stretch past 500 ms, so the second press would remove the runner. With that wait raised to 600 ms, standing in for the load, both of its tests failed. They now install Playwright's clock before the page loads (`page.clock.install()`), stop it once the page has loaded, and move it between the presses with `page.clock.runFor`. With 600 ms of real time added between the presses, they pass.
+
+- `pauseAt` refuses a time the clock has passed, and the page's clock runs on while the test asks, so `stopClock` in `runners.spec.ts` stops it a few seconds ahead of the page's own `Date.now()`.
+- A stopped clock fires no timer, and TanStack Query hands the board's answers to the view with `setTimeout(0)`, so stop it only once the page has loaded, and resume it (`page.clock.resume()`) before a step that waits for an answer to show. In a probe, `/runners` loaded on a stopped clock showed no heading after 3 s, its heading but none of its rows after a `runFor(10)`, and its three rows once resumed. A request leaves without a timer, so a press that sends one still reaches the fake board while the clock is stopped.
+
 ## Scheduler and server tests
 
 ### The scheduler test's fake runner records turns only when asked
@@ -77,6 +84,8 @@ With a concurrency cap of one, a leftover onboarding dispatch merges with a late
 ### A runner's disconnect is recorded after its stream closes, so stop the hub before deleting a society
 
 The server notices a closed stream asynchronously and then writes the runner's state and a `runner.changed` event. A test that stopped its runner and removed the data directory at once failed one run in three with `ENOTEMPTY` on `events/`; `RunnerHub.close` marks every stream closed and waits for the disconnects under way, and the test harness and the server's shutdown call it.
+
+A connection is written late too. The stream's answer is chunked, and `@hono/node-server` sends a chunked answer's headers before any write. So the runner counts its stream open, and its `start()` resolves, while `RunnerHub.attach` is still writing the runner's record. The enroll test in `runner.test.ts` started a runner, stopped it, and went on. Its cleanup's `rm` failed with `ENOTEMPTY` on the data directory itself about once in 60 CI runs, and in 40 of 200 repeats at a load of 10 to 12 on four cores. In each failure that write, its `rename` held about 100 ms by the disk, landed during the `rm` and created `events/` again. `close` now waits for the connections under way too, and the same 200 repeats passed.
 
 ### CI's account has no git identity
 

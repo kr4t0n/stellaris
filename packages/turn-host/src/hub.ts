@@ -183,6 +183,12 @@ export class RunnerHub implements TurnRunner {
   private readonly pending = new Map<string, Pending>();
   /** Disconnects being recorded, which `close` waits for. */
   private readonly detaching = new Set<Promise<void>>();
+  /**
+   * Connections being recorded, which `close` waits for too: the runner counts its stream open on
+   * the answer's headers, which leave before this is written, so it may stop, and the server with
+   * it, while the write is under way.
+   */
+  private readonly attaching = new Set<Promise<unknown>>();
   private readonly runnerListeners = new Set<(runner: Name) => void>();
   /** The project being moved, by slug: none of its turns is placed and nothing lands there until it ends. */
   private readonly moving = new Map<Name, Move>();
@@ -397,7 +403,11 @@ export class RunnerHub implements TurnRunner {
         );
       }
     }
-    await this.board.markRunner(name, { status: "connected" });
+    const connected = this.board.markRunner(name, { status: "connected" }).finally(() => {
+      this.attaching.delete(connected);
+    });
+    this.attaching.add(connected);
+    await connected;
     this.runnerChanged(name);
     return async () => {
       if (seat.send !== send) {
@@ -431,7 +441,8 @@ export class RunnerHub implements TurnRunner {
 
   /**
    * Lets every runner go, as the server stops: streams count as closed from here on, and the
-   * disconnects under way are recorded before this resolves.
+   * connections and disconnects under way are recorded before this resolves. A stream that closes
+   * after this writes nothing, since its seat no longer sends to it.
    */
   async close(): Promise<void> {
     for (const seat of this.seats.values()) {
@@ -445,7 +456,7 @@ export class RunnerHub implements TurnRunner {
         clearTimeout(timer);
       }
     }
-    await Promise.allSettled(this.detaching);
+    await Promise.allSettled([...this.attaching, ...this.detaching]);
   }
 
   /** A turn's steps, which show its job arrived as its receipt would. */

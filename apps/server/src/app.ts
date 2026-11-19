@@ -223,32 +223,41 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     c.json((await board.listAgents()).map(({ tokenHash: _hash, ...agent }) => agent)),
   );
   api.get("/members", async (c) => c.json(await board.listMembers()));
+  // A citizen's, a runner's, a skill's, or a role's name names a folder or a file of the board's,
+  // so it is parsed before anything reads one: a NUL or an encoded slash in it would reach the path.
+  const nameOf = (c: Context<Env>) => NameSchema.parse(c.req.param("name"));
   // A member's finished turns from the event log and each one's steps, its memory core, its own
   // skills, the conflict copies in its home, and the home's history, read only.
-  api.get("/agents/:name/turns", async (c) =>
-    c.json(await board.listTurns(c.req.param("name"), Number(c.req.query("limit") ?? "50"))),
-  );
+  api.get("/agents/:name/turns", async (c) => {
+    const name = nameOf(c);
+    await board.readAgent(name);
+    return c.json(await board.listTurns(name, Number(c.req.query("limit") ?? "50")));
+  });
   api.get("/agents/:name/turns/:turnId", async (c) =>
-    c.json(await board.readTranscript(c.req.param("name"), c.req.param("turnId"))),
+    c.json(await board.readTranscript(nameOf(c), c.req.param("turnId"))),
   );
   api.get("/agents/:name/memory", async (c) => {
-    await board.readAgent(c.req.param("name"));
-    return c.json({ body: await board.readMemoryCore(c.req.param("name")) });
+    const name = nameOf(c);
+    await board.readAgent(name);
+    return c.json({ body: await board.readMemoryCore(name) });
   });
   api.get("/agents/:name/skills", async (c) => {
-    await board.readAgent(c.req.param("name"));
-    return c.json(await board.listAgentSkills(c.req.param("name")));
+    const name = nameOf(c);
+    await board.readAgent(name);
+    return c.json(await board.listAgentSkills(name));
   });
   api.get("/agents/:name/conflicts", async (c) => {
-    await board.readAgent(c.req.param("name"));
-    return c.json(await board.listHomeConflicts(c.req.param("name")));
+    const name = nameOf(c);
+    await board.readAgent(name);
+    return c.json(await board.listHomeConflicts(name));
   });
   api.get("/agents/:name/history", async (c) => {
+    const name = nameOf(c);
     const limit = HistoryLimitSchema.parse(c.req.query("limit") ?? "30");
-    return c.json(await board.homeHistory(c.req.param("name"), limit));
+    return c.json(await board.homeHistory(name, limit));
   });
   api.get("/agents/:name/history/:commit", async (c) =>
-    c.json(await board.homeChange(c.req.param("name"), c.req.param("commit"))),
+    c.json(await board.homeChange(nameOf(c), c.req.param("commit"))),
   );
   api.get("/roles", async (c) => c.json(await board.listRoles()));
   api.get("/runners", async (c) => c.json(await board.listRunners()));
@@ -258,7 +267,7 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     if (c.get("actor").role !== USER_ROLE) {
       throw new BoardError("FORBIDDEN", "only the user reads a runner's quota");
     }
-    const runner = NameSchema.parse(c.req.param("name"));
+    const runner = nameOf(c);
     const cli = CliKindSchema.parse(c.req.param("cli"));
     if (quotas === undefined) {
       throw new RunnerAwayError("this server asks no runner for quotas");
@@ -272,7 +281,7 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   ] as const) {
     for (const path of [`/runners/:name/${verb}`, `/runners/:name/${verb}/:cli`]) {
       api.post(path, async (c) => {
-        const name = NameSchema.parse(c.req.param("name"));
+        const name = nameOf(c);
         const cli = c.req.param("cli");
         return c.json(
           await board.setRunnerPaused(c.get("actor"), name, {
@@ -286,7 +295,7 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   // The user renames a runner, with every record that names it, once nothing runs there; the hub,
   // when there is one, checks that and has the runner connect again under its new name.
   api.put("/runners/:name/name", async (c) => {
-    const from = NameSchema.parse(c.req.param("name"));
+    const from = nameOf(c);
     const body = RunnerRenameBodySchema.parse(await c.req.json());
     return c.json(
       deps.runners === undefined
@@ -298,7 +307,7 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   // and nothing runs there; the hub, when there is one, checks that it is paused or away too, and
   // lets go of it.
   api.delete("/runners/:name", async (c) => {
-    const name = NameSchema.parse(c.req.param("name"));
+    const name = nameOf(c);
     return c.json(
       deps.runners === undefined
         ? await board.removeRunner(c.get("actor"), name)
@@ -362,42 +371,44 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   api.get("/society/knowledge", async (c) => c.json(await board.listKnowledge(null)));
   api.get("/skills", async (c) => c.json(await board.listSocietySkills()));
   // A society skill's folder as it is published, with each file's text.
-  api.get("/skills/:name/files", async (c) =>
-    c.json(await board.readSocietySkillFiles(NameSchema.parse(c.req.param("name")))),
-  );
+  api.get("/skills/:name/files", async (c) => c.json(await board.readSocietySkillFiles(nameOf(c))));
 
   // Governance the user does directly: retirement, charters, channels.
   api.post("/agents/:name/retire", async (c) => {
+    const name = nameOf(c);
     const body = RetireBodySchema.parse(await c.req.json());
     const { tokenHash: _hash, ...agent } = await board.retireAgent(c.get("actor"), {
-      name: c.req.param("name"),
+      name,
       reason: body.reason,
     });
     return c.json(agent);
   });
   api.put("/agents/:name/model", async (c) => {
+    const name = nameOf(c);
     const body = ModelBodySchema.parse(await c.req.json());
     const { tokenHash: _hash, ...agent } = await board.setAgentModel(
       c.get("actor"),
-      c.req.param("name"),
+      name,
       body.model,
     );
     return c.json(agent);
   });
   api.put("/agents/:name/effort", async (c) => {
+    const name = nameOf(c);
     const body = EffortBodySchema.parse(await c.req.json());
     const { tokenHash: _hash, ...agent } = await board.setAgentEffort(
       c.get("actor"),
-      c.req.param("name"),
+      name,
       body.effort,
     );
     return c.json(agent);
   });
   api.put("/agents/:name/runner", async (c) => {
+    const name = nameOf(c);
     const body = HomeRunnerBodySchema.parse(await c.req.json());
     const { tokenHash: _hash, ...agent } = await board.setAgentRunner(
       c.get("actor"),
-      c.req.param("name"),
+      name,
       body.runner,
     );
     return c.json(agent);
@@ -419,7 +430,7 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   // CLI decides which models and effort levels exist: its pinned runner, else where its projects
   // live, else any runner with its CLI.
   api.get("/agents/:name/models", async (c) => {
-    const agent = await board.readAgent(c.req.param("name"));
+    const agent = await board.readAgent(nameOf(c));
     if (agent.cli === null) {
       throw new BoardError("INVALID_STATE", `${agent.name} takes no turns, so it has no models`);
     }
@@ -435,9 +446,10 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     return c.json(await models.list(agent.cli, prefer));
   });
   api.put("/roles/:name", async (c) => {
+    const name = nameOf(c);
     const charter = RoleCharterSchema.parse({
       ...z.record(z.string(), z.unknown()).parse(await c.req.json()),
-      name: c.req.param("name"),
+      name,
     });
     return c.json(await board.setRoleCharter(c.get("actor"), charter));
   });

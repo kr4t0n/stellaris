@@ -190,7 +190,7 @@ One long-running process, the board server, hosts the only writer of the data di
 - A browser test that checks the page while a request is on its way holds that request until the test lets it go, never for a fixed time ([holding an answer](./docs/internals/testing.md#the-fake-board)).
 - A browser test that presses again before one of the page's own timers fires moves the page's clock between the presses with `page.clock`, never waits a fixed time ([the page's clock](./docs/internals/testing.md#a-browser-test-that-races-one-of-the-pages-timers-runs-on-the-pages-clock)).
 - A test that imports another workspace package reads that package's `dist/`, so run `pnpm build` before testing a change another package's tests cover.
-- A wait for a turn on a test society's runner to reach its CLI passes `TURN_START_WAIT` (`apps/server/src/testing/harness.ts`), since the runner's git work before it outlasts Vitest's 1 s default under load; every other wait keeps the default ([the wait](./docs/internals/testing.md#a-wait-for-a-turn-to-start-takes-turn_start_wait)).
+- A wait for a turn on a test society's runner to reach its CLI passes `TURN_START_WAIT` (`apps/server/src/testing/harness.ts`), since the runner's git work before it outlasts Vitest's 1 s default under load; no other wait takes it ([the wait](./docs/internals/testing.md#a-wait-for-a-turn-to-start-takes-turn_start_wait)).
 
 ## Gotchas
 

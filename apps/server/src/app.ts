@@ -2,6 +2,7 @@ import { BoardError, isBoardError, type Actor, type Board } from "@stellaris/boa
 import { handleMcpRequest } from "@stellaris/board-mcp";
 import {
   BranchPathSchema,
+  ChannelRefSchema,
   CliKindSchema,
   EffortSchema,
   IMAGE_MEDIA_TYPES,
@@ -226,6 +227,8 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   // A citizen's, a runner's, a skill's, or a role's name names a folder or a file of the board's,
   // so it is parsed before anything reads one: a NUL or an encoded slash in it would reach the path.
   const nameOf = (c: Context<Env>) => NameSchema.parse(c.req.param("name"));
+  // A task's, a thread's, a proposal's, or an image's id names a file of the board's too.
+  const idOf = (c: Context<Env>) => UlidSchema.parse(c.req.param("id"));
   // A member's finished turns from the event log and each one's steps, its memory core, its own
   // skills, the conflict copies in its home, and the home's history, read only.
   api.get("/agents/:name/turns", async (c) => {
@@ -345,15 +348,13 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   api.get("/proposals", async (c) => c.json(await board.listProposals()));
   // Every cron, ended ones too; they are set, changed, and ended through their verbs.
   api.get("/crons", async (c) => c.json(await board.listCrons()));
-  api.get("/proposals/:id", async (c) => c.json(await board.readProposal(c.req.param("id"))));
+  api.get("/proposals/:id", async (c) => c.json(await board.readProposal(idOf(c))));
   // Where the messages that text names by id are, for the interface to link them.
   api.get("/messages", async (c) =>
     c.json(await board.findMessages(MessageIdsSchema.parse(c.req.query("ids") ?? ""))),
   );
   // A skill proposal's folder as the board took it from its proposer's home, with each file's text.
-  api.get("/proposals/:id/files", async (c) =>
-    c.json(await board.readSkillFiles(UlidSchema.parse(c.req.param("id")))),
-  );
+  api.get("/proposals/:id/files", async (c) => c.json(await board.readSkillFiles(idOf(c))));
   api.get("/signals", async (c) =>
     c.json(await board.listSignals(Number(c.req.query("limit") ?? "100"))),
   );
@@ -497,17 +498,17 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     );
   });
   api.get("/projects/:slug/files/:path{.+}", (c) => projectFile(c, c.req.param("path")));
-  api.get("/tasks/:id", async (c) => c.json((await board.findTask(c.req.param("id"))).task));
-  api.get("/tasks/:id/thread", async (c) => c.json(await board.listThread(c.req.param("id"))));
+  api.get("/tasks/:id", async (c) => c.json((await board.findTask(idOf(c))).task));
+  api.get("/tasks/:id/thread", async (c) => c.json(await board.listThread(idOf(c))));
   // What a task's work left: one path on its branch.
   const taskFile = async (c: Context<Env>, file: string) => {
-    const { task } = await board.findTask(UlidSchema.parse(c.req.param("id")));
+    const { task } = await board.findTask(idOf(c));
     return branchFile(c, task.project, `task/${task.id}`, file);
   };
   api.get("/tasks/:id/files", (c) => taskFile(c, ""));
   // What a task's branch changed since it left the default branch, file by file.
   api.get("/tasks/:id/changes", async (c) => {
-    const { task } = await board.findTask(UlidSchema.parse(c.req.param("id")));
+    const { task } = await board.findTask(idOf(c));
     if (deps.runners === undefined) {
       throw new BoardError("NOT_FOUND", "this board has no runners to read a task's branch from");
     }
@@ -515,7 +516,7 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   });
   // What a task's branch did to one file, counted as its changes are.
   api.get("/tasks/:id/diff/:path{.+}", async (c) => {
-    const { task } = await board.findTask(UlidSchema.parse(c.req.param("id")));
+    const { task } = await board.findTask(idOf(c));
     if (deps.runners === undefined) {
       throw new BoardError("NOT_FOUND", "this board has no runners to read a task's branch from");
     }
@@ -531,7 +532,7 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   // An image a citizen uploaded, as its bytes: it never changes, and only a holder of a token sees
   // it, so a browser keeps it privately for good, and never runs it as anything but an image.
   api.get("/images/:id", async (c) => {
-    const { type, bytes } = await board.readImage(UlidSchema.parse(c.req.param("id")));
+    const { type, bytes } = await board.readImage(idOf(c));
     return c.body(new Uint8Array(bytes), 200, {
       "content-type": IMAGE_MEDIA_TYPES[type],
       "cache-control": "private, max-age=31536000, immutable",
@@ -542,11 +543,14 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   api.get("/threads", async (c) => c.json(await board.listThreads()));
   api.get("/requests", async (c) => c.json(await board.listRequests()));
   api.get("/threads/:id", async (c) => {
-    const id = c.req.param("id");
+    const id = idOf(c);
     return c.json({ thread: await board.readThread(id), messages: await board.listThread(id) });
   });
   api.get("/channels", async (c) => c.json(await board.listChannels()));
-  api.get("/channels/:ref{.+}", async (c) => c.json(await board.listChannel(c.req.param("ref"))));
+  // A channel's reference names its folder, so it is parsed before the board reads one as well.
+  api.get("/channels/:ref{.+}", async (c) =>
+    c.json(await board.listChannel(ChannelRefSchema.parse(c.req.param("ref")))),
+  );
 
   // Board events: the durable log, as a page or as a stream.
   api.get("/events", async (c) => {

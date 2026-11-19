@@ -2050,6 +2050,23 @@ export async function fakeBoard(
     if (labChannels.some((each) => pathname === `/api/channels/lab/${each.name}`)) {
       return json(route, []);
     }
+    // The board parses a task's, a thread's, or a proposal's id and a channel's reference before
+    // it reads a file, and refuses one that isn't, as a typed address can hold.
+    const id = /^\/api\/(?:tasks|threads|proposals)\/([^/]+)(?:\/thread)?$/.exec(pathname)?.[1];
+    const ref = /^\/api\/channels\/(.+)$/.exec(pathname)?.[1];
+    if (id !== undefined && !/^[0-9A-HJKMNP-TV-Z]{26}$/.test(decodeURIComponent(id))) {
+      return json(route, { error: "VALIDATION", message: "expected a ULID" }, 400);
+    }
+    if (
+      ref !== undefined &&
+      !/^(?:[a-z0-9][a-z0-9-]{0,31}\/)?[a-z0-9][a-z0-9-]{0,31}$/.test(decodeURIComponent(ref))
+    ) {
+      return json(
+        route,
+        { error: "VALIDATION", message: "expected <channel> or <project>/<channel>" },
+        400,
+      );
+    }
     const ask = asks.get(pathname.slice("/api/threads/".length));
     if (pathname.startsWith("/api/threads/") && ask !== undefined) {
       return json(route, { thread: ask.thread, messages: ask.messages });

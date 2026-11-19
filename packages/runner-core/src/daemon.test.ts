@@ -143,7 +143,10 @@ describe("RunnerDaemon", () => {
     expect(server.hellos.slice(0, 4)).toEqual([200, 401, 401, 401]);
     expect(warnings.slice(0, 3)).toEqual(Array(3).fill("runner connection failed"));
     expect(await Promise.race([runner.removed.then(() => true), wait(0, false)])).toBe(false);
-    await runner.stop();
+    // A second stop, as a signal's during a removal's, waits for the one under way.
+    const stopping = runner.stop();
+    expect(runner.stop()).toBe(stopping);
+    await stopping;
   });
 
   // Inside the test process something always holds the event loop, so only a process of its own

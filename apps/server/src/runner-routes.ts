@@ -3,11 +3,13 @@ import path from "node:path";
 import {
   HeldWorkspacesSchema,
   FileReadSchema,
+  isSafeRelativePath,
   NameSchema,
   RunnerAnswerSchema,
   RunnerEnrollPollSchema,
   RunnerEnrollRequestSchema,
   RunnerHelloSchema,
+  RunnerSyncReportSchema,
   TurnEventsSchema,
   TurnOutcomeSchema,
   UlidSchema,
@@ -24,8 +26,10 @@ import {
   RUNNER_ANSWER_LIMIT_BYTES,
   RUNNER_BODY_LIMIT_BYTES,
 } from "./body-limit.js";
+import { boardStreamBody } from "./board-stream.js";
 import type { EnrollmentDesk } from "./enrollment.js";
 import { HomeGit } from "./home-git.js";
+import { liftDeadline } from "./serve.js";
 
 type RunnerEnv = { Variables: { runner: Name } };
 
@@ -90,20 +94,26 @@ export function runnerRoutes(
     return streamSSE(c, async (stream) => {
       const queue: RunnerMessage[] = [];
       let wake: (() => void) | null = null;
+      // Aborted when the hub ends the stream, as after a rename, so the runner connects again.
+      const ending = new AbortController();
       stream.onAbort(() => wake?.());
       const send = (message: RunnerMessage): boolean => {
-        if (stream.aborted || stream.closed) {
+        if (stream.aborted || stream.closed || ending.signal.aborted) {
           return false;
         }
         queue.push(message);
         wake?.();
         return true;
       };
-      const detach = await hub.attach(runner, send);
+      const end = (): void => {
+        ending.abort();
+        wake?.();
+      };
+      const detach = await hub.attach(runner, send, end);
       try {
         // Headers go out with the first write, so the runner knows it is attached once this arrives.
         await stream.write(": attached\n\n");
-        while (!stream.aborted && !stream.closed) {
+        while (!stream.aborted && !stream.closed && !ending.signal.aborted) {
           for (let message = queue.shift(); message !== undefined; message = queue.shift()) {
             await stream.writeSSE({ event: message.type, data: JSON.stringify(message) });
           }
@@ -160,10 +170,27 @@ export function runnerRoutes(
     return c.json({ ok: true });
   });
 
+  routes.post("/sync", body, async (c) => {
+    await hub.boardSync(c.get("runner"), RunnerSyncReportSchema.parse(await c.req.json()));
+    return c.json({ ok: true });
+  });
+
   routes.get("/board/manifest", async (c) => c.json({ files: await board.boardManifest() }));
   routes.post("/board/read", body, async (c) =>
     c.json({ files: await board.readBoardFiles(FileReadSchema.parse(await c.req.json()).paths) }),
   );
+  // The whole projection in one answer for a runner's first copy, from the path after `after` on,
+  // which takes as long as the link needs: a cut one is asked for again from where it stopped.
+  routes.get("/board/stream", (c) => {
+    const after = c.req.query("after");
+    if (after !== undefined && !isSafeRelativePath(after)) {
+      return c.json({ error: "VALIDATION", message: "after must be a relative path" }, 400);
+    }
+    liftDeadline(c.req.raw);
+    return new Response(boardStreamBody(board.boardStream(after ?? null)), {
+      headers: { "content-type": "application/gzip", "cache-control": "no-store" },
+    });
+  });
 
   // A runner reaches an agent's home only while it runs a turn of that agent.
   const home = new Hono<RunnerEnv>();

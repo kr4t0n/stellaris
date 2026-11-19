@@ -428,7 +428,7 @@ final class SnapshotTests: XCTestCase {
     }
   }
 
-  /// The plan and the charter opened from the bar: beside the thread from 640 points wide, and in
+  /// The plan and the charter opened from the strip: beside the thread from 640 points wide, and in
   /// a sheet at the narrower widths, a column of the inner display folded like a book among them.
   @MainActor func testThePlanAndTheCharterBesideTheThreadOrInASheet() async throws {
     let model = try await signedIn()
@@ -537,7 +537,7 @@ final class SnapshotTests: XCTestCase {
     }
   }
 
-  /// The Advance and Reject sheets, with what they say so far.
+  /// The Advance sheet and Decide's turned to Reject, with what they say so far.
   @MainActor func testTheAdvanceAndRejectSheets() async throws {
     let model = try await signedIn()
     model.advanceNotes[exportView] =

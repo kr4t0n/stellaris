@@ -30,6 +30,8 @@ import {
   ProjectSchema,
   ProposalFrontmatterSchema,
   RoleCharterSchema,
+  RunnerRemovedSchema,
+  RunnerRenamedSchema,
   RunnerSchema,
   RunningTurnSchema,
   SkillFileContentSchema,
@@ -424,9 +426,15 @@ export function createApi(token: string) {
         token,
         TopicSchema.array(),
       ),
-    sendMessage: (input: { channel?: string; thread_id?: string; body: string }) =>
-      invoke("post_message", token, input, MessageSchema),
-    openThread: (input: { channel: string; title: string }) =>
+    /** A post; sent again with its `idempotency_key`, as after a lost answer, it is stored once. */
+    sendMessage: (input: {
+      channel?: string;
+      thread_id?: string;
+      body: string;
+      idempotency_key?: string;
+    }) => invoke("post_message", token, input, MessageSchema),
+    /** A new thread; opened again with its `idempotency_key`, as after a lost answer, it is opened once. */
+    openThread: (input: { channel: string; title: string; idempotency_key?: string }) =>
       invoke("open_thread", token, input, ThreadRecordSchema),
     closeThread: (input: { thread_id: string; summary: string }) =>
       invoke("close_thread", token, input, MessageSchema),
@@ -494,6 +502,24 @@ export function createApi(token: string) {
         {},
         RunnerSchema,
       ),
+    /**
+     * Renames a runner, and every project, pin, and session that names it, once nothing runs
+     * there; the board says what holds it otherwise.
+     */
+    renameRunner: (runner: string, name: string) =>
+      write(
+        "PUT",
+        `/api/runners/${encodeURIComponent(runner)}/name`,
+        token,
+        { name },
+        RunnerRenamedSchema,
+      ),
+    /**
+     * Removes a runner, unpinning its citizens and clearing its sessions, once no project lives
+     * there, nothing runs there, and it is paused or away; the board says what holds it otherwise.
+     */
+    removeRunner: (runner: string) =>
+      write("DELETE", `/api/runners/${encodeURIComponent(runner)}`, token, {}, RunnerRemovedSchema),
     /** Runners that asked to join and wait for the user's approval, newest first. */
     enrollments: () => get("/api/enrollments", token, PendingEnrollmentSchema.array()),
     /** Registers a waiting runner under `name`; the runner picks up its token on its next poll. */

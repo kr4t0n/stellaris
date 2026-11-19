@@ -22,6 +22,7 @@ import {
   capOutput,
   EffortOptionSchema,
   ModelOptionSchema,
+  RUNNER_TOKEN_ENV,
   type AgentEvent,
   type CliQuota,
   type EffortOption,
@@ -513,6 +514,13 @@ function modelOf(raw: unknown): ModelOption | null {
   return parsed.success ? parsed.data : null;
 }
 
+/** The runner's environment for the app server, without the runner's own token, which no turn is given. */
+function inheritedEnv(): Record<string, string | undefined> {
+  return Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => key !== RUNNER_TOKEN_ENV),
+  );
+}
+
 /**
  * Runs `ask` against an app server started only to answer it, initialized and stopped after: it
  * opens no thread, so it takes no turn.
@@ -526,7 +534,7 @@ async function askAppServer<T>(
     args.push("-c", override);
   }
   const spawn = options.spawn ?? defaultSpawnAppServer(options.codexPath ?? "codex");
-  const child = spawn(args, { cwd: os.tmpdir(), env: { ...process.env, ...options.env } });
+  const child = spawn(args, { cwd: os.tmpdir(), env: { ...inheritedEnv(), ...options.env } });
   const client = new JsonRpcClient(child, {
     notification: () => undefined,
     stderr: (line) => options.stderr?.(line),
@@ -774,7 +782,7 @@ export class CodexAppServerSession implements ResidentSession {
       args.push("-c", override);
     }
     const env: Record<string, string | undefined> = {
-      ...process.env,
+      ...inheritedEnv(),
       ...options.env,
       ...CLI_ENV,
       [AGENT_TOKEN_ENV]: start.mcp.token,

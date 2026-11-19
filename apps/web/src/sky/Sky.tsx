@@ -16,17 +16,21 @@ interface SkyProps {
   /** What is hovered: a star's id, or `task:<id>` for a task's mark. */
   readonly hovered: string | null;
   readonly onHover: (id: string | null) => void;
-  /** Screen space covered by islands at each side; the sky fits between them. */
+  /** Screen space the open board covers at each side; the sky fits the room it leaves. */
   readonly insets: Insets;
   /** The anchor whose sphere is drawn brighter, the project the board has open. */
   readonly focus: string | null;
   readonly onSelectAnchor: (anchor: string) => void;
   readonly onSelectStar: (id: string) => void;
   readonly onSelectTask: (id: string) => void;
+  /** A click on the sky that hits nothing: no star, task or sphere, and no drag. */
+  readonly onSelectSky: () => void;
   /** The live turn stream, whose tool calls flicker stars and whose posts rise from them. */
   readonly live: LiveStore;
   /** Shown beside what is hovered and moved with it every frame. */
   readonly card: ReactNode;
+  /** Whether the camera's buttons show: not where the open board leaves them too little sky. */
+  readonly camera?: boolean | undefined;
 }
 
 /**
@@ -83,8 +87,10 @@ export function Sky({
   onSelectAnchor,
   onSelectStar,
   onSelectTask,
+  onSelectSky,
   live,
   card,
+  camera = true,
 }: SkyProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -253,12 +259,15 @@ export function Sky({
             onSelectTask(mark);
           } else if (sphere !== null) {
             onSelectAnchor(sphere);
+          } else {
+            onSelectSky();
           }
         }}
       />
       <fieldset
         className="card absolute bottom-4 flex flex-col gap-0.5 p-1"
         style={{ right: insets.right + 16 }}
+        hidden={!camera}
       >
         <legend className="sr-only">Camera</legend>
         <button

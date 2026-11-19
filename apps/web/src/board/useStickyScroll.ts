@@ -11,7 +11,9 @@ function distanceToEnd(element: HTMLElement): number {
  * Keeps a scrolling list at its newest item while the reader is there, as chat does, and leaves it
  * alone once the reader scrolls up to read history. With `stick` off, as while a view shows the
  * message a link named, the list starts where the reader is taken instead. With `follow` off, as
- * in a task's view, whose thread comes after its plan, the list never moves by itself.
+ * in a proposal's view, whose thread comes after its charter, the list never moves by itself. A
+ * reader at the end stays there when the list's own box changes, as when the task view's top opens
+ * a row or the composer grows a line.
  *
  * `away` says the reader is away from the end, and `jump` takes them back, pinning the list there
  * again where it follows. `unseen` counts the `ids` newer than the newest the reader was at the end
@@ -32,6 +34,7 @@ export function useStickyScroll({
   // until the reader scrolls back up.
   const jumping = useRef<number | null>(null);
   const lastTop = useRef(0);
+  const lastHeight = useRef(0);
   const [away, setAway] = useState(false);
   const newest = ids.at(-1) ?? null;
   const [seen, setSeen] = useState<string | null>(null);
@@ -60,6 +63,22 @@ export function useStickyScroll({
       }
     }
   });
+  // The list's own box can change under a reader at the end, as when something above or below it
+  // opens or the composer grows a line: the end stays in view.
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (element === null || typeof ResizeObserver === "undefined") {
+      return undefined;
+    }
+    const observer = new ResizeObserver(() => {
+      lastHeight.current = element.clientHeight;
+      if (atEnd.current && follow && jumping.current === null) {
+        element.scrollTop = element.scrollHeight;
+      }
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [follow]);
   // Once new items are in: whether they reach past the end where the reader is, as when a link took
   // them to a message, and the newest the reader has seen, which is everything the list opened with.
   useLayoutEffect(() => {
@@ -74,6 +93,14 @@ export function useStickyScroll({
   const onScroll = (): void => {
     const element = ref.current;
     if (element === null) {
+      return;
+    }
+    // A scroll that comes with a new height is the browser's, as scroll anchoring moves the list
+    // when its box shrinks, before the observer above hears of it: a reader at the end stays there.
+    const resized = element.clientHeight !== lastHeight.current;
+    lastHeight.current = element.clientHeight;
+    if (resized && atEnd.current && follow && jumping.current === null) {
+      element.scrollTop = element.scrollHeight;
       return;
     }
     const near = distanceToEnd(element) < NEAR_END;

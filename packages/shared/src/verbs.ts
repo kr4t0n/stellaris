@@ -13,7 +13,7 @@ import {
 } from "./board.js";
 import { CronExpressionSchema, TimeZoneSchema } from "./crons.js";
 import { ImagePathSchema, ImageRefSchema } from "./images.js";
-import { ChannelRefSchema, NameSchema, UlidSchema } from "./ids.js";
+import { ChannelRefSchema, IdempotencyKeySchema, NameSchema, UlidSchema } from "./ids.js";
 import type { VerbName } from "./roles.js";
 
 /** A moment with its offset, such as 2026-10-12T09:00:00+08:00 or 2026-10-12T01:00:00Z. */
@@ -33,6 +33,11 @@ export const VerbInputs = {
     channel: ChannelRefSchema.optional(),
     body: z.string().min(1),
     thread_id: UlidSchema.optional(),
+    /**
+     * Sent again with the same key, as after an answer that never arrived, the post is stored once:
+     * the board answers with the message it stored, among the author's latest posts there.
+     */
+    idempotency_key: IdempotencyKeySchema.optional(),
   }),
   read_inbox: z.object({
     since_cursor: UlidSchema.nullable().optional(),
@@ -49,6 +54,11 @@ export const VerbInputs = {
   open_thread: z.object({
     channel: ChannelRefSchema,
     title: z.string().min(1).max(200),
+    /**
+     * Sent again with the same key, as after an answer that never arrived, the thread is opened
+     * once: the board answers with the thread it opened, among the newest threads of the scope.
+     */
+    idempotency_key: IdempotencyKeySchema.optional(),
   }),
   close_thread: z.object({ thread_id: UlidSchema, summary: z.string().min(1) }),
   create_task: z.object({

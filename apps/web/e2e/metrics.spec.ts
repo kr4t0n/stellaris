@@ -1,16 +1,21 @@
 import { expect, test } from "@playwright/test";
 import { fakeBoard, STAGE_TASK } from "./board.js";
 
-test("the metrics open from the top bar, and the window is part of the address", async ({
+test("the metrics open from the status tabs, and the window is part of the address", async ({
   page,
 }) => {
   await fakeBoard(page);
-  await page.goto("/");
-  const button = page.getByRole("button", { name: "Metrics" });
-  await button.click();
+  await page.goto("/citizens");
+  const tab = page.getByRole("navigation", { name: "Status" }).getByRole("link", {
+    name: "Metrics",
+  });
+  await tab.click();
   await expect(page).toHaveURL(/\/metrics$/);
-  await expect(button).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("link", { name: "metrics" })).toHaveCount(0);
+  await expect(tab).toHaveAttribute("aria-current", "page");
+  // The navigator has no row of its own for them: the status row and its tabs lead here.
+  await expect(
+    page.getByRole("region", { name: "Board navigator" }).getByRole("link", { name: "metrics" }),
+  ).toHaveCount(0);
   const view = page.getByRole("region", { name: "Board content" });
   await expect(view.getByRole("heading", { name: "Metrics" })).toBeVisible();
 
@@ -61,7 +66,7 @@ test("the metrics open from the top bar, and the window is part of the address",
   await expect(view).toContainText("5 decisions, about 2.5 a day");
   await page.reload();
   await expect(view).toContainText("5 decisions");
-  await button.click();
+  await page.keyboard.press("Escape");
   await expect(page).toHaveURL(/\/$/);
 });
 

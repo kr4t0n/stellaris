@@ -7,6 +7,7 @@ import {
   runnerState,
   sameCode,
   suggestRunnerName,
+  syncLine,
 } from "./runners.js";
 
 describe("suggestRunnerName", () => {
@@ -154,5 +155,81 @@ describe("runnerState", () => {
       detail: "away, last seen 1 hour ago; claude held by its limit for 1h 0m",
       tone: "text-amber-300",
     });
+  });
+});
+
+describe("a runner's board sync", () => {
+  const now = Date.parse("2026-10-13T12:00:00.000Z");
+  const sync = {
+    phase: "copying" as const,
+    files: 6_200,
+    totalFiles: 15_152,
+    bytes: 11_000_000,
+    totalBytes: 27_000_000,
+    attempt: 1,
+    startedAt: "2026-10-13T11:58:00.000Z",
+    updatedAt: "2026-10-13T11:59:59.000Z",
+  };
+  const studio: Runner = RunnerSchema.parse({
+    name: "studio",
+    os: "darwin",
+    clis: ["claude"],
+    capabilities: [],
+    status: "connected",
+    sync,
+  });
+
+  it("shows how far it has come under the row, and its own state beside the user's pause", () => {
+    expect(syncLine(studio, now)).toEqual({
+      label: "Syncing board 6,200 / 15,152 files",
+      fraction: 6_200 / 15_152,
+      error: null,
+    });
+    expect(runnerState(studio, now)).toEqual({
+      label: "syncing",
+      detail: "connected; syncing its board copy since 2 minutes ago",
+      tone: "text-fg-secondary",
+    });
+    const paused = { ...studio, paused: { at: "2026-10-13T11:00:00.000Z", by: "user" } };
+    expect(runnerState(paused, now).label).toBe("paused · syncing");
+    expect(runnerState(paused, now).tone).toBe("text-amber-300");
+    // Before the runner first reports, and while it lists the server's files, there is no count.
+    expect(
+      syncLine(
+        { ...studio, sync: { ...sync, phase: "starting", files: 0, totalFiles: null } },
+        now,
+      ),
+    ).toEqual({ label: "Syncing board", fraction: null, error: null });
+  });
+
+  it("says after a failed try which it was, when the next is, and why", () => {
+    const failing: Runner = {
+      ...studio,
+      sync: {
+        ...sync,
+        attempt: 3,
+        error: "fetch failed, caused by SocketError: other side closed",
+        nextTryAt: "2026-10-13T12:00:12.000Z",
+      },
+    };
+    expect(syncLine(failing, now)).toEqual({
+      label: "Syncing board 6,200 / 15,152 files · try 3 failed, next in 12s",
+      fraction: 6_200 / 15_152,
+      error: "fetch failed, caused by SocketError: other side closed",
+    });
+    expect(syncLine(failing, now + 13_000)?.label).toBe(
+      "Syncing board 6,200 / 15,152 files · try 3 failed, trying again",
+    );
+    expect(runnerState(failing, now).tone).toBe("text-amber-300");
+  });
+
+  it("shows nothing once the sync is done or the runner is away", () => {
+    for (const settled of [
+      { ...studio, sync: { ...sync, phase: "done" as const, finishedAt: sync.updatedAt } },
+      { ...studio, status: "disconnected" as const },
+    ]) {
+      expect(syncLine(settled, now)).toBeNull();
+      expect(runnerState(settled, now).label).not.toContain("syncing");
+    }
   });
 });

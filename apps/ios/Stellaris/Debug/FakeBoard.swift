@@ -338,6 +338,8 @@
       let body: String
       /// What a verb recorded on the post, as JSON.
       var step: Data? = nil
+      /// The key it was posted with.
+      var key: String? = nil
     }
 
     private struct Opened: Sendable {
@@ -345,6 +347,8 @@
       let channel: String
       let title: String
       let openedAt: String
+      /// The key it was opened with.
+      var key: String? = nil
     }
 
     private struct Written: Sendable {
@@ -426,20 +430,27 @@
       }
     }
 
-    /// Takes a post or a new thread, as the user, and answers as the board does.
+    /// Takes a post or a new thread, as the user, and answers as the board does: one sent again
+    /// with its key, in the same place, is answered with what was stored and stores nothing.
     private static func write(_ path: String, request: URLRequest, token: String) -> (Int, Data) {
       let input =
         bodyData(of: request).flatMap { try? JSONSerialization.jsonObject(with: $0) }
         as? [String: Any] ?? [:]
+      let key = input["idempotency_key"] as? String
       let now = Date.ISO8601FormatStyle(includingFractionalSeconds: true).format(.now)
       return written.withLock { written in
         var mine = written[token] ?? Written()
         defer { written[token] = mine }
         if path == "/api/verbs/open_thread" {
+          let channel = input["channel"] as? String ?? "general"
+          if let key,
+            let opened = mine.threads.first(where: { $0.key == key && $0.channel == channel })
+          {
+            return (200, json(threadRecord(opened)))
+          }
           let thread = Opened(
             id: String(format: "00000000000000000000THR%03d", mine.threads.count + 1),
-            channel: input["channel"] as? String ?? "general",
-            title: input["title"] as? String ?? "", openedAt: now)
+            channel: channel, title: input["title"] as? String ?? "", openedAt: now, key: key)
           mine.threads.append(thread)
           return (200, json(threadRecord(thread)))
         }
@@ -449,9 +460,16 @@
             mine.threads.first { $0.id == id }?.channel
               ?? (id == samples ? "general" : capturedChannel(of: id))
           } ?? input["channel"] as? String ?? "general"
+        if let key,
+          let posted = mine.posts.first(where: {
+            $0.key == key && $0.channel == channel && $0.thread == thread
+          })
+        {
+          return (200, json(record(posted)))
+        }
         let post = Post(
           id: String(format: "00000000000000000000PST%03d", mine.posts.count + 1),
-          channel: channel, thread: thread, ts: now, body: input["body"] as? String ?? "")
+          channel: channel, thread: thread, ts: now, body: input["body"] as? String ?? "", key: key)
         mine.posts.append(post)
         return (200, json(record(post)))
       }
@@ -680,14 +698,17 @@
       ]
       message["thread"] = post.thread
       message["step"] = post.step.flatMap(object)
+      message["idempotencyKey"] = post.key
       return message
     }
 
     private static func threadRecord(_ thread: Opened) -> [String: Any] {
-      [
+      var record: [String: Any] = [
         "id": thread.id, "channel": thread.channel, "title": thread.title, "state": "open",
         "openedBy": "user", "openedAt": thread.openedAt, "body": "",
       ]
+      record["idempotencyKey"] = thread.key
+      return record
     }
 
     // MARK: Threads

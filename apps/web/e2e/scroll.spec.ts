@@ -143,7 +143,21 @@ function fakeTask(id: string, blocker: string, title: string) {
   };
 }
 
-/** A task's or a proposal's view, opened at its top, with nothing counted as new. */
+/** Goes to another task through the open task's plan, which links what it is blocked by. */
+async function followBlocker(page: Page, task: string): Promise<void> {
+  const top = page.getByRole("region", { name: "Where the task stands" });
+  await top.getByRole("button", { name: /^Plan/ }).click();
+  await top.getByRole("region", { name: "Plan" }).locator(`a[href="/task/${task}"]`).click();
+}
+
+/** A task's view, opened at its thread's newest message, with nothing counted as new. */
+async function opensAtEnd(page: Page, newest: string): Promise<void> {
+  await expect(page.getByText(newest)).toBeInViewport();
+  await expect(jumpButton(page)).toHaveCount(0);
+  expect(await distanceToEnd(taskList(page))).toBeLessThanOrEqual(1);
+}
+
+/** A proposal's view, opened at its top, with nothing counted as new. */
 async function opensAfresh(page: Page, newest: string): Promise<void> {
   await expect(page.getByText(newest)).toBeAttached();
   await expect(jumpButton(page)).toHaveAccessibleName("Jump to latest");
@@ -405,39 +419,68 @@ test("a long channel gets the same jump", async ({ page }) => {
   await expect(jumpButton(page)).toHaveCount(0);
 });
 
-test("a task's view opens at its plan, and the jump goes to its thread's newest message without following what comes after", async ({
+const TASK_PLACE: Place = {
+  id: STAGE_TASK,
+  channel: "lab/general",
+  subject: { kind: "task", id: STAGE_TASK },
+};
+
+/** The scrolling list a task's thread is in, under the task's top. */
+function taskList(page: Page): Locator {
+  return page
+    .getByRole("region", { name: "Thread" })
+    .locator("xpath=ancestor::div[contains(@class, 'overflow-y-auto')][1]");
+}
+
+test("a task's view opens at its thread's newest message and follows what comes after, as a thread does", async ({
   page,
 }) => {
-  const thread = await longThread(page, 40, {
-    id: STAGE_TASK,
-    channel: "lab/general",
-    subject: { kind: "task", id: STAGE_TASK },
-  });
+  const thread = await longThread(page, 40, TASK_PLACE);
   await page.goto(`/task/${STAGE_TASK}`);
-  await expect(page.getByText("Message 40:")).toBeAttached();
-  const list = listOf(page).locator("xpath=ancestor::div[contains(@class, 'overflow-y-auto')][1]");
-  expect(await list.evaluate((element) => element.scrollTop)).toBe(0);
-  await expect(page.getByRole("heading", { name: "Plan" })).toBeInViewport();
-  await expect(jumpButton(page)).toBeVisible();
-
-  // From the keyboard, focus lands on the thread's newest message, not on the section around it.
-  await page.getByRole("textbox", { name: "Write in the task's thread" }).focus();
-  await page.keyboard.press("Shift+Tab");
-  await expect(jumpButton(page)).toBeFocused();
-  await page.keyboard.press("Enter");
-  await expect.poll(() => distanceToEnd(list)).toBeLessThanOrEqual(1);
-  await expect(page.locator("article").filter({ hasText: "Message 40:" })).toBeFocused();
+  const list = taskList(page);
   await expect(page.getByText("Message 40:")).toBeInViewport();
+  expect(await distanceToEnd(list)).toBeLessThanOrEqual(1);
   await expect(jumpButton(page)).toHaveCount(0);
 
-  // The view does not follow: what arrives next waits below, counted.
+  // What arrives next comes into view.
   thread.postMore(3);
-  await expect(page.getByText("Message 43:")).toBeAttached();
-  await expect(jumpButton(page)).toHaveAccessibleName("Jump to latest, 3 new");
+  await expect(page.getByText("Message 43:")).toBeInViewport();
+  await expect.poll(() => distanceToEnd(list)).toBeLessThanOrEqual(1);
+
+  // Scrolled up, the reader stays put, and the jump counts what arrives and takes them back.
+  await scrollToDistance(list, 600);
+  await expect(jumpButton(page)).toBeVisible();
+  thread.postMore(2);
+  await expect(page.getByText("Message 45:")).toBeAttached();
+  await expect(jumpButton(page)).toHaveAccessibleName("Jump to latest, 2 new");
   expect(await distanceToEnd(list)).toBeGreaterThan(80);
   await jumpButton(page).click();
   await expect.poll(() => distanceToEnd(list)).toBeLessThanOrEqual(1);
-  await expect(page.getByText("Message 43:")).toBeInViewport();
+  await expect(page.getByText("Message 45:")).toBeInViewport();
+});
+
+test("a task's thread stays at its end as the box grows and shrinks and the rows above it open, at the narrowest view", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => localStorage.setItem("stellaris.contentWidth", "420"));
+  await longThread(page, 40, TASK_PLACE);
+  await page.goto(`/task/${STAGE_TASK}`);
+  const list = taskList(page);
+  await expect(page.getByText("Message 40:")).toBeInViewport();
+  const box = page.getByRole("textbox", { name: "Write in the task's thread" });
+  await box.fill(
+    "Go with the regular expression. Keep the fifteen-row table as the test, row by row.",
+  );
+  await expect.poll(() => distanceToEnd(list)).toBeLessThanOrEqual(1);
+  await box.fill("");
+  await expect.poll(() => distanceToEnd(list)).toBeLessThanOrEqual(1);
+  const top = page.getByRole("region", { name: "Where the task stands" });
+  for (const row of [/^Plan/, /^Pull request/, /^Brief/, /^Files/]) {
+    await top.getByRole("button", { name: row }).click();
+    await expect.poll(() => distanceToEnd(list)).toBeLessThanOrEqual(1);
+  }
+  await expect(page.getByText("Message 40:")).toBeInViewport();
 });
 
 test("a proposal's view gets the same jump to its thread's newest message", async ({ page }) => {
@@ -491,7 +534,7 @@ test("scrolling back up as the jump starts lets go of it, and what arrives next 
   expect(await list.evaluate((element) => element.scrollTop)).toBe(settled);
 });
 
-test("going from one task to another already read starts the count and the place afresh", async ({
+test("going from one task to another already read opens each at its own newest message, nothing counted", async ({
   page,
 }) => {
   const other = "01M3Q2BBBBBBBBBBBBBBBBBBB1";
@@ -531,16 +574,16 @@ test("going from one task to another already read starts the count and the place
   await serveThread(page, first, 1, "the board");
   await serveThread(page, second, 101, "the board");
   await page.goto(`/task/${other}`);
-  await opensAfresh(page, "Message 140:");
-  await page.locator(`a[href="/task/${STAGE_TASK}"]`).first().click();
-  await opensAfresh(page, "Message 40:");
+  await opensAtEnd(page, "Message 140:");
+  await followBlocker(page, STAGE_TASK);
+  await opensAtEnd(page, "Message 40:");
   // Read before, so the view goes straight to it without a pane in between.
-  await page.locator(`a[href="/task/${other}"]`).first().click();
-  await opensAfresh(page, "Message 140:");
+  await followBlocker(page, other);
+  await opensAtEnd(page, "Message 140:");
   await page.goBack();
-  await opensAfresh(page, "Message 40:");
+  await opensAtEnd(page, "Message 40:");
   await page.goForward();
-  await opensAfresh(page, "Message 140:");
+  await opensAtEnd(page, "Message 140:");
 });
 
 test("going from one proposal to another already read starts the count afresh", async ({

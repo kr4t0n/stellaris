@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { Board, FAILURE_REASONS } from "@stellaris/board-core";
+import { Board, FAILURE_REASONS, type TurnInFlight } from "@stellaris/board-core";
 import type { TranscriptEntry, TurnRecord } from "@stellaris/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMetricsApp, PROMETHEUS_CONTENT_TYPE, prometheusText } from "./prometheus.js";
@@ -14,6 +14,7 @@ const USER = { name: "user", role: "user" } as const;
 const FAMILIES = [
   ["stellaris_turn_tokens_total", "counter"],
   ["stellaris_turns_total", "counter"],
+  ["stellaris_turns_running", "gauge"],
   ["stellaris_turns_idle_total", "counter"],
   ["stellaris_turns_failed_total", "counter"],
   ["stellaris_task_sendbacks_total", "counter"],
@@ -219,11 +220,15 @@ describe("Prometheus's turn counters", () => {
   let dir: string;
   let board: Board;
   let clock: Date;
+  /** The turns in flight the board watches, as the server's turn host gives them. */
+  let inFlight: TurnInFlight[];
 
   beforeEach(async () => {
     dir = await mkdtemp(path.join(os.tmpdir(), "stellaris-prom-"));
     clock = new Date("2026-10-13T09:00:00.000Z");
+    inFlight = [];
     board = (await Board.init(dir, { name: "prom" }, { now: () => clock })).board;
+    board.watchTurns(() => inFlight);
     await board.addProject(USER, { slug: "demo", channels: ["general"] });
     await addWorkRoles(board);
     await board.addAgent(USER, {
@@ -373,11 +378,17 @@ describe("Prometheus's turn counters", () => {
       expect(tokens?.help).toMatch(/^Tokens finished turns used/);
       expect(turns?.help).toMatch(/^Finished turns/);
       expect(tokens?.samples).toContainEqual({
-        labels: { agent: "eng-1", cli: "claude", model: "claude-opus-5-5", kind: "cache_read" },
+        labels: {
+          project: "demo",
+          agent: "eng-1",
+          cli: "claude",
+          model: "claude-opus-5-5",
+          kind: "cache_read",
+        },
         value: 56_000,
       });
       expect(tokens?.samples).toContainEqual({
-        labels: { agent: "eng-2", cli: "codex", model: "gpt-6", kind: "input" },
+        labels: { project: "demo", agent: "eng-2", cli: "codex", model: "gpt-6", kind: "input" },
         value: 900,
       });
       expect(tokens?.samples).toHaveLength(8);
@@ -385,6 +396,13 @@ describe("Prometheus's turn counters", () => {
         { labels: { agent: "eng-1", outcome: "completed", trigger: "stage" }, value: 1 },
         { labels: { agent: "eng-2", outcome: "completed", trigger: "stage" }, value: 1 },
         { labels: { agent: "eng-2", outcome: "failed", trigger: "stage" }, value: 1 },
+      ]);
+      const running = families.get("stellaris_turns_running");
+      expect(running?.help).toMatch(/^Turns running now/);
+      // Every turn has ended, and each project and citizen that ran one keeps its series at 0.
+      expect(running?.samples).toEqual([
+        { labels: { project: "demo", agent: "eng-1" }, value: 0 },
+        { labels: { project: "demo", agent: "eng-2" }, value: 0 },
       ]);
       expect(families.get("stellaris_turns_idle_total")?.samples).toEqual([
         { labels: { agent: "eng-1", trigger: "stage" }, value: 1 },
@@ -427,9 +445,48 @@ describe("Prometheus's turn counters", () => {
         { labels: { agent: "eng-1", outcome: "completed", trigger: "stage" }, value: 2 },
       ]);
       expect(families.get("stellaris_turn_tokens_total")?.samples).toContainEqual({
-        labels: { agent: "eng-1", cli: "claude", model: "claude-opus-5-5", kind: "input" },
+        labels: {
+          project: "demo",
+          agent: "eng-1",
+          cli: "claude",
+          model: "claude-opus-5-5",
+          kind: "input",
+        },
         value: 11,
       });
+    } finally {
+      metrics.close();
+    }
+  });
+
+  it("serves the turns in flight by project and citizen at each scrape, never a start with no end", async () => {
+    await turn("eng-1", {});
+    // A start whose end was never logged, as a server stopped during the turn leaves it.
+    await start("eng-2", 1, { project: "society", place: "demo" });
+    const metrics = await serve();
+    try {
+      const running = async () =>
+        parseExposition(await (await metrics.scrape()).text()).get("stellaris_turns_running")
+          ?.samples;
+      expect(await running()).toEqual([
+        { labels: { project: "demo", agent: "eng-1" }, value: 0 },
+        { labels: { project: "society", agent: "eng-2" }, value: 0 },
+      ]);
+      // eng-2 is asked in demo's channels while the scrape reads: a society-scope turn.
+      inFlight = [
+        { agent: "eng-1", scope: "demo" },
+        { agent: "eng-1", scope: "demo", thread: "01ARZ3NDEKTSV4RRFFQ69G5FAV" },
+        { agent: "eng-2", scope: "society", place: "demo" },
+      ];
+      expect(await running()).toEqual([
+        { labels: { project: "demo", agent: "eng-1" }, value: 2 },
+        { labels: { project: "society", agent: "eng-2" }, value: 1 },
+      ]);
+      inFlight = [];
+      expect(await running()).toEqual([
+        { labels: { project: "demo", agent: "eng-1" }, value: 0 },
+        { labels: { project: "society", agent: "eng-2" }, value: 0 },
+      ]);
     } finally {
       metrics.close();
     }
@@ -571,8 +628,18 @@ describe("Prometheus's turn counters", () => {
   it("escapes what a label's value holds, and serves every counter before any turn", () => {
     const awkward = 'a "quoted" model\\with\na newline';
     const text = prometheusText({
-      tokens: [{ agent: "eng-1", cli: "claude", model: awkward, kind: "input", tokens: 5 }],
+      tokens: [
+        {
+          project: awkward,
+          agent: "eng-1",
+          cli: "claude",
+          model: awkward,
+          kind: "input",
+          tokens: 5,
+        },
+      ],
       turns: [{ agent: "eng-1", outcome: "completed", trigger: awkward, turns: 1 }],
+      running: [{ project: awkward, agent: awkward, turns: 2 }],
       idle: [{ agent: "eng-1", trigger: awkward, turns: 1 }],
       failed: [{ agent: "eng-1", cli: "claude", reason: "other", turns: 1 }],
       sendBacks: [{ project: "demo", by: awkward, sendBacks: 1 }],
@@ -587,7 +654,13 @@ describe("Prometheus's turn counters", () => {
       mentions: [{ agent: awkward, waiting: 1, unanswered: 2 }],
     });
     const families = parseExposition(text);
-    expect(families.get("stellaris_turn_tokens_total")?.samples[0]?.labels["model"]).toBe(awkward);
+    expect(families.get("stellaris_turn_tokens_total")?.samples[0]?.labels).toMatchObject({
+      project: awkward,
+      model: awkward,
+    });
+    expect(families.get("stellaris_turns_running")?.samples).toEqual([
+      { labels: { project: awkward, agent: awkward }, value: 2 },
+    ]);
     expect(families.get("stellaris_turns_total")?.samples[0]?.labels["trigger"]).toBe(awkward);
     expect(families.get("stellaris_turns_idle_total")?.samples[0]?.labels["trigger"]).toBe(awkward);
     expect(families.get("stellaris_task_sendbacks_total")?.samples[0]?.labels["by"]).toBe(awkward);
@@ -609,6 +682,7 @@ describe("Prometheus's turn counters", () => {
       prometheusText({
         tokens: [],
         turns: [],
+        running: [],
         idle: [],
         failed: [],
         sendBacks: [],

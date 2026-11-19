@@ -6,7 +6,9 @@ export const ISLAND_SURFACE =
 
 /**
  * A floating island: a rounded panel inset from the window's edges and floating over the sky,
- * never docked flush against an edge. The caller places it.
+ * never docked flush against an edge. The caller places it. A `bare` one is a column of a larger
+ * island instead, with no surface or place of its own; the board switches its islands between the
+ * two, so the same elements, and the views they hold, stay mounted when its layout changes.
  *
  * Its content scrolls inside it, never the island itself: it clips what overflows rather than
  * hiding it, since a box that hides its overflow still scrolls for `scrollIntoView`, focus, and
@@ -16,18 +18,20 @@ export function Island({
   label,
   className,
   style,
+  bare = false,
   children,
 }: {
   label: string;
   className: string;
-  style?: CSSProperties;
+  style?: CSSProperties | undefined;
+  bare?: boolean | undefined;
   children: ReactNode;
 }) {
   return (
     <section
       aria-label={label}
       style={style}
-      className={`absolute flex flex-col overflow-clip ${ISLAND_SURFACE} ${className}`}
+      className={`flex flex-col overflow-clip ${bare ? "relative" : `absolute ${ISLAND_SURFACE}`} ${className}`}
     >
       {children}
     </section>

@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import withTitlesCases from "../../../ios/fixtures/cases/with-titles.json?raw";
 import {
+  entitiesKey,
+  entitiesOf,
   entityHref,
   entityIndex,
   entityOfHref,
@@ -273,5 +275,40 @@ describe("the ids table BoardKit's port runs too", () => {
     expect(cases.map((each) => ({ name: each.name, line: read(each) }))).toEqual(
       cases.map((each) => ({ name: each.name, line: each.line })),
     );
+  });
+});
+
+describe("entitiesKey", () => {
+  const EXPORT = "01M3Q2AAAAAAAAAAAAAAAAAAA1";
+  const THREAD = "01M3Q2BBBBBBBBBBBBBBBBBBB1";
+  const OTHER = "01M3Q2CCCCCCCCCCCCCCCCCCC1";
+  const indexOf = (threadTitle: string, otherTitle: string) =>
+    entityIndex(
+      [
+        { id: THREAD, title: threadTitle },
+        { id: OTHER, title: otherTitle },
+      ],
+      [{ id: EXPORT, title: "Build the export" }],
+      [],
+    );
+
+  it("stays the same while the entries a text names do, whatever else the index gains or changes", () => {
+    const text = `See ${EXPORT} and the thread ${THREAD}.`;
+    const before = entitiesKey(text, indexOf("Rollout", "Other"));
+    expect(entitiesKey(text, indexOf("Rollout", "Other, renamed"))).toBe(before);
+    expect(entitiesKey(text, indexOf("Rollout, renamed", "Other"))).not.toBe(before);
+    // A text that names nothing the index knows has the same key under any index.
+    expect(entitiesKey("No ids here.", indexOf("A", "B"))).toBe(
+      entitiesKey("No ids here.", new Map()),
+    );
+  });
+
+  it("reads back as the entries of the ids the text holds, and they split the text as the whole index does", () => {
+    const whole = indexOf("Rollout", "Other");
+    const text = `Done in ${EXPORT}; see /thread/${THREAD} too.`;
+    const named = entitiesOf(entitiesKey(text, whole));
+    expect([...named.keys()].toSorted()).toEqual([EXPORT, THREAD].toSorted());
+    expect(named.get(THREAD)).toEqual(whole.get(THREAD));
+    expect(splitEntities(text, named)).toEqual(splitEntities(text, whole));
   });
 });

@@ -1,5 +1,5 @@
 import type { Member, Message, Task } from "@stellaris/shared";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { Markdown } from "../components/Markdown.js";
 import { ago } from "../lib/format.js";
 import { Avatar, useDisplayName } from "./Avatar.js";
@@ -8,7 +8,11 @@ import { stepLabel } from "./tasks.js";
 /** Longer bodies start folded, so one report does not push a whole channel off the island. */
 const FOLD_AT = 1_400;
 
-export function MessageItem({
+/**
+ * One message. Kept while its props are: a read of its thread or channel keeps the objects of the
+ * messages that didn't change, so a post renders only itself.
+ */
+export const MessageItem = memo(function MessageItem({
   message,
   members,
   now,
@@ -79,4 +83,4 @@ export function MessageItem({
       </div>
     </article>
   );
-}
+});

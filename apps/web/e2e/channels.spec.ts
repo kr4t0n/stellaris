@@ -10,8 +10,9 @@ test("a channel's back arrow returns to the project it was opened from, and a th
 
   await view.getByRole("link", { name: "# general", exact: true }).click();
   await expect(page).toHaveURL("/c/lab/general");
+  // A task's thread opens in the task's view.
   await view.getByRole("link", { name: /opened task thread Compare shortest-path/ }).click();
-  await expect(page).toHaveURL(`/thread/${STAGE_TASK}`);
+  await expect(page).toHaveURL(`/task/${STAGE_TASK}`);
 
   await view.getByRole("button", { name: "Back to #general", exact: true }).click();
   await expect(page).toHaveURL("/c/lab/general");

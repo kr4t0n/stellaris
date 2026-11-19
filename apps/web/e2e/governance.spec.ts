@@ -12,7 +12,8 @@ test("a message named by its id reads as who posted it where, and opens there, m
   // "message" before the id, and whose it was, are the title's to say.
   await expect(thread).toContainText("It follows ada's post in Compare shortest-path algorithms.");
   await link.click();
-  await expect(page).toHaveURL(new RegExp(`/thread/${STAGE_TASK}\\?message=`));
+  // A message in a task's thread opens in the task's view, which holds the thread.
+  await expect(page).toHaveURL(new RegExp(`/task/${STAGE_TASK}\\?message=`));
   const marked = page.locator('article[aria-current="true"]');
   await expect(marked).toHaveCount(1);
   await expect(marked).toContainText("Survey done: twelve methods");
@@ -119,8 +120,8 @@ test("the pause switch pauses and resumes the society", async ({ page }) => {
   await page.goto("/");
 
   await page.getByRole("button", { name: "Pause", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Paused · resume" })).toBeVisible();
-  await page.getByRole("button", { name: "Paused · resume" }).click();
+  await expect(page.getByRole("button", { name: "Resume", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Resume", exact: true }).click();
   await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
   expect(board.writes.map((write) => write.path)).toEqual(["/api/pause", "/api/resume"]);
 });
@@ -129,9 +130,13 @@ test("needs you gathers a proposal, a stage that names the user, and a question 
   page,
 }) => {
   const board = await fakeBoard(page, { asked: true });
-  await page.goto("/");
+  await page.goto("/c/general");
 
-  await page.getByRole("button", { name: "3 need you" }).click();
+  const needsYou = page.getByRole("region", { name: "Governance" }).getByRole("link", {
+    name: /^needs you/,
+  });
+  await expect(needsYou).toHaveText("◉needs you3");
+  await needsYou.click();
   await expect(page).toHaveURL(/\/needs-you$/);
   const view = page.getByRole("region", { name: "Board content" });
   await expect(view.getByRole("link", { name: /^Skill refereed-research/ })).toHaveAttribute(
@@ -149,9 +154,13 @@ test("needs you gathers a proposal, a stage that names the user, and a question 
   const box = view.getByRole("textbox", { name: "Write in the task's thread" });
   await box.fill("Yes, include 2025.");
   await box.press("Enter");
-  await expect(page.getByRole("button", { name: "2 need you" })).toBeVisible();
+  await expect(needsYou).toHaveText("◉needs you2");
   expect(board.writes.at(-1)).toEqual({
     path: "/api/verbs/post_message",
-    body: { thread_id: STAGE_TASK, body: "Yes, include 2025." },
+    body: {
+      thread_id: STAGE_TASK,
+      body: "Yes, include 2025.",
+      idempotency_key: expect.stringMatching(/^[0-9a-f]{32}$/),
+    },
   });
 });

@@ -3,6 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "../components/Button.js";
 import { ApiError } from "../lib/api.js";
+import { newIdempotencyKey } from "../lib/messages.js";
 import { useMembers, useRoles, useSession } from "../lib/session.js";
 import { listed } from "./compose.js";
 import { wakesFor } from "./wakes.js";
@@ -43,15 +44,32 @@ export function NewThreadForm({ channel, onDone }: { channel: string; onDone: ()
 
   // What is sent, so whom it wakes is read from the same text: indentation can make it code.
   const first = body.trim();
+  /**
+   * The keys of the open on its way, or that failed: sent again, as after an answer that never
+   * arrived, the open goes with the same key while its title is the same, and the first message
+   * with the same key while it is the same, so the board opens the thread and stores the message
+   * once. Changed text goes with a new key.
+   */
+  const keys = useRef<{ title: string; open: string; first: string; post: string } | null>(null);
   const open = useMutation({
     mutationFn: async () => {
-      const thread = await api.openThread({ channel, title: title.trim() });
+      const name = title.trim();
+      const was = keys.current;
+      const sent = {
+        title: name,
+        open: was?.title === name ? was.open : newIdempotencyKey(),
+        first,
+        post: was?.first === first ? was.post : newIdempotencyKey(),
+      };
+      keys.current = sent;
+      const thread = await api.openThread({ channel, title: name, idempotency_key: sent.open });
       if (first !== "") {
-        await api.sendMessage({ thread_id: thread.id, body: first });
+        await api.sendMessage({ thread_id: thread.id, body: first, idempotency_key: sent.post });
       }
       return thread;
     },
     onSuccess: (thread) => {
+      keys.current = null;
       void client.invalidateQueries({ queryKey: ["threads"] });
       onDone();
       void navigate({ to: "/thread/$threadId", params: { threadId: thread.id } });

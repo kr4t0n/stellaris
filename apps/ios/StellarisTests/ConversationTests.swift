@@ -46,14 +46,61 @@ import Testing
     await general.load(using: model)
     let posted = try await model.post("Ship it", to: .general)
     #expect(posted.author == "user" && posted.channel == "general" && posted.thread == nil)
-    #expect(try await eventually { general.messages.last?.body == "Ship it" })
+    // The answer put it at the conversation's end, with no read of its own.
+    #expect(general.messages.last?.id == posted.id)
 
     let samples = Conversation.thread(FakeBoard.samples)
     await model.feed(for: samples).load(using: model)
     let reply = try await model.post("Looks right", to: samples)
     #expect(reply.thread == FakeBoard.samples)
-    #expect(try await eventually { model.feed(for: samples).messages.last?.id == reply.id })
+    #expect(model.feed(for: samples).messages.last?.id == reply.id)
     #expect(general.messages.last?.body == "Ship it", "the thread's reply went to the channel")
+  }
+
+  @Test func showsAPostFromItsAnswerBeforeAnyRead() async throws {
+    let model = try await signedIn()
+    let general = model.feed(for: .general)
+    await general.load(using: model)
+    let before = general.messages.count
+    let posted = try await model.post("Shown at once", to: .general)
+    // No read has run yet: the answer put it there, once.
+    #expect(general.messages.last?.id == posted.id)
+    #expect(general.messages.count == before + 1)
+    general.received(posted)
+    #expect(general.messages.count == before + 1)
+  }
+
+  /// A read under way when the user posts was asked before the board may have had the post: its
+  /// answer leaves the post in place, after what it brings, and a read begun later settles it.
+  @Test(.timeLimit(.minutes(1))) func keepsAPostThroughAReadBegunBeforeIt() async throws {
+    let samples = Conversation.thread(FakeBoard.samples)
+    let gate = HeldBoard.Gate(paths: ["/api/threads/\(FakeBoard.samples)"])
+    let (model, _) = fakeApp(holding: gate)
+    await model.start()
+    try await model.signIn(board: FakeBoard.address, token: gate.token)
+    try await waitUntilLoaded(model)
+    model.open(samples)
+    let feed = model.feed(for: samples)
+    let first = Task { await feed.load(using: model) }
+    await gate.arrivals(1)
+    gate.answer()
+    await first.value
+    // A reread under way, as an event of someone else's post would start.
+    let second = Task { await feed.load(using: model) }
+    await gate.arrivals(2)
+    let posted = try await model.post("Sent while a read was out", to: samples)
+    #expect(feed.messages.last?.id == posted.id)
+    try await Task.sleep(for: .milliseconds(300))
+    // The read answers with what the board had when it arrived, before the post.
+    gate.answerAsArrived()
+    await second.value
+    #expect(feed.messages.contains { $0.id == posted.id }, "the earlier read took the post away")
+    // A read begun after the post brings it from the board, once.
+    let third = Task { await feed.load(using: model) }
+    await gate.arrivals(3)
+    gate.answer()
+    await third.value
+    #expect(feed.messages.filter { $0.id == posted.id }.count == 1)
   }
 
   @Test func opensAThreadWithItsFirstMessageAndShowsIt() async throws {
@@ -77,6 +124,73 @@ import Testing
     let stream = channelStream(
       "general", messages: model.feed(for: .general).messages, threads: model.store.threads)
     #expect(stream.last?.id == id)
+  }
+
+  /// A new thread whose open's, or first message's, answer was lost goes again with the same keys,
+  /// and the board, which stored both, answers with what it stored: one thread, one message.
+  @Test(
+    .timeLimit(.minutes(1)),
+    arguments: ["/api/verbs/open_thread", "/api/verbs/post_message"])
+  func opensANewThreadOnceThoughAnAnswerWasLost(_ lost: String) async throws {
+    let gate = HeldBoard.Gate(paths: [lost])
+    let (model, _) = fakeApp(holding: gate)
+    await model.start()
+    try await model.signIn(board: FakeBoard.address, token: gate.token)
+    try await waitUntilLoaded(model)
+    model.newThreads["general"] = NewThreadDraft(title: "Rollout order", body: "Docs first.")
+    let first = Task { try await model.openThread(in: "general") }
+    await gate.arrivals(1)
+    gate.fail()
+    await #expect(throws: (any Error).self) { try await first.value }
+    #expect(model.newThreads["general"]?.body == "Docs first.")
+
+    let again = Task { try await model.openThread(in: "general") }
+    await gate.arrivals(2)
+    gate.answerAsArrived()
+    try await again.value
+    guard case .thread(let id) = model.history.current else {
+      Issue.record("Chat shows \(model.history.current), not the thread")
+      return
+    }
+    #expect(model.store.threads.filter { $0.thread.title == "Rollout order" }.map(\.id) == [id])
+    let feed = model.feed(for: .thread(id))
+    await feed.load(using: model)
+    #expect(feed.messages.map(\.body) == ["Docs first."])
+    #expect(model.newThreadKeys["general"] == nil)
+  }
+
+  /// A new thread's keys outlast Cancel, so the same text after a lost answer opens the thread the
+  /// board stored, and go with the drafts when the user signs out.
+  @Test(.timeLimit(.minutes(1))) func keepsANewThreadsKeysThroughCancelUntilSignOut()
+    async throws
+  {
+    let gate = HeldBoard.Gate(paths: ["/api/verbs/open_thread"])
+    let (model, _) = fakeApp(holding: gate)
+    await model.start()
+    try await model.signIn(board: FakeBoard.address, token: gate.token)
+    try await waitUntilLoaded(model)
+    model.newThreads["general"] = NewThreadDraft(title: "Rollout order", body: "")
+    let lost = Task { try await model.openThread(in: "general") }
+    await gate.arrivals(1)
+    gate.fail()
+    await #expect(throws: (any Error).self) { try await lost.value }
+    // Cancelled, as the sheet's Cancel drops the draft, then written again with the same title.
+    model.newThreads["general"] = nil
+    model.newThreads["general"] = NewThreadDraft(title: "Rollout order", body: "")
+    let again = Task { try await model.openThread(in: "general") }
+    await gate.arrivals(2)
+    gate.answerAsArrived()
+    try await again.value
+    #expect(model.store.threads.filter { $0.thread.title == "Rollout order" }.count == 1)
+
+    model.newThreads["general"] = NewThreadDraft(title: "Release notes", body: "")
+    let failed = Task { try await model.openThread(in: "general") }
+    await gate.arrivals(3)
+    gate.fail()
+    await #expect(throws: (any Error).self) { try await failed.value }
+    #expect(model.newThreadKeys["general"] != nil)
+    await model.signOut()
+    #expect(model.newThreadKeys.isEmpty)
   }
 
   @Test func keepsANewThreadsTextUntilItOpensOrIsCancelled() async throws {

@@ -69,6 +69,18 @@ class ShellTestCase: XCTestCase {
     row.tap()
   }
 
+  /// Opens the plan, or the charter, from the strip above a task's or a proposal's thread, with a
+  /// tap two thirds across, clear of what takes touches over it on the outer display: the strip
+  /// runs the window's width, 466 points, so from 394 points in it lies under the side column,
+  /// where the status bar's clock draws, and its middle, 233 points in, is 10 points past the
+  /// frame the status bar reports at the window's top-leading corner, 223 by 317. A tap at 90%
+  /// across, under the column, opened nothing.
+  @MainActor func openFromTheStrip(_ app: XCUIApplication, _ identifier: String = "task-strip") {
+    let strip = app.buttons[identifier].firstMatch
+    XCTAssertTrue(strip.waitForExistence(timeout: 20), "the thread shows no \(identifier)")
+    strip.coordinate(withNormalizedOffset: CGVector(dx: 0.66, dy: 0.5)).tap()
+  }
+
   /// Closes a sheet by dragging it down to the window's foot from `start`, a point relative to its
   /// bar: by default on the bar, right of the status bar's frame at the top-leading corner, which
   /// takes touches there.
@@ -92,6 +104,30 @@ class ShellTestCase: XCTestCase {
     XCTAssertGreaterThan(
       button.frame.midX, edge - 70,
       "\(button.label) stands \(Int(edge - button.frame.maxX)) pt short of the window's edge")
+  }
+
+  /// Checks from a picture of the screen whether `button`, a bar's symbol, is drawn in the blue
+  /// iOS gives the confirming place, or plain: four points of its glass, left of the symbol, right
+  /// of it, above and below, each blue where its blue outweighs its red by more than 100.
+  @MainActor func expectTinted(_ app: XCUIApplication, _ button: XCUIElement, _ tinted: Bool) {
+    XCTAssertTrue(button.waitForExistence(timeout: 20))
+    // Once the sheet has finished rising.
+    RunLoop.current.run(until: .now.addingTimeInterval(1))
+    let frame = button.frame
+    guard let pixels = ScreenPixels(XCUIScreen.main.screenshot().image) else {
+      return XCTFail("the picture of the screen can't be read")
+    }
+    let reach = min(frame.width, frame.height) * 0.4
+    let offsets: [(CGFloat, CGFloat)] = [(-reach, 0), (reach, 0), (0, -reach), (0, reach)]
+    let colours = offsets.compactMap { pixels.colour(x: frame.midX + $0.0, y: frame.midY + $0.1) }
+    let blue = colours.filter { $0.blue - $0.red > 100 }
+    let seen = colours.map(String.init(describing:)).joined(separator: ", ")
+    XCTAssertEqual(colours.count, offsets.count, "\(button.label) lies off the picture")
+    if tinted {
+      XCTAssertEqual(blue.count, colours.count, "\(button.label) isn't blue: \(seen)")
+    } else {
+      XCTAssertTrue(blue.isEmpty, "\(button.label) is blue: \(seen)")
+    }
   }
 
   /// A message of #general, looked for in the conversation alone, which keeps XCTest's walk of

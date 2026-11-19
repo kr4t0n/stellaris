@@ -116,6 +116,11 @@ export function staleKeys(event: BoardEvent): QueryKey[] {
   if (type === "runner.quota" || type === "runner.paused" || type === "runner.resumed") {
     return [["runners"]];
   }
+  // A rename rewrites the projects living on the runner and the citizens pinned to it too, and a
+  // removal clears an archived project's and the pins.
+  if (type === "runner.renamed" || type === "runner.removed") {
+    return [["runners"], ["models"], ["projects"], ["members"]];
+  }
   // A runner that comes or goes may list other models, and the server forgets what it listed;
   // after the server's own upgrade, every runner registers again.
   if (type.startsWith("runner.")) {

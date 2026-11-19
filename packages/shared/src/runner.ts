@@ -5,6 +5,7 @@ import {
   ModelOptionSchema,
   ProjectSchema,
   RunnerOsSchema,
+  RunnerSyncProgressSchema,
   type Project,
 } from "./board.js";
 import {
@@ -88,6 +89,11 @@ export const RunnerHelloSchema = z.object({
    * removes its copy once the project has moved; one from before never does.
    */
   projectMoves: z.boolean().default(false),
+  /**
+   * Whether the runner brings its board copy up to date as it connects, reporting how far it has
+   * come, and so may be held until it is done; one from before never does, and is never held for it.
+   */
+  boardSync: z.boolean().default(false),
   capabilities: z.array(z.string()).default([]),
   /**
    * What the runner's account lacks of the git identity citizens' own commits carry, checked
@@ -107,7 +113,15 @@ export const RunnerHelloSchema = z.object({
 export type RunnerHello = z.infer<typeof RunnerHelloSchema>;
 export type RunnerHelloInput = z.input<typeof RunnerHelloSchema>;
 
-export const RunnerWelcomeSchema = z.object({ name: NameSchema, version: z.string() });
+export const RunnerWelcomeSchema = z.object({
+  name: NameSchema,
+  version: z.string(),
+  /**
+   * Whether the server holds the runner until it reports its board copy synced; a server from
+   * before does not, so the runner leaves its copy to each turn's pull.
+   */
+  boardSync: z.boolean().default(false),
+});
 export type RunnerWelcome = z.infer<typeof RunnerWelcomeSchema>;
 
 /**
@@ -848,6 +862,50 @@ export const FileReadSchema = z.object({ paths: z.array(z.string()) });
 /** File contents by relative path, base64. */
 export const FileContentsSchema = z.object({ files: z.record(z.string(), z.string()) });
 export type FileContents = z.infer<typeof FileContentsSchema>;
+
+/**
+ * The largest file the file API serves, a manifest lists, or the board's stream carries: homes and
+ * the projection are markdown.
+ */
+export const MAX_SYNCED_FILE_BYTES = 8 * 1024 * 1024;
+
+/**
+ * The whole projection in one answer, for a runner's first copy: a gzip stream of records, each a
+ * line of JSON. The first (`BoardStreamStartSchema`) gives the totals of the projection and of the
+ * files left out because their paths sort at or before the `after` the runner asked from; each file
+ * is a line (`BoardStreamFileSchema`) followed by exactly `size` bytes of its content; a last line
+ * (`BoardStreamEndSchema`) says nothing was cut. Files come in the order of their paths' UTF-16
+ * code units, so a runner whose stream was cut asks again from the last path it wrote. A record
+ * names a regular file alone: the format has no links, folders, or devices.
+ */
+export const BoardStreamStartSchema = z.strictObject({
+  files: z.number().int().nonnegative(),
+  bytes: z.number().int().nonnegative(),
+  skippedFiles: z.number().int().nonnegative(),
+  skippedBytes: z.number().int().nonnegative(),
+});
+export type BoardStreamStart = z.infer<typeof BoardStreamStartSchema>;
+
+export const BoardStreamFileSchema = z.strictObject({
+  path: z.string().min(1).max(4096),
+  version: z.string().regex(/^[0-9a-f]{64}(\+x)?$/),
+  size: z.number().int().nonnegative().max(MAX_SYNCED_FILE_BYTES),
+});
+export type BoardStreamFile = z.infer<typeof BoardStreamFileSchema>;
+
+export const BoardStreamEndSchema = z.strictObject({ end: z.literal(true) });
+
+/** The longest record line a runner reads before it takes the stream for broken. */
+export const BOARD_STREAM_LINE_LIMIT = 64 * 1024;
+
+/**
+ * What a runner reports of its board sync as it connects: how far it has come and, after a failed
+ * try, why and how long until the next.
+ */
+export const RunnerSyncReportSchema = RunnerSyncProgressSchema.extend({
+  retryInMs: z.number().int().nonnegative().optional(),
+});
+export type RunnerSyncReport = z.infer<typeof RunnerSyncReportSchema>;
 
 /**
  * A relative path the file API accepts: forward slashes, no empty, `.`, or `..` segment, nothing

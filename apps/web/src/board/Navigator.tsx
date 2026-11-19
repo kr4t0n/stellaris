@@ -1,11 +1,14 @@
 import { Link } from "@tanstack/react-router";
-import { type ReactNode, useEffect, useMemo } from "react";
+import { type ReactNode, useEffect, useMemo, useRef } from "react";
 import { Island } from "../components/Island.js";
+import type { BoardLayout } from "../lib/layout.js";
 import type { ChannelSummary } from "../lib/api.js";
 import { initSeen, isUnseen, useSeen } from "../lib/seen.js";
 import { useChannels, useProjects, useProposals, useTasks, useThreads } from "../lib/session.js";
 import { waitingOnYou } from "./governance.js";
 import { useNeedsYou } from "./useNeedsYou.js";
+import { LayoutSwitch } from "./LayoutSwitch.js";
+import { type StatusView, useStatusCounts } from "./StatusTabs.js";
 import { inPlay } from "./tasks.js";
 import { WorkingNow } from "./WorkingNow.js";
 
@@ -90,8 +93,17 @@ function Count({ value, title }: { value: number; title: string }) {
   );
 }
 
-/** Where the user decides: what waits on the user and the proposals, each with its count. */
-function Governance({ active }: { active: GovernanceView | null }) {
+/**
+ * Where the user looks first and decides: the society's status, then what waits on the user and
+ * the proposals, each with its count.
+ */
+function Governance({
+  active,
+  statusActive,
+}: {
+  active: GovernanceView | null;
+  statusActive: boolean;
+}) {
   const proposals = useProposals();
   const waiting = (proposals.data ?? []).filter(waitingOnYou).length;
   const attention = useNeedsYou().length;
@@ -101,6 +113,7 @@ function Governance({ active }: { active: GovernanceView | null }) {
         Governance
       </h3>
       <ul>
+        <StatusEntry active={statusActive} />
         <li>
           <Link
             to="/needs-you"
@@ -131,9 +144,55 @@ function Governance({ active }: { active: GovernanceView | null }) {
 }
 
 /**
- * The left island: who is working now, what waits on the user's decision, then the society's channels and every project's in the
+ * The one row for the society's status, which opens its first tab; the strip over the content
+ * switches between citizens, runners, crons, metrics and the operations log. Its amber count adds
+ * up what waits there, and its name says what.
+ */
+function StatusEntry({ active }: { active: boolean }) {
+  const { enrolling, failing } = useStatusCounts();
+  const waiting = [
+    ...(enrolling === 0
+      ? []
+      : [`${enrolling} ${enrolling === 1 ? "runner" : "runners"} waiting for approval`]),
+    ...(failing === 0 ? [] : [`${failing} ${failing === 1 ? "cron" : "crons"} failing`]),
+  ];
+  return (
+    <li>
+      <Link
+        to="/citizens"
+        aria-label={["Status", ...waiting].join(", ")}
+        className={`${ROW} ${active ? ROW_ACTIVE : ROW_IDLE}`}
+      >
+        <span aria-hidden="true" className="text-fg-muted">
+          ◎
+        </span>
+        <span className="min-w-0 flex-1 truncate">status</span>
+        <Count value={enrolling + failing} title={waiting.join(", ")} />
+      </Link>
+    </li>
+  );
+}
+
+/** Closes the board, from the navigator's header or its rail. */
+function CloseBoard() {
+  return (
+    <Link
+      to="/"
+      aria-label="Close the board"
+      className="grid size-7 place-items-center rounded-lg text-fg-tertiary hover:bg-surface-2/70 hover:text-fg-primary"
+    >
+      ✕
+    </Link>
+  );
+}
+
+/**
+ * The board's left side, an island of its own or the panel's first column: who is working now, the
+ * society's status and what waits on the user's decision, then the society's channels and every project's in the
  * order the sky places them, each with its open threads and its name in bold when something is new
- * since this browser looked, and last the archived projects, each opening its overview.
+ * since this browser looked, and last the archived projects, each opening its overview. Beside the
+ * sky in a window too narrow for it, `over` the content from the rail, whose buttons its header
+ * leaves out.
  */
 export function Navigator({
   activeChannel,
@@ -142,7 +201,18 @@ export function Navigator({
   activeScope,
   activeGovernance,
   activeOverview,
+  activeView,
+  layout,
+  onLayout,
+  over = false,
 }: {
+  /** Shown over the content from the folded navigator's rail, beside the sky in a narrow window. */
+  over?: boolean | undefined;
+  /** The status view that is open, if one is. */
+  activeView: StatusView | null;
+  /** Where the board sits: an island of its own around the sky, or the panel's first column beside it. */
+  layout: BoardLayout;
+  onLayout: (layout: BoardLayout) => void;
   activeChannel: string | null;
   /** The project whose tasks are open, when a tasks view or a task is. */
   activeTasks: string | null;
@@ -205,20 +275,29 @@ export function Navigator({
   }, [threads.data]);
 
   return (
-    <Island label="Board navigator" className="top-[72px] bottom-4 left-4 w-64">
+    <Island
+      label="Board navigator"
+      bare={layout === "beside" && !over}
+      className={
+        over
+          ? "inset-y-0 left-[44px] z-20 w-[256px] max-w-[calc(100%-44px)] bg-surface-1!"
+          : layout === "beside"
+            ? "w-[256px] shrink-0 border-r border-line"
+            : "top-[72px] bottom-[16px] left-[16px] w-[256px]"
+      }
+    >
       <header className="flex items-center justify-between px-4 pt-4 pb-1">
         <span className="text-caps">Board</span>
-        <Link
-          to="/"
-          aria-label="Close the board"
-          className="grid size-7 place-items-center rounded-lg text-fg-tertiary hover:bg-surface-2/70 hover:text-fg-primary"
-        >
-          ✕
-        </Link>
+        {over ? null : (
+          <div className="flex items-center gap-1">
+            <LayoutSwitch layout={layout} onLayout={onLayout} />
+            <CloseBoard />
+          </div>
+        )}
       </header>
       <nav className="flex-1 overflow-y-auto px-2 pb-3">
         <WorkingNow activeCitizen={activeCitizen} activeScope={activeScope} />
-        <Governance active={activeGovernance} />
+        <Governance active={activeGovernance} statusActive={activeView !== null} />
         {groups.map((group) => (
           <section key={group.key} className="mt-3">
             <h3 className="pb-1">
@@ -298,5 +377,102 @@ export function Navigator({
         )}
       </nav>
     </Island>
+  );
+}
+
+/**
+ * The navigator folded beside the sky, in a window too narrow for it beside the content: a column
+ * of its three buttons, the channels, the layout switch, and Close. The channels open the
+ * navigator over the content, which closes again on the channels' button, on a choice in it, on a
+ * press anywhere else, or on the focus moving anywhere else, as Tab past its last link does; the
+ * Playground's Escape closes it too, before the board. Its `children`
+ * are the navigator while it is open, placed against the panel, so the content keeps its place
+ * among the panel's columns and its view stays mounted.
+ */
+export function NavigatorRail({
+  layout,
+  onLayout,
+  open,
+  onToggle,
+  onClose,
+  children,
+}: {
+  layout: BoardLayout;
+  onLayout: (layout: BoardLayout) => void;
+  open: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const channels = useRef<HTMLButtonElement>(null);
+  const over = useRef<HTMLDivElement>(null);
+  const wasOpen = useRef(open);
+
+  useEffect(() => {
+    const list = over.current;
+    if (!open || list === null) {
+      return undefined;
+    }
+    // A press or the focus anywhere but the list and its button closes the list, so nothing it
+    // covers is used, or focused, unseen.
+    const onElsewhere = (event: Event): void => {
+      const target = event.target instanceof Node ? event.target : null;
+      if (target !== null && !list.contains(target) && !channels.current?.contains(target)) {
+        onClose();
+      }
+    };
+    // A choice closes the list once its click has reached the router: closed at once, the list
+    // would leave the page before React's own listener, at the root, hands the link's click to the
+    // router, and the browser would follow the link as a new page load. A new address closes it
+    // anyway; this closes it for the address already open.
+    let chosen: number | undefined;
+    const onChoose = (event: MouseEvent): void => {
+      if (event.target instanceof Element && event.target.closest("a") !== null) {
+        chosen = window.setTimeout(onClose, 0);
+      }
+    };
+    document.addEventListener("pointerdown", onElsewhere, { capture: true });
+    document.addEventListener("focusin", onElsewhere);
+    list.addEventListener("click", onChoose);
+    return () => {
+      window.clearTimeout(chosen);
+      document.removeEventListener("pointerdown", onElsewhere, { capture: true });
+      document.removeEventListener("focusin", onElsewhere);
+      list.removeEventListener("click", onChoose);
+    };
+  }, [open, onClose]);
+
+  // Closing takes the focus with the list, so it comes back to the channels' button.
+  useEffect(() => {
+    if (wasOpen.current && !open && document.activeElement === document.body) {
+      channels.current?.focus();
+    }
+    wasOpen.current = open;
+  }, [open]);
+
+  return (
+    <section
+      aria-label="Board"
+      className="flex w-[44px] shrink-0 flex-col items-center gap-1 border-r border-line pt-3"
+    >
+      <button
+        ref={channels}
+        type="button"
+        aria-label="Show the board's channels"
+        aria-expanded={open}
+        title="Channels"
+        onClick={onToggle}
+        className="grid size-7 place-items-center rounded-lg text-fg-tertiary hover:bg-surface-2/70 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none aria-expanded:bg-surface-2/70 aria-expanded:text-fg-primary"
+      >
+        <svg viewBox="0 0 16 16" width={16} height={16} aria-hidden="true">
+          <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11" stroke="currentColor" strokeLinecap="round" />
+        </svg>
+      </button>
+      <div ref={over} className="contents">
+        {children}
+      </div>
+      <LayoutSwitch layout={layout} onLayout={onLayout} />
+      <CloseBoard />
+    </section>
   );
 }

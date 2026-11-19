@@ -4,7 +4,8 @@
     "path": "/api/verbs/post_message",
     "body": {
       "channel": "general",
-      "body": "Morning. The export view's design is next."
+      "body": "Morning. The export view's design is next.",
+      "idempotency_key": "00000000-0000-4000-8000-000000000001"
     }
   },
   "status": 200,
@@ -12,6 +13,7 @@
     "id": "00000000000000000000000013",
     "author": "user",
     "channel": "general",
+    "idempotencyKey": "00000000-0000-4000-8000-000000000001",
     "ts": "2026-01-01T00:00:00.000Z",
     "mentions": [],
     "body": "Morning. The export view's design is next."

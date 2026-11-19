@@ -27,7 +27,9 @@ import {
   Board,
   BoardError,
   computeMetrics,
+  IDEMPOTENCY_LOOKBACK,
   SYSTEM_ACTOR,
+  THREAD_IDEMPOTENCY_LOOKBACK,
   tokenUse,
   type Actor,
   type BoardOptions,
@@ -401,6 +403,206 @@ describe("Board", () => {
         "thread.closed",
       ]),
     );
+  });
+
+  it("stores a post sent again with its idempotency key once, in a thread and in a channel", async () => {
+    const { board } = await society();
+    const thread = await board.openThread(USER, { channel: "demo/general", title: "Keys" });
+    const key = "post-key-for-a-retry-0001";
+    const events = async () =>
+      (await board.readEvents(null)).filter((event) => event.type === "message.posted").length;
+    const before = await events();
+
+    // The answer was lost, so the client sends the same post with the same key: one message.
+    const first = await board.postMessage(USER, {
+      thread_id: thread.id,
+      body: "Ship it.",
+      idempotency_key: key,
+    });
+    const again = await board.postMessage(USER, {
+      thread_id: thread.id,
+      body: "Ship it.",
+      idempotency_key: key,
+    });
+    expect(first.idempotencyKey).toBe(key);
+    expect(again.id).toBe(first.id);
+    expect((await board.listThread(thread.id)).map((message) => message.id)).toEqual([first.id]);
+    expect(await events()).toBe(before + 1);
+
+    // The same in a channel, where a different key is a different post.
+    const posted = await board.postMessage(USER, {
+      channel: "demo/dev",
+      body: "Ship it.",
+      idempotency_key: key,
+    });
+    const repeated = await board.postMessage(USER, {
+      channel: "demo/dev",
+      body: "Ship it.",
+      idempotency_key: key,
+    });
+    const other = await board.postMessage(USER, {
+      channel: "demo/dev",
+      body: "Ship it.",
+      idempotency_key: "post-key-for-a-retry-0002",
+    });
+    expect(repeated.id).toBe(posted.id);
+    expect(other.id).not.toBe(posted.id);
+    expect(
+      (await board.listChannel("demo/dev")).filter((m) => m.body.trim() === "Ship it."),
+    ).toHaveLength(2);
+
+    // A key is its author's, in its place: another author, or another place, posts anew.
+    const byEng = await board.postMessage(ENG, {
+      thread_id: thread.id,
+      body: "Ship it.",
+      idempotency_key: key,
+    });
+    expect(byEng.id).not.toBe(first.id);
+    const elsewhere = await board.postMessage(USER, {
+      channel: "demo/general",
+      body: "Ship it.",
+      idempotency_key: key,
+    });
+    expect(elsewhere.id).not.toBe(first.id);
+
+    // The key sent with another text is refused rather than answered with the first.
+    await expect(
+      board.postMessage(USER, { thread_id: thread.id, body: "Ship it now.", idempotency_key: key }),
+    ).rejects.toMatchObject({ code: "ALREADY_EXISTS" });
+    expect(await board.listThread(thread.id)).toHaveLength(2);
+  });
+
+  it("looks for a post's key among its author's latest posts there", async () => {
+    const { board } = await society();
+    const thread = await board.openThread(USER, { channel: "demo/general", title: "Keys" });
+    const key = "post-key-for-a-retry-0001";
+    const first = await board.postMessage(USER, {
+      thread_id: thread.id,
+      body: "One.",
+      idempotency_key: key,
+    });
+    // Others' posts in between don't push it out of reach.
+    for (let n = 0; n < IDEMPOTENCY_LOOKBACK + 5; n += 1) {
+      await board.postMessage(ENG, { thread_id: thread.id, body: `Eng ${n}.` });
+    }
+    for (let n = 0; n < IDEMPOTENCY_LOOKBACK - 1; n += 1) {
+      await board.postMessage(USER, { thread_id: thread.id, body: `User ${n}.` });
+    }
+    expect(
+      (await board.postMessage(USER, { thread_id: thread.id, body: "One.", idempotency_key: key }))
+        .id,
+    ).toBe(first.id);
+    // One more of the author's own posts, and the key is past the look.
+    await board.postMessage(USER, { thread_id: thread.id, body: "Last." });
+    const late = await board.postMessage(USER, {
+      thread_id: thread.id,
+      body: "One.",
+      idempotency_key: key,
+    });
+    expect(late.id).not.toBe(first.id);
+  });
+
+  it("refuses an idempotency key that isn't 16 to 64 letters, digits, hyphens or underscores", async () => {
+    const { board } = await society();
+    for (const key of ["short", "x".repeat(65), "has a space in it, so no"]) {
+      await expect(
+        board.postMessage(USER, { channel: "demo/general", body: "Hi.", idempotency_key: key }),
+      ).rejects.toThrow("expected 16-64 letters, digits, hyphens, or underscores");
+      await expect(
+        board.openThread(USER, { channel: "demo/general", title: "Hi", idempotency_key: key }),
+      ).rejects.toThrow("expected 16-64 letters, digits, hyphens, or underscores");
+    }
+    expect(await board.listThreads()).toHaveLength(0);
+  });
+
+  it("opens a thread sent again with its idempotency key once, after a restart too", async () => {
+    const { board } = await society();
+    const key = "open-key-for-a-retry-0001";
+    const opened = async () =>
+      (await board.readEvents(null)).filter((event) => event.type === "thread.opened").length;
+    const titled = async (title: string) =>
+      (await board.listThreads()).filter((thread) => thread.title === title);
+    const before = await opened();
+
+    // The answer was lost, so the client opens again with the same key: one thread, one event.
+    const first = await board.openThread(USER, {
+      channel: "demo/general",
+      title: "Rollout order",
+      idempotency_key: key,
+    });
+    const again = await board.openThread(USER, {
+      channel: "demo/general",
+      title: "Rollout order",
+      idempotency_key: key,
+    });
+    expect(first.idempotencyKey).toBe(key);
+    expect(again).toEqual(first);
+    expect(await titled("Rollout order")).toHaveLength(1);
+    expect(await opened()).toBe(before + 1);
+
+    // The key is in the thread's record, so a board opened again on the same data still has it.
+    const reopened = await Board.open(dir, { now });
+    expect(
+      await reopened.openThread(USER, {
+        channel: "demo/general",
+        title: "Rollout order",
+        idempotency_key: key,
+      }),
+    ).toEqual(first);
+
+    // The key sent with another title is refused rather than answered with the first.
+    await expect(
+      board.openThread(USER, { channel: "demo/general", title: "Rollback", idempotency_key: key }),
+    ).rejects.toMatchObject({ code: "ALREADY_EXISTS" });
+    expect(await titled("Rollback")).toHaveLength(0);
+
+    // A key is its opener's, on its channel: another author, another channel of the project, or a
+    // channel of the society opens a thread of its own.
+    const byEng = await board.openThread(ENG, {
+      channel: "demo/general",
+      title: "Rollout order",
+      idempotency_key: key,
+    });
+    const onDev = await board.openThread(USER, {
+      channel: "demo/dev",
+      title: "Rollout order",
+      idempotency_key: key,
+    });
+    const inSociety = await board.openThread(USER, {
+      channel: "general",
+      title: "Rollout order",
+      idempotency_key: key,
+    });
+    expect(new Set([first.id, byEng.id, onDev.id, inSociety.id]).size).toBe(4);
+    expect(await titled("Rollout order")).toHaveLength(4);
+    expect(await opened()).toBe(before + 4);
+
+    // An open without a key, and the threads a task opens, keep none.
+    const plain = await board.openThread(USER, { channel: "demo/general", title: "Rollout order" });
+    expect(plain.id).not.toBe(first.id);
+    expect(plain).not.toHaveProperty("idempotencyKey");
+    const task = await board.createTask(USER, { project: "demo", title: "build" });
+    expect(await board.readThread(task.id)).not.toHaveProperty("idempotencyKey");
+  });
+
+  it("looks for an open's key among the newest threads of the scope, whoever opened them", async () => {
+    const { board } = await society();
+    const key = "open-key-for-a-retry-0001";
+    const open = () =>
+      board.openThread(USER, { channel: "demo/general", title: "Keyed", idempotency_key: key });
+    const first = await open();
+    // Threads opened in the society's channels sit in another scope, so they don't count.
+    for (let n = 0; n < THREAD_IDEMPOTENCY_LOOKBACK; n += 1) {
+      await board.openThread(USER, { channel: "general", title: `Society ${n}` });
+    }
+    // Anyone's threads in the project do: one less than the look, and the key is still found.
+    for (let n = 0; n < THREAD_IDEMPOTENCY_LOOKBACK - 1; n += 1) {
+      await board.openThread(ENG, { channel: "demo/dev", title: `Eng ${n}` });
+    }
+    expect((await open()).id).toBe(first.id);
+    // One more, and the key is past the look: the open makes a thread of its own.
+    await board.openThread(ENG, { channel: "demo/dev", title: "One more" });
+    expect((await open()).id).not.toBe(first.id);
   });
 
   it("files a citizen's digest by the scope a turn reads it in, with a cursor per scope", async () => {
@@ -1723,6 +1925,323 @@ describe("Board", () => {
       { type: "runner.resumed", actor: "user", payload: { name: "pod" } },
       { type: "runner.resumed", actor: "user", payload: { name: "pod", cli: "claude" } },
     ]);
+  });
+
+  it("renames a runner, for the user alone, with the projects, pins, and sessions that name it, and its token", async () => {
+    const { board } = await society();
+    const { token } = await board.addRunner(USER, "pod");
+    await board.addRunner(USER, "far");
+    await board.markRunner("pod", { status: "connected", clis: ["claude", "codex"] });
+    await board.setRunnerPaused(USER, "pod", { paused: true });
+    await board.setRunnerPaused(USER, "pod", { paused: true, cli: "codex" });
+    const quota = CliQuotaSchema.parse({
+      observedAt: clock.toISOString(),
+      source: "turn",
+      status: "allowed",
+    });
+    await board.recordQuota("pod", "claude", quota);
+    // A project living on it, an archived one that did, and one living elsewhere.
+    await board.placeProject("demo", "pod");
+    await board.addProject(USER, { slug: "old" });
+    await board.placeProject("old", "pod");
+    await board.archiveProject(USER, { project: "old", reason: "done" });
+    await board.addProject(USER, { slug: "yard" });
+    await board.placeProject("yard", "far");
+    await board.pinAgent("eng-1", "pod");
+    await board.pinAgent("rev-1", "far");
+    // Every kind of conversation's session record that names it, and one that names another.
+    const thread = await board.createTask(USER, { project: "demo", title: "build" });
+    const records: Array<[string, string | undefined]> = [
+      ["demo", undefined],
+      ["demo", thread.id],
+      ["demo", "#dev"],
+      ["society", "~demo"],
+    ];
+    for (const [scope, part] of records) {
+      await board.writeSession("eng-1", scope, "claude", `session-${part ?? scope}`, "pod", part);
+    }
+    await board.writeSession("rev-1", "demo", "codex", "far-session", "far");
+    const projected = (name: string) => readFile(board.paths.member(name), "utf8");
+
+    // Only the user renames, a runner the board knows, to a free name of the board's shape.
+    await expect(board.renameRunner(ENG, "pod", "gpu-1")).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    await expect(board.renameRunner(USER, "ghost", "gpu-1")).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    await expect(board.renameRunner(USER, "pod", "far")).rejects.toMatchObject({
+      code: "ALREADY_EXISTS",
+    });
+    await expect(board.renameRunner(USER, "pod", "pod")).rejects.toMatchObject({
+      code: "INVALID_STATE",
+    });
+    await expect(board.renameRunner(USER, "pod", "Not A Name")).rejects.toMatchObject({
+      code: "VALIDATION",
+      message:
+        '"Not A Name" is no runner name: a name is 1 to 32 lowercase letters, digits, or hyphens, starting with a letter or digit',
+    });
+    expect((await board.listRunners()).map((runner) => runner.name).toSorted()).toEqual([
+      "far",
+      "pod",
+    ]);
+    expect(board.resolveRunnerToken(token)).toBe("pod");
+
+    const renamed = await board.renameRunner(USER, "pod", "gpu-1");
+    expect(renamed).toMatchObject({ projects: ["demo", "old"], agents: ["eng-1"], sessions: 4 });
+    // Its record keeps everything but the name: what it offers, its pauses, and its quotas.
+    const before = { clis: ["claude", "codex"], quotas: { claude: quota } };
+    expect(renamed.runner).toMatchObject({ name: "gpu-1", status: "connected", ...before });
+    expect(renamed.runner.paused?.by).toBe("user");
+    expect(Object.keys(renamed.runner.pausedClis ?? {})).toEqual(["codex"]);
+    expect(await board.readRunner("gpu-1")).toEqual(renamed.runner);
+    await expect(board.readRunner("pod")).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(await readFile(board.paths.runner("gpu-1"), "utf8")).toContain("\n# gpu-1\n");
+    expect((await board.readProject("demo")).runner).toBe("gpu-1");
+    expect((await board.readProject("old")).runner).toBe("gpu-1");
+    expect((await board.readProject("yard")).runner).toBe("far");
+    expect((await board.readAgent("eng-1")).homeRunner).toBe("gpu-1");
+    expect((await board.readAgent("rev-1")).homeRunner).toBe("far");
+    expect(await projected("eng-1")).toContain("homeRunner: gpu-1");
+    for (const [scope, part] of records) {
+      expect(await board.readSessions("eng-1", scope, part)).toEqual({
+        claude: `session-${part ?? scope}`,
+        runner: "gpu-1",
+      });
+    }
+    expect(await board.readSessions("rev-1", "demo")).toEqual({
+      codex: "far-session",
+      runner: "far",
+    });
+    // The runner's token answers to the new name, now and after a restart.
+    expect(board.resolveRunnerToken(token)).toBe("gpu-1");
+    const reopened = await Board.open(dir, { now });
+    expect(reopened.resolveRunnerToken(token)).toBe("gpu-1");
+    expect(await readFile(path.join(board.paths.state(), "runners.json"), "utf8")).not.toContain(
+      '"pod"',
+    );
+
+    // One event says what the rename did; those before it keep the name they were written with.
+    const events = await reopened.readEvents(null);
+    expect(events.filter((event) => event.type === "runner.renamed")).toMatchObject([
+      {
+        actor: "user",
+        payload: { from: "pod", to: "gpu-1", projects: ["demo", "old"], agents: ["eng-1"] },
+      },
+    ]);
+    expect(events.find((event) => event.type === "runner.added")?.payload).toEqual({
+      name: "pod",
+    });
+    // The old name is free again.
+    await reopened.addRunner(USER, "pod");
+  });
+
+  it("finishes a rename cut short, after the token moved or after the new record was written", async () => {
+    const { board } = await society();
+    const { token } = await board.addRunner(USER, "pod");
+    await board.addRunner(USER, "far");
+    await board.placeProject("demo", "pod");
+    const tokensFile = path.join(board.paths.state(), "runners.json");
+    const stored = z
+      .object({ runners: z.record(z.string(), z.object({ tokenHash: z.string() })) })
+      .parse(JSON.parse(await readFile(tokensFile, "utf8"))).runners;
+
+    // Stopped right after the token's move, as when the new record's write failed: the server
+    // still answers the token as pod, and the file has it under gpu-1.
+    const { pod, ...rest } = stored;
+    await writeFile(tokensFile, JSON.stringify({ runners: { ...rest, "gpu-1": pod } }));
+    expect(board.resolveRunnerToken(token)).toBe("pod");
+    const finished = await board.renameRunner(USER, "pod", "gpu-1");
+    expect(finished.runner.name).toBe("gpu-1");
+    expect(board.resolveRunnerToken(token)).toBe("gpu-1");
+    expect((await board.readProject("demo")).runner).toBe("gpu-1");
+    await expect(board.readRunner("pod")).rejects.toMatchObject({ code: "NOT_FOUND" });
+
+    // Stopped after the new record was written and before the old one went, then restarted: the
+    // runner connected since under gpu-1, whose record is kept, and pod's goes.
+    await board.markRunner("gpu-1", { status: "connected", version: "9.9.9" });
+    const record = await readFile(board.paths.runner("gpu-1"), "utf8");
+    await writeFile(board.paths.runner("pod"), record.replaceAll("gpu-1", "pod"));
+    const reopened = await Board.open(dir, { now });
+    expect((await reopened.listRunners()).map((runner) => runner.name).toSorted()).toEqual([
+      "far",
+      "gpu-1",
+      "pod",
+    ]);
+    const again = await reopened.renameRunner(USER, "pod", "gpu-1");
+    expect(again.runner).toMatchObject({ name: "gpu-1", status: "connected", version: "9.9.9" });
+    expect((await reopened.listRunners()).map((runner) => runner.name).toSorted()).toEqual([
+      "far",
+      "gpu-1",
+    ]);
+    expect(reopened.resolveRunnerToken(token)).toBe("gpu-1");
+
+    // A name another runner holds with a token of its own is still refused.
+    await reopened.addRunner(USER, "pod");
+    await expect(reopened.renameRunner(USER, "pod", "far")).rejects.toMatchObject({
+      code: "ALREADY_EXISTS",
+    });
+  });
+
+  it("removes a runner, for the user alone and with no project living there, clearing the pins and sessions that name it, and its token", async () => {
+    const { board } = await society();
+    const { token } = await board.addRunner(USER, "pod");
+    await board.addRunner(USER, "far");
+    await board.placeProject("demo", "far");
+    await board.addProject(USER, { slug: "lab" });
+    await board.placeProject("lab", "pod");
+    await board.addProject(USER, { slug: "yard" });
+    await board.placeProject("yard", "pod");
+    await board.pinAgent("eng-1", "pod");
+    await board.pinAgent("rev-1", "far");
+    // Every kind of conversation's session record that names it, and one that names another.
+    const thread = await board.createTask(USER, { project: "demo", title: "build" });
+    const records: Array<[string, string | undefined]> = [
+      ["demo", undefined],
+      ["demo", thread.id],
+      ["demo", "#dev"],
+      ["society", "~demo"],
+    ];
+    for (const [scope, part] of records) {
+      await board.writeSession("eng-1", scope, "claude", `session-${part ?? scope}`, "pod", part);
+    }
+    await board.writeSession("rev-1", "demo", "codex", "far-session", "far");
+    // A session ended there, whose record names the runner and holds no id.
+    await board.writeSession("rev-1", "society", "codex", "ended", "pod");
+    await board.dropSession("rev-1", "society", "codex", "ended");
+    expect(await board.readSessions("rev-1", "society")).toEqual({ runner: "pod" });
+    const projected = (name: string) => readFile(board.paths.member(name), "utf8");
+
+    // Only the user removes, a runner the board knows, and none a project lives on.
+    await expect(board.removeRunner(ENG, "pod")).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(board.removeRunner(USER, "ghost")).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(board.removeRunner(USER, "pod")).rejects.toMatchObject({
+      code: "INVALID_STATE",
+      message:
+        "runner pod cannot be removed while lab, yard live there; move them to another runner first",
+    });
+    await board.archiveProject(USER, { project: "yard", reason: "done" });
+    await expect(board.removeRunner(USER, "pod")).rejects.toMatchObject({
+      code: "INVALID_STATE",
+      message:
+        "runner pod cannot be removed while lab lives there; move it to another runner first",
+    });
+    // A refusal changes nothing.
+    expect(board.resolveRunnerToken(token)).toBe("pod");
+    expect((await board.readAgent("eng-1")).homeRunner).toBe("pod");
+    expect((await board.readSessions("eng-1", "demo")).runner).toBe("pod");
+    expect((await board.readProject("yard")).runner).toBe("pod");
+
+    // Once lab is archived too, nothing lives there.
+    await board.archiveProject(USER, { project: "lab", reason: "done" });
+    const removed = await board.removeRunner(USER, "pod");
+    expect(removed).toEqual({
+      name: "pod",
+      projects: ["lab", "yard"],
+      agents: ["eng-1"],
+      sessions: 4,
+    });
+    await expect(board.readRunner("pod")).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect((await board.listRunners()).map((runner) => runner.name)).toEqual(["far"]);
+    expect((await board.readProject("lab")).runner).toBeUndefined();
+    expect((await board.readProject("yard")).runner).toBeUndefined();
+    expect((await board.readProject("demo")).runner).toBe("far");
+    // Pinned again on the next turn outside a project, as after `agent runner <name> none`.
+    expect((await board.readAgent("eng-1")).homeRunner).toBeUndefined();
+    expect(await projected("eng-1")).not.toContain("homeRunner");
+    expect((await board.readAgent("rev-1")).homeRunner).toBe("far");
+    // Each record keeps naming the runner, so the conversation's next turn elsewhere starts afresh as
+    // after a move, with no session to resume; one that held no id counts for nothing.
+    for (const [scope, part] of records) {
+      expect(await board.readSessions("eng-1", scope, part)).toEqual({ runner: "pod" });
+    }
+    expect(await board.readSessions("rev-1", "society")).toEqual({ runner: "pod" });
+    expect(await board.readSessions("rev-1", "demo")).toEqual({
+      codex: "far-session",
+      runner: "far",
+    });
+    // Its token answers to no runner, now and after a restart.
+    expect(board.resolveRunnerToken(token)).toBeNull();
+    const reopened = await Board.open(dir, { now });
+    expect(reopened.resolveRunnerToken(token)).toBeNull();
+    expect(await readFile(path.join(board.paths.state(), "runners.json"), "utf8")).not.toContain(
+      '"pod"',
+    );
+
+    // One event says what the removal did; those before it keep the name.
+    const events = await reopened.readEvents(null);
+    expect(events.filter((event) => event.type === "runner.removed")).toMatchObject([
+      {
+        actor: "user",
+        payload: { name: "pod", projects: ["lab", "yard"], agents: ["eng-1"], sessions: 4 },
+      },
+    ]);
+    expect(events.find((event) => event.type === "runner.added")?.payload).toEqual({
+      name: "pod",
+    });
+    // Gone, it is unknown, and its name is free for a new runner with a token of its own.
+    await expect(reopened.removeRunner(USER, "pod")).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const { token: next } = await reopened.addRunner(USER, "pod");
+    expect(next).not.toBe(token);
+    expect(reopened.resolveRunnerToken(token)).toBeNull();
+    expect(reopened.resolveRunnerToken(next)).toBe("pod");
+  });
+
+  it("finishes a removal cut short, after the token went or with the token left and the record gone", async () => {
+    const { board } = await society();
+    const { token } = await board.addRunner(USER, "pod");
+    await board.addRunner(USER, "far");
+    await board.pinAgent("eng-1", "pod");
+    await board.writeSession("eng-1", "demo", "claude", "session-0", "pod");
+    const tokensFile = path.join(board.paths.state(), "runners.json");
+    const stored = z
+      .object({ runners: z.record(z.string(), z.object({ tokenHash: z.string() })) })
+      .parse(JSON.parse(await readFile(tokensFile, "utf8"))).runners;
+
+    // Stopped right after the token's entry went, as when the record's removal failed: the server
+    // still answers the token as pod, and the record is left.
+    const { pod: _pod, ...rest } = stored;
+    await writeFile(tokensFile, JSON.stringify({ runners: rest }));
+    expect(board.resolveRunnerToken(token)).toBe("pod");
+    const finished = await board.removeRunner(USER, "pod");
+    expect(finished).toEqual({ name: "pod", projects: [], agents: ["eng-1"], sessions: 1 });
+    expect(board.resolveRunnerToken(token)).toBeNull();
+    await expect(board.readRunner("pod")).rejects.toMatchObject({ code: "NOT_FOUND" });
+
+    // Restarted with the record left and its token's entry gone: the runner is still known, so the
+    // removal finishes, with nothing left to clear but the record.
+    await board.addRunner(USER, "gpu-1");
+    const gpu = z
+      .object({ runners: z.record(z.string(), z.object({ tokenHash: z.string() })) })
+      .parse(JSON.parse(await readFile(tokensFile, "utf8"))).runners;
+    const { "gpu-1": _left, ...without } = gpu;
+    await writeFile(tokensFile, JSON.stringify({ runners: without }));
+    const reopened = await Board.open(dir, { now });
+    expect((await reopened.listRunners()).map((runner) => runner.name).toSorted()).toEqual([
+      "far",
+      "gpu-1",
+    ]);
+    expect(await reopened.removeRunner(USER, "gpu-1")).toEqual({
+      name: "gpu-1",
+      projects: [],
+      agents: [],
+      sessions: 0,
+    });
+    expect((await reopened.listRunners()).map((runner) => runner.name)).toEqual(["far"]);
+
+    // A token's entry left with no record, which no removal of this order leaves but a hand
+    // might, is still the runner's, and goes.
+    const { token: spareToken } = await reopened.addRunner(USER, "spare");
+    await rm(reopened.paths.runner("spare"));
+    expect(reopened.resolveRunnerToken(spareToken)).toBe("spare");
+    expect(await reopened.removeRunner(USER, "spare")).toMatchObject({ name: "spare" });
+    expect(reopened.resolveRunnerToken(spareToken)).toBeNull();
+    await expect(reopened.removeRunner(USER, "spare")).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    expect(
+      (await reopened.readEvents(null)).filter((event) => event.type === "runner.removed"),
+    ).toHaveLength(3);
   });
 
   it("keeps the lease of a holder the user's pause holds, then lets it lapse from at least half a lease after", async () => {
@@ -3784,6 +4303,49 @@ describe("Board", () => {
     expect((await board.listAgentSkills("eng-1")).map((s) => [s.name, s.summary])).toEqual([
       ["old-keys", "Read the body."],
     ]);
+  });
+
+  it("tells whether a citizen wrote its memory and profile past the templates it was added with", async () => {
+    const { board } = await society();
+    expect(await board.readHomeWritten("eng-1")).toEqual({ memory: false, profile: false });
+    const memory = board.paths.agentMemoryCore("eng-1");
+    const profile = board.paths.agentProfile("eng-1");
+    // A lesson under the template's heading is written; the template saved again is not.
+    const template = await readFile(memory, "utf8");
+    await writeFile(memory, `${template}\n- The user prefers small pull requests.\n`, "utf8");
+    await writeFile(profile, `${await readFile(profile, "utf8")}\n\n`, "utf8");
+    expect(await board.readHomeWritten("eng-1")).toEqual({ memory: true, profile: false });
+    // A profile without frontmatter counts, and a missing or blank file does not.
+    await writeFile(profile, "I build web apps.\n", "utf8");
+    await rm(memory);
+    expect(await board.readHomeWritten("eng-1")).toEqual({ memory: false, profile: true });
+    await writeFile(profile, "\n\n", "utf8");
+    expect(await board.readHomeWritten("eng-1")).toEqual({ memory: false, profile: false });
+  });
+
+  it("ends a conversation's session on a runner, keeping the runner's name and no session for the CLI", async () => {
+    const { board } = await society();
+    // A home where no session began yet records the runner the ended one ran on.
+    await board.endSession("eng-1", "demo", "claude", "pod");
+    expect(await board.readSessions("eng-1", "demo")).toEqual({ runner: "pod" });
+    // On the same runner it keeps another CLI's session.
+    await board.writeSession("eng-1", "demo", "codex", "codex-session", "pod");
+    await board.writeSession("eng-1", "demo", "claude", "claude-session", "pod");
+    await board.endSession("eng-1", "demo", "claude", "pod");
+    expect(await board.readSessions("eng-1", "demo")).toEqual({
+      codex: "codex-session",
+      runner: "pod",
+    });
+    // On another runner the record of the first goes whole, as a session written there replaces it.
+    await board.endSession("eng-1", "demo", "claude", "far");
+    expect(await board.readSessions("eng-1", "demo")).toEqual({ runner: "far" });
+    // Beside a thread's record, which it leaves alone.
+    await board.writeSession("eng-1", "demo", "claude", "thread-session", "pod", "#dev");
+    await board.endSession("eng-1", "demo", "claude", "pod");
+    expect(await board.readSessions("eng-1", "demo", "#dev")).toEqual({
+      claude: "thread-session",
+      runner: "pod",
+    });
   });
 
   it("reads a citizen's skills, profile, and memory whose frontmatter does not parse", async () => {

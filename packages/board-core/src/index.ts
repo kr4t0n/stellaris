@@ -1,4 +1,11 @@
-export { Board, CHANNEL_POST_WAIT_MS, CLOSING_ATTEMPTS, SYSTEM_ACTOR } from "./board.js";
+export {
+  Board,
+  CHANNEL_POST_WAIT_MS,
+  CLOSING_ATTEMPTS,
+  IDEMPOTENCY_LOOKBACK,
+  THREAD_IDEMPOTENCY_LOOKBACK,
+  SYSTEM_ACTOR,
+} from "./board.js";
 export type {
   UserRequest,
   Actor,
@@ -22,6 +29,7 @@ export type {
   UnreadConversation,
 } from "./board.js";
 export { BoardError, isBoardError } from "./errors.js";
+export type { StreamedFile } from "./files.js";
 export { computeMetrics } from "./metrics.js";
 export type { MetricsCitizen, MetricsInput } from "./metrics.js";
 export { MetricsIndex } from "./metrics-index.js";
@@ -33,6 +41,8 @@ export { TOKEN_KINDS, TurnCounters, UNKNOWN_LABEL } from "./turn-counters.js";
 export type {
   FailedSeries,
   IdleSeries,
+  RunningSeries,
+  RunningTurn,
   SendBackSeries,
   TokenKind,
   TurnCounts,

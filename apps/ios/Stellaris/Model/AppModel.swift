@@ -72,6 +72,10 @@ enum SignInFailure: Error, Equatable {
   /// What each channel's new thread says so far, kept until it opens, so a sheet dismissed or built
   /// again comes back with its text.
   var newThreads: [String: NewThreadDraft] = [:]
+  /// The keys each channel's new thread last went with, kept until it opens, so one sent again
+  /// after a lost answer, or cancelled and sent again with the same text, is opened once. Signing
+  /// in or out drops them with the drafts.
+  private(set) var newThreadKeys: [String: NewThreadKeys] = [:]
   /// The message a link named in each conversation, marked and scrolled to once, as the web marks
   /// the message its address names.
   private(set) var marks: [Conversation: MessageMark] = [:]
@@ -295,20 +299,22 @@ enum SignInFailure: Error, Equatable {
     marks[conversation]?.reached = true
   }
 
-  /// Posts `body` to `conversation` as the user, then, without waiting, reads the conversation
-  /// again, and what waits on the user, which a post answers where it was asked, as the web's
-  /// composer does.
-  func post(_ body: String, to conversation: Conversation) async throws -> Message {
+  /// Posts `body` to `conversation` as the user with `key`, which a post sent again keeps, so the
+  /// board stores it once. The answer carries the message, so the conversation shows it at once;
+  /// the board's event for it reads the conversation again, as the web's composer leaves it to.
+  /// Then, without waiting, reads what waits on the user, which a post answers where it was asked.
+  func post(_ body: String, to conversation: Conversation, key: String = UUID().uuidString)
+    async throws -> Message
+  {
     let request =
       switch conversation {
-      case .channel(let ref): BoardAPI.postMessage(channel: ref, body: body)
-      case .thread(let id): BoardAPI.postMessage(thread: id, body: body)
+      case .channel(let ref): BoardAPI.postMessage(channel: ref, body: body, key: key)
+      case .thread(let id): BoardAPI.postMessage(thread: id, body: body, key: key)
       }
     let message = try await send(request)
     uploadFailures[conversation.key] = nil
-    let feed = feed(for: conversation)
+    feed(for: conversation).received(message)
     Task {
-      await feed.load(using: self)
       await store.reload(["requests"], using: self)
     }
     return message
@@ -406,14 +412,16 @@ enum SignInFailure: Error, Equatable {
   /// it in Chat and forgets the draft, as the web's New thread does.
   func openThread(in channel: String) async throws {
     let draft = newThreads[channel] ?? NewThreadDraft()
-    let thread = try await send(
-      BoardAPI.openThread(
-        channel: channel, title: draft.title.trimmingCharacters(in: .whitespacesAndNewlines)))
+    let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
     let first = draft.body.trimmingCharacters(in: .whitespacesAndNewlines)
+    let keys = NewThreadKeys(title: title, first: first, after: newThreadKeys[channel])
+    newThreadKeys[channel] = keys
+    let thread = try await send(BoardAPI.openThread(channel: channel, title: title, key: keys.open))
     if !first.isEmpty {
-      _ = try await send(BoardAPI.postMessage(thread: thread.id, body: first))
+      _ = try await send(BoardAPI.postMessage(thread: thread.id, body: first, key: keys.post))
     }
     newThreads[channel] = nil
+    newThreadKeys[channel] = nil
     if startingThread == channel {
       startingThread = nil
     }
@@ -478,6 +486,15 @@ enum SignInFailure: Error, Equatable {
     if advancing == id {
       advancing = nil
     }
+  }
+
+  /// Opens the decision sheet of a proposal that waits on the user: on Reject while a rejection's
+  /// reason is kept, so a sheet swiped away mid-rejection comes back to it, and on Approve
+  /// otherwise.
+  func openDecision(_ proposal: String) {
+    let reject = Verdict(proposal: proposal, choice: .reject)
+    let kept = !(reasons[reject] ?? "").isEmpty
+    deciding = kept ? reject : Verdict(proposal: proposal, choice: .approve)
   }
 
   /// Approves or rejects the proposal as the user, with the reason its sheet holds, which a
@@ -758,6 +775,7 @@ enum SignInFailure: Error, Equatable {
     browsing = nil
     marks = [:]
     newThreads = [:]
+    newThreadKeys = [:]
     forgetSubjects()
     live.clear()
     feeds = [:]
@@ -799,6 +817,7 @@ enum SignInFailure: Error, Equatable {
     viewing = nil
     startingThread = nil
     newThreads = [:]
+    newThreadKeys = [:]
     forgetSubjects()
     marks = [:]
     live.clear()

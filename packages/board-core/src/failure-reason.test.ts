@@ -217,6 +217,21 @@ const SHAPES: readonly (readonly ["claude" | "codex", FailedTurnEnd, string])[] 
     "auth",
   ],
   ["claude", failed("Not logged in · Please run /login"), "auth"],
+  // The account's refusals, as the live board logged them, an id left out.
+  [
+    "claude",
+    failed(
+      "API Error: Your account can't receive replies from Claude right now. You can find the next step in the Anthropic Verification Portal: https://portal.anthropic.com/verify?org=01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    ),
+    "auth",
+  ],
+  [
+    "claude",
+    failed(
+      "Claude Code can't use your Claude subscription, usually because a payment is past due · Pay or renew at https://claude.ai/settings/billing (if you just paid, try again shortly), or use an Anthropic API key instead",
+    ),
+    "auth",
+  ],
   // Codex 0.165.0's words through the adapter, for a stub refusing its refresh token as revoked,
   // and the words its binary holds for a refresh that failed otherwise.
   [

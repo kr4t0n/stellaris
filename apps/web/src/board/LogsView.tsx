@@ -3,40 +3,33 @@ import { Link } from "@tanstack/react-router";
 import { ago } from "../lib/format.js";
 import { useNow, useScheduler, useSignals } from "../lib/session.js";
 import { holdingNow, SIGNAL_LABEL, signalFacts } from "../lib/signals.js";
-import { LinkedText } from "./Entities.js";
-import { Island } from "./Island.js";
+import { LinkedText } from "../components/Entities.js";
+import { PaneHeader, PaneNote } from "./Pane.js";
 
 /**
- * The operations log: the signals the scheduler measured, newest first. It floats from the HUD
- * rather than living in the board, because it is the server's instrumentation, not conversation.
+ * The operations log, one of the status views: the signals the scheduler measured, newest first.
+ * It is the server's instrumentation, not conversation, so it has no channel in the board.
  */
-export function LogsIsland({ onClose }: { onClose: () => void }) {
+export function LogsView() {
   const signals = useSignals(true);
   const scheduler = useScheduler();
   const now = useNow(30_000);
   const records = signals.data ?? [];
   const holding = holdingNow(records, scheduler.data?.signals ?? []);
   return (
-    <Island
-      label="Operations log"
-      className="top-[72px] right-4 z-20 max-h-[min(70vh,640px)]"
-      style={{ width: 400 }}
-    >
-      <header className="flex items-center gap-3 border-b border-line px-4 py-3">
-        <h2 className="min-w-0 flex-1 text-heading">Operations log</h2>
-        <button
-          type="button"
-          aria-label="Close the log"
-          onClick={onClose}
-          className="grid size-7 shrink-0 place-items-center rounded-lg text-fg-tertiary hover:bg-surface-2/70 hover:text-fg-primary focus-visible:ring-2 focus-visible:ring-fg-primary/30 focus-visible:outline-none"
-        >
-          ×
-        </button>
-      </header>
+    <>
+      <PaneHeader
+        title="Operations log"
+        subtitle={
+          records.length === 0
+            ? undefined
+            : `${records.length === 1 ? "1 signal" : `${records.length} signals`}, newest first`
+        }
+      />
       {records.length === 0 ? (
-        <p className="px-4 py-4 text-meta">
+        <PaneNote>
           {signals.data === undefined ? "Reading the log…" : "Nothing measured yet."}
-        </p>
+        </PaneNote>
       ) : (
         <ol className="flex-1 overflow-y-auto">
           {records.toReversed().map(({ id, ts, signal }) => {
@@ -84,6 +77,6 @@ export function LogsIsland({ onClose }: { onClose: () => void }) {
           })}
         </ol>
       )}
-    </Island>
+    </>
   );
 }

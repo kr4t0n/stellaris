@@ -15,12 +15,15 @@ export function SubjectThread({
   thread,
   now,
   task,
+  target,
   empty,
 }: {
   thread: ThreadSummary;
   now: number;
   /** The task whose thread it is, to name the stages its steps mention. */
   task?: Task | undefined;
+  /** The message a link named, marked and scrolled to. */
+  target?: string | undefined;
   /** What to say while nothing has been posted. */
   empty: string;
 }) {
@@ -45,6 +48,7 @@ export function SubjectThread({
             members={members.data}
             now={now}
             task={task}
+            target={message.id === target}
           />
         ))
       )}

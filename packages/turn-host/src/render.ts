@@ -15,6 +15,12 @@ export interface OnboardingContext {
   readonly worktree: string;
   /** The project's open channels besides general, which a newcomer follows by choice. */
   readonly otherChannels?: readonly string[] | undefined;
+  /**
+   * Whether the citizen has written memory/core.md and profile.md, as its turns in other scopes and
+   * projects may have: the preamble asks for each only while it holds the board's template.
+   */
+  readonly memoryWritten: boolean;
+  readonly profileWritten: boolean;
 }
 
 export interface RenderInstructionsInput {
@@ -100,10 +106,21 @@ const GOVERNANCE = [
   "- Operations signals are counters and timers the board logs, listed in the prompt of a role that reads them: stages waiting for a holder, backlog per role, stages waiting on a role nobody fills, churn, stale threads, idle members, missing capabilities, replicas added, spend. They are not posts in any channel; interpreting them is your judgment.",
 ].join("\n");
 
-/** The onboarding preamble. It appears on an agent's first turn and never again. */
+/**
+ * The onboarding preamble. It appears on the first turn of a citizen's home in a scope, the one no
+ * session was recorded before, and on the onboarding turn of each project the citizen joins; every later
+ * new session there is told why it is new instead (`SessionAfresh`).
+ */
 export function renderOnboardingPreamble(context: OnboardingContext): string {
+  // What the citizen wrote elsewhere, named alone, so the notes never call written what they ask for.
+  const written = [
+    ...(context.memoryWritten ? ["memory"] : []),
+    ...(context.profileWritten ? ["profile"] : []),
+  ];
   return [
-    `This is your first turn as ${context.agentName}.`,
+    written.length === 0
+      ? `This is your first turn as ${context.agentName}.`
+      : `This is your first turn here as ${context.agentName}. Your home, with your ${written.join(" and ")}, is the one your turns elsewhere use.`,
     "",
     `Your role in one paragraph: ${context.roleSummary}`,
     "",
@@ -113,8 +130,16 @@ export function renderOnboardingPreamble(context: OnboardingContext): string {
       : [
           `You follow its general channel. It also has ${(context.otherChannels ?? []).map((ref) => `#${ref}`).join(", ")}, each a workstream such as a release: subscribe to one when your work there needs its posts. Its tasks and mentions reach you either way.`,
         ]),
-    "Your memory is empty. Write durable lessons about yourself, your craft, or the user to memory/core.md in your home directory.",
-    "Write profile.md in your home directory: one paragraph on what you do well and what to send your way. The roster the front desk routes with is built from it.",
+    ...(context.memoryWritten
+      ? []
+      : [
+          "Your memory is empty. Write durable lessons about yourself, your craft, or the user to memory/core.md in your home directory.",
+        ]),
+    ...(context.profileWritten
+      ? []
+      : [
+          "Write profile.md in your home directory: one paragraph on what you do well and what to send your way. The roster the front desk routes with is built from it.",
+        ]),
     "Read the project's instructions file, if it has one, before doing anything else.",
     "Silence is allowed, and every turn ends with the status object.",
   ].join("\n");

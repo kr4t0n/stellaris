@@ -89,10 +89,11 @@ server:
     annotations: {}
 
   # Prometheus's counters of finished turns, the tokens they used, idle and failed turns,
-  # send-backs, and the wake latency of mentions, at /metrics on a port of their own (STELLARIS_METRICS_PORT), which the container and
+  # send-backs, and the wake latency of mentions, and a gauge of the turns running now, at
+  # /metrics on a port of their own (STELLARIS_METRICS_PORT), which the container and
   # the Service expose and the Ingress never routes, since the main port's /metrics is the
   # interface's page. The port asks for no token and serves counts by citizen, CLI, model, outcome,
-  # trigger, reason, and project, nothing else.
+  # trigger, reason, and project or the society scope, nothing else.
   metrics:
     enabled: false
     port: 4701
@@ -343,6 +344,8 @@ runner:
 
   # The image runs as stellaris (uid 1000) in the shared `users` group (gid 100), which fsGroup
   # gives the volume; OnRootMismatch skips the recursive chown of a volume that is already right.
+  # Every turn runs as that one user too, so a turn can read the board tokens of the others in its
+  # pod and the runner's own: a pod is one trust domain.
   podSecurityContext:
     fsGroup: 100
     fsGroupChangePolicy: OnRootMismatch

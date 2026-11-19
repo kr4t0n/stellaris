@@ -216,18 +216,29 @@ public enum BoardAPI {
         contentType: imageType(of: data)?.mediaType ?? "application/octet-stream"))
   }
 
-  /// A post in a channel.
-  public static func postMessage(channel: String, body: String) -> BoardRequest<Message> {
-    fixed("post_message", PostInput(channel: channel, thread_id: nil, body: body))
+  /// A post in a channel. Sent again with the same `key`, as after an answer that never arrived,
+  /// the board stores it once and answers with the message it stored.
+  public static func postMessage(channel: String, body: String, key: String? = nil)
+    -> BoardRequest<Message>
+  {
+    fixed(
+      "post_message", PostInput(channel: channel, thread_id: nil, body: body, idempotency_key: key))
   }
 
-  /// A post in a thread.
-  public static func postMessage(thread: String, body: String) -> BoardRequest<Message> {
-    fixed("post_message", PostInput(channel: nil, thread_id: thread, body: body))
+  /// A post in a thread, with its key as in a channel.
+  public static func postMessage(thread: String, body: String, key: String? = nil)
+    -> BoardRequest<Message>
+  {
+    fixed(
+      "post_message", PostInput(channel: nil, thread_id: thread, body: body, idempotency_key: key))
   }
 
-  public static func openThread(channel: String, title: String) -> BoardRequest<BoardThread> {
-    fixed("open_thread", OpenThreadInput(channel: channel, title: title))
+  /// A new thread on a channel. Opened again with the same `key`, as after an answer that never
+  /// arrived, the board opens it once and answers with the thread it opened.
+  public static func openThread(channel: String, title: String, key: String? = nil)
+    -> BoardRequest<BoardThread>
+  {
+    fixed("open_thread", OpenThreadInput(channel: channel, title: title, idempotency_key: key))
   }
 
   /// Finishes the task's current stage as the user, with a note for its thread.
@@ -280,11 +291,13 @@ public enum BoardAPI {
     let channel: String?
     let thread_id: String?
     let body: String
+    let idempotency_key: String?
   }
 
   private struct OpenThreadInput: Encodable {
     let channel: String
     let title: String
+    let idempotency_key: String?
   }
 
   private struct AdvanceInput: Encodable {

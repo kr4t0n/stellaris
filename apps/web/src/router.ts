@@ -72,6 +72,8 @@ const routeTree = rootRoute.addChildren([
   createRoute({
     getParentRoute: () => rootRoute,
     path: "/task/$taskId",
+    // `message` is one in the task's thread, marked there; a link to the thread lands here.
+    validateSearch: messageSearch,
     component: lazyRouteComponent(() => import("./board/TaskView.js"), "TaskView"),
   }),
   createRoute({
@@ -97,6 +99,12 @@ const routeTree = rootRoute.addChildren([
       return window.success ? { window: window.data } : {};
     },
     component: lazyRouteComponent(() => import("./board/MetricsView.js"), "MetricsView"),
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    // The operations log, the server's signals, one of the status views.
+    path: "/logs",
+    component: lazyRouteComponent(() => import("./board/LogsView.js"), "LogsView"),
   }),
   createRoute({
     getParentRoute: () => rootRoute,

@@ -57,6 +57,20 @@ function json(route: Route, body: unknown, status = 200): Promise<void> {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
 
+/** How a link loses an answer the board sent: a reset, or a gateway's 502. */
+type Loss = "reset" | "502";
+
+/** Answers a write the fake stored, or loses the answer as `lost` says. */
+function answerOrLose(route: Route, stored: unknown, lost: Loss | undefined): Promise<void> {
+  if (lost === "502") {
+    return route.fulfill({ status: 502, contentType: "text/plain", body: "Bad Gateway" });
+  }
+  if (lost === "reset") {
+    return route.abort("connectionreset");
+  }
+  return json(route, stored);
+}
+
 interface Proposal {
   id: string;
   kind: string;
@@ -272,9 +286,12 @@ function unlinkedTask(): FakeTask {
   return task;
 }
 
-/** The same, with a check that names the user before Sign off, waiting on the user now. */
-function earlyApprovalTask(): FakeTask {
-  const check: FakeStage = { id: "s3", name: "Check", agent: "user", gate: true, holders: [] };
+/**
+ * The same, with a check that names the user before Sign off, waiting on the user now: a gate, or
+ * with `gate` false a stage the user does.
+ */
+function earlyApprovalTask(gate = true): FakeTask {
+  const check: FakeStage = { id: "s3", name: "Check", agent: "user", gate, holders: [] };
   return {
     ...unlinkedTask(),
     stages: [...TASK_STAGES.slice(0, 1), check, ...TASK_STAGES.slice(1)],
@@ -579,6 +596,23 @@ const DESK_TURN = {
   error: null,
   startedAt: "2026-09-29T09:00:00.000Z",
   toolCalls: 4,
+};
+
+/**
+ * A later turn of desk's whose report, two paragraphs as long as a busy turn's, runs many lines past
+ * the two a closed row shows.
+ */
+const DESK_LONG_TURN = {
+  ...DESK_TURN,
+  id: "01M3Q2DDDDDDDDDDDDDDDDDDF1",
+  turnId: "01M3Q2DDDDDDDDDDDDDDDDDDF2",
+  ts: "2026-09-29T10:12:00.000Z",
+  startedAt: "2026-09-29T10:00:00.000Z",
+  toolCalls: 31,
+  summary:
+    "Fixed the solver's tie-breaking so equal-cost paths come back in a stable order, with a test that failed before the fix on all three city graphs, and opened the pull request against dev with the timings of each graph before and after in its description. " +
+    "The suite passes locally in 4 minutes at a load of 2; CI is green on the head commit.\n\n" +
+    "Left open: the largest graph still takes 41 s to load from its CSV, most of it in parsing, which is a change of its own; the review may ask for the old order behind a flag, which the description offers. Nothing waits on the user yet.",
 };
 
 /**
@@ -1073,6 +1107,19 @@ export interface FakeBoard {
   refuseNext(message: string): void;
   /** Puts this many citizens in a turn at lab, and this many turns in the queue. */
   setWorking(running: number, queued?: number): void;
+  /**
+   * Stores the next post but loses its answer, as a link would: reset (the default), or answered by
+   * a gateway's 502.
+   */
+  loseNextPostAnswer(how?: Loss): void;
+  /** Opens the next thread but loses the answer, as `loseNextPostAnswer` does a post's. */
+  loseNextOpenAnswer(how?: Loss): void;
+  /** The posts stored with this body, in the task's thread or an ask's. */
+  stored(body: string): number;
+  /** The threads opened with this title. */
+  opened(title: string): number;
+  /** Gives studio's record this board sync, as its runner reported it, or none. */
+  setSync(sync: Record<string, unknown> | null): void;
 }
 
 /** The citizens `setWorking` puts in turns, in order. */
@@ -1262,10 +1309,14 @@ export async function fakeBoard(
     unlinked?: boolean;
     /** Links none either, and puts a check naming the user before Sign off, current. */
     earlyApproval?: boolean;
+    /** The same, with the check a stage the user does rather than a gate. */
+    ungated?: boolean;
     /** Adds ada, a researcher retired after two counted turns. */
     retired?: boolean;
     /** Adds ren, a researcher in lab with heartbeat turns, two of them in a task's thread. */
     heartbeats?: boolean;
+    /** Gives desk a second turn, whose report runs many lines past the two a closed row shows. */
+    longReport?: boolean;
     /**
      * Gives desk a model set apart from the one it reports, an effort, four projects, and turns on
      * two runners named as the chart names its pods, stew one of them, and adds hal, an
@@ -1288,6 +1339,8 @@ export async function fakeBoard(
   let answering: string | null = null;
   const writes: Write[] = [];
   let refusal: string | null = null;
+  const lostAnswers: Loss[] = [];
+  const lostOpens: Loss[] = [];
   let paused = false;
   let working: string[] = [];
   let queued: string[] = [];
@@ -1315,9 +1368,14 @@ export async function fakeBoard(
         : { pausedClis: pauses.pausedClis }),
     };
   };
-  const runnerRecords = (): Array<Record<string, unknown>> => [
+  // Each runner's name now, by the name it started with; a rename moves its pauses with it.
+  const runnerNames = new Map<string, string>();
+  const named = (runner: string): string => runnerNames.get(runner) ?? runner;
+  // studio's board sync, as its runner last reported it; the view reads it while it holds studio.
+  let studioSync: Record<string, unknown> | null = null;
+  const everyRunner = (): Array<Record<string, unknown>> => [
     {
-      name: "pod",
+      name: named("pod"),
       os: "linux",
       clis: ["claude", "codex"],
       capabilities: [],
@@ -1325,10 +1383,10 @@ export async function fakeBoard(
       gitIdentityMissing: ["email"],
       status: "connected",
       quotas: podQuotas,
-      ...pausesOf("pod"),
+      ...pausesOf(named("pod")),
     },
     {
-      name: "studio",
+      name: named("studio"),
       os: "darwin",
       clis: ["claude"],
       capabilities: [],
@@ -1336,19 +1394,24 @@ export async function fakeBoard(
       gitIdentityMissing: [],
       status: "connected",
       quotas: studioQuotas,
-      ...pausesOf("studio"),
+      ...pausesOf(named("studio")),
+      ...(studioSync === null ? {} : { sync: studioSync }),
     },
     {
-      name: "laptop",
+      name: named("laptop"),
       os: "darwin",
       clis: ["claude"],
       capabilities: ["gpu"],
       version: "0.3.10",
       status: "disconnected",
       quotas: laptopQuotas,
-      ...pausesOf("laptop"),
+      ...pausesOf(named("laptop")),
     },
   ];
+  // The runners removed, by the name each had then.
+  const removedRunners = new Set<string>();
+  const runnerRecords = (): Array<Record<string, unknown>> =>
+    everyRunner().filter((each) => !removedRunners.has(String(each["name"])));
   const crowded = options.crowded === true;
   const deskProjects = crowded ? ["lab", "atlas", "beacon", "comet"] : ["lab"];
   let deskModel: string | null = crowded ? "opus" : null;
@@ -1365,8 +1428,8 @@ export async function fakeBoard(
   let lab = crowded ? { ...PROJECT, runner: "stellaris-runner-1" } : PROJECT;
   // Approving its last stage sets the task landing, as the board does for a ghpr task.
   let task: FakeTask =
-    options.earlyApproval === true
-      ? earlyApprovalTask()
+    options.earlyApproval === true || options.ungated === true
+      ? earlyApprovalTask(options.ungated !== true)
       : options.unlinked === true
         ? unlinkedTask()
         : TASK;
@@ -1519,6 +1582,101 @@ export async function fakeBoard(
     if (request.method() !== "GET") {
       const body: Record<string, unknown> = request.postDataJSON() ?? {};
       writes.push({ path: pathname, body });
+      // A rename, refused as the board refuses one: to a name taken, or while desk is in a turn on
+      // pod, where it runs.
+      const rename = /^\/api\/runners\/([^/]+)\/name$/.exec(pathname);
+      if (rename !== null) {
+        const from = decodeURIComponent(rename[1] ?? "");
+        const to = typeof body["name"] === "string" ? body["name"] : "";
+        const records = runnerRecords();
+        const original = ["pod", "studio", "laptop"].find((each) => named(each) === from);
+        if (original === undefined) {
+          return json(route, { error: "NOT_FOUND", message: `runner ${from} not found` }, 404);
+        }
+        if (!/^[a-z0-9][a-z0-9-]{0,31}$/.test(to)) {
+          return json(
+            route,
+            {
+              error: "VALIDATION",
+              message: `${JSON.stringify(to)} is no runner name: a name is 1 to 32 lowercase letters, digits, or hyphens, starting with a letter or digit`,
+            },
+            400,
+          );
+        }
+        if (records.some((each) => each["name"] === to)) {
+          return json(
+            route,
+            { error: "ALREADY_EXISTS", message: `runner ${to} already exists` },
+            409,
+          );
+        }
+        if (original === "pod" && inFlight) {
+          return json(
+            route,
+            {
+              error: "INVALID_STATE",
+              message: `runner ${from} cannot be renamed while 1 turn(s) run or start there; pause it, and rename it once that ends`,
+            },
+            409,
+          );
+        }
+        runnerNames.set(original, to);
+        const pauses = runnerPauses.get(from);
+        if (pauses !== undefined) {
+          runnerPauses.delete(from);
+          runnerPauses.set(to, pauses);
+        }
+        const projects = lab.runner === from ? [lab.slug] : [];
+        if (lab.runner === from) {
+          lab = { ...lab, runner: to };
+        }
+        const agents = deskRunner === from ? ["desk"] : [];
+        if (deskRunner === from) {
+          deskRunner = to;
+        }
+        return json(route, {
+          runner: runnerRecords().find((each) => each["name"] === to),
+          projects,
+          agents,
+          sessions: projects.length + agents.length,
+        });
+      }
+      // A removal, refused as the hub and then the board refuse one: while the runner is connected
+      // and not paused, while desk is in a turn on pod, or while lab lives there.
+      const removal =
+        request.method() === "DELETE" ? /^\/api\/runners\/([^/]+)$/.exec(pathname) : null;
+      if (removal !== null) {
+        const name = decodeURIComponent(removal[1] ?? "");
+        const record = runnerRecords().find((each) => each["name"] === name);
+        if (record === undefined) {
+          return json(route, { error: "NOT_FOUND", message: `runner ${name} not found` }, 404);
+        }
+        const refuse = (message: string) => json(route, { error: "INVALID_STATE", message }, 409);
+        const turns = name === named("pod") && inFlight;
+        if (record["status"] === "connected" && record["paused"] === undefined) {
+          return refuse(
+            `runner ${name} cannot be removed while it is connected and not paused${turns ? " and 1 turn(s) run or start there; pause it, and remove it once that ends" : "; pause it first"}`,
+          );
+        }
+        if (turns) {
+          return refuse(
+            `runner ${name} cannot be removed while 1 turn(s) run or start there; pause it, and remove it once that ends`,
+          );
+        }
+        if (lab.runner === name) {
+          return refuse(
+            `runner ${name} cannot be removed while lab lives there; move it to another runner first`,
+          );
+        }
+        removedRunners.add(name);
+        runnerPauses.delete(name);
+        const projects = archived && ARCHIVED_PROJECT.runner === name ? ["iphone"] : [];
+        const agents = deskRunner === name ? ["desk"] : [];
+        if (deskRunner === name) {
+          deskRunner = null;
+        }
+        return json(route, { name, projects, agents, sessions: agents.length });
+      }
       const pause = /^\/api\/runners\/([^/]+)\/(pause|resume)(?:\/([^/]+))?$/.exec(pathname);
       if (pause !== null) {
         const [, runner = "", verb, cli] = pause;
@@ -1719,6 +1877,14 @@ export async function fakeBoard(
             payload: body,
           });
         case "/api/verbs/open_thread": {
+          // An open sent again with its key is answered with the thread it opened, as the board does.
+          const key = body["idempotency_key"];
+          const opened = [...asks.values()].find(
+            (each) => key !== undefined && each.thread["idempotencyKey"] === key,
+          );
+          if (opened !== undefined) {
+            return json(route, opened.thread);
+          }
           const thread = {
             id: `01M3Q2HHHHHHHHHHHHHHHHHHH${asks.size + 2}`,
             channel: body["channel"],
@@ -1726,13 +1892,24 @@ export async function fakeBoard(
             state: "open",
             openedBy: "user",
             openedAt: "2026-09-29T10:00:00.000Z",
+            ...(key === undefined ? {} : { idempotencyKey: key }),
             body: "",
           };
           asks.set(thread.id, { thread, messages: [] });
-          return json(route, thread);
+          return answerOrLose(route, thread, lostOpens.shift());
         }
         case "/api/verbs/post_message": {
+          // A post sent again with its key is answered with the one stored, as the board does.
+          const key = body["idempotency_key"];
+          const keyed = key === undefined ? {} : { idempotencyKey: key };
           const ask = asks.get(String(body["thread_id"]));
+          const place = ask?.messages ?? threadMessages;
+          const stored = place.find((each) => key !== undefined && each["idempotencyKey"] === key);
+          if (stored !== undefined) {
+            return json(route, stored);
+          }
+          const answer = (posted: Record<string, unknown>): Promise<void> =>
+            answerOrLose(route, posted, lostAnswers.shift());
           if (ask !== undefined) {
             const posted = {
               ...askMessage(
@@ -1742,10 +1919,11 @@ export async function fakeBoard(
                 String(body["body"]),
               ),
               ts: "2026-09-29T10:00:00.000Z",
+              ...keyed,
             };
             ask.messages.push(posted);
             answering = String(ask.thread["id"]);
-            return json(route, posted);
+            return answer(posted);
           }
           const posted = {
             id: `01M3Q2AAAAAAAAAAAAAAAAAAB${threadMessages.length + 1}`,
@@ -1755,18 +1933,27 @@ export async function fakeBoard(
             ts: "2026-09-29T10:00:00.000Z",
             mentions: [],
             body: body["body"],
+            ...keyed,
           };
           threadMessages.push(posted);
           if (body["thread_id"] === STAGE_TASK) {
             waitingAsk = false;
           }
-          return json(route, posted);
+          return answer(posted);
         }
         case "/api/pause":
         case "/api/resume":
           paused = pathname === "/api/pause";
           return json(route, { paused });
         case `/api/enrollments/${ENROLLING_CODE}/approve`:
+          // The board refuses a name a runner has, as it does any time.
+          if (runnerRecords().some((each) => each["name"] === body["name"])) {
+            return json(
+              route,
+              { error: "ALREADY_EXISTS", message: `runner ${String(body["name"])} already exists` },
+              409,
+            );
+          }
           enrolling = false;
           return json(route, {
             name: body["name"],
@@ -1912,7 +2099,7 @@ export async function fakeBoard(
       case "/api/agents/desk/models":
         return json(route, { runner: "pod", cli: "claude", models: CLAUDE_MODELS });
       case "/api/agents/desk/turns":
-        return json(route, [DESK_TURN]);
+        return json(route, options.longReport === true ? [DESK_TURN, DESK_LONG_TURN] : [DESK_TURN]);
       case `/api/agents/desk/turns/${DESK_TURN_ID}`:
         return json(route, DESK_TRANSCRIPT);
       case "/api/agents/ren/turns":
@@ -2094,6 +2281,20 @@ export async function fakeBoard(
     setWorking: (running, waiting = 0) => {
       working = WORKERS.slice(0, running).map((name) => `${name}/lab`);
       queued = WORKERS.slice(running, running + waiting).map((name) => `${name}/lab`);
+    },
+    loseNextPostAnswer: (how = "reset") => {
+      lostAnswers.push(how);
+    },
+    loseNextOpenAnswer: (how = "reset") => {
+      lostOpens.push(how);
+    },
+    stored: (text) =>
+      [...threadMessages, ...[...asks.values()].flatMap((each) => each.messages)].filter(
+        (each) => each["body"] === text,
+      ).length,
+    opened: (title) => [...asks.values()].filter((each) => each.thread["title"] === title).length,
+    setSync: (sync) => {
+      studioSync = sync;
     },
   };
 }

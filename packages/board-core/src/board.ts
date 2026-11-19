@@ -67,6 +67,7 @@ import {
   RetirementProposalSchema,
   RoleCharterSchema,
   RunnerSchema,
+  RunnerSyncSchema,
   mergeQuota,
   quotaChanged,
   SEED_ROLES,
@@ -120,6 +121,11 @@ import {
   type RoleCharter,
   type RoleCharterInput,
   type Runner,
+  type RunnerRemoved,
+  type RunnerRenamed,
+  type RunnerSync,
+  type RunnerSyncProgress,
+  type BoardStreamStart,
   type Skill,
   type SkillFileContent,
   type SkillFiles,
@@ -161,7 +167,7 @@ import {
 import { MENTION_PATTERN } from "@stellaris/shared/mentions";
 import { BoardError } from "./errors.js";
 import { EventLog } from "./events.js";
-import { FileTree } from "./files.js";
+import { FileTree, type StreamedFile } from "./files.js";
 import { HomeRepos } from "./homes.js";
 import { withoutMetadata } from "@stellaris/shared/image-metadata";
 import { MoveRepos } from "./moves.js";
@@ -314,10 +320,15 @@ export interface RunnerPatch {
    * said nothing, as an older runner's does, which drops what an earlier one reported.
    */
   readonly gitIdentityMissing?: readonly GitIdentityPart[] | null | undefined;
+  /** The sync of the runner's board copy its hello started; null drops it, as an older runner's does. */
+  readonly sync?: RunnerSync | null | undefined;
 }
 
 /** What a walk of a home skips: the repository itself, transcripts, and the CLIs' configuration. */
 const SKIPPED_IN_HOME = new Set([".git", "turns", ".claude", ".codex"]);
+
+/** How many conversations' session records a runner's rename reads, or writes, at once. */
+const SESSION_BATCH = 64;
 
 /** Runner token hashes by runner name, kept in the state directory rather than the projection. */
 const RunnerTokensSchema = z.object({
@@ -540,6 +551,23 @@ const PausedSchema = z.object({ paused: z.boolean() });
 const DEFAULT_LEASE_MS = 30 * 60 * 1000;
 
 /**
+ * How many of an author's latest posts in a thread or channel a post's idempotency key is looked for
+ * among. A client sends a post again soon after losing its answer, so its key is among these; one
+ * sent again after the author posted this many more there, as the app can after a fresh start, is
+ * stored as a new post. The look reads at most this many small files.
+ */
+export const IDEMPOTENCY_LOOKBACK = 20;
+
+/**
+ * How many of the newest threads of a channel's project, or of the society's channels, an open's
+ * idempotency key is looked for among, whoever opened them: a thread's file is named by its id
+ * alone, so its opener's own can't be picked by name as a post's can. A client opens again soon
+ * after losing the answer; one that opens again after this many more threads opened there, by
+ * anyone, gets a new thread. The look reads at most this many small files.
+ */
+export const THREAD_IDEMPOTENCY_LOOKBACK = 50;
+
+/**
  * Free text quoted in a board notice, its mentions written as plain names so they wake nobody. Every
  * `@name` goes, in code too, since code in the text alone may not be code in the post it is quoted in.
  */
@@ -606,8 +634,16 @@ const PLANNING_ROLES: readonly Name[] = [USER_ROLE, "steward", "concierge"];
 /** Roles that may add a citizen to a project or remove one, beyond the citizen itself. */
 const REALLOCATING_ROLES: readonly Name[] = [USER_ROLE, "steward", "concierge"];
 
+/** What a new citizen's memory/core.md and profile.md hold until the citizen writes them. */
+const MEMORY_CORE_TEMPLATE =
+  "# Core memory\n\nShort, curated, loaded on every turn. Keep entries that change future behavior and hold across tasks.\n";
 const PROFILE_TEMPLATE =
   "# Profile\n\nOne short paragraph, kept current: what I do well, what I am working on, and what to send my way. The board projects this into the roster the front desk reads.\n";
+
+/** Whether a file's body holds more than the template the board wrote, whitespace aside. */
+function writtenPast(body: string, template: string): boolean {
+  return body.trim().length > 0 && body.trim() !== template.trim();
+}
 
 /** A plain rendering of a provisioning summary value for a post, without falling back to `[object Object]`. */
 function plain(value: unknown): string {
@@ -1694,11 +1730,13 @@ export class Board {
         throw new BoardError("NOT_FOUND", `runner ${name} not found`);
       }
       const doc = await readMarkdown(file, RunnerSchema);
-      const { gitIdentityMissing: reported, ...rest } = doc.data;
+      const { gitIdentityMissing: reported, sync: syncing, ...rest } = doc.data;
       const gitIdentityMissing =
         patch.gitIdentityMissing === undefined ? reported : (patch.gitIdentityMissing ?? undefined);
+      const sync = patch.sync === undefined ? syncing : (patch.sync ?? undefined);
       const next: Runner = RunnerSchema.parse({
         ...rest,
+        ...(sync === undefined ? {} : { sync }),
         ...(gitIdentityMissing === undefined
           ? {}
           : { gitIdentityMissing: [...gitIdentityMissing] }),
@@ -1725,6 +1763,49 @@ export class Board {
           key: `runner:${name}`,
           summary: `runner ${name} is ${next.status}${clis}${capabilities}`,
           value: next.status === "connected" ? 1 : 0,
+        });
+      }
+      return next;
+    });
+  }
+
+  /**
+   * Records how far a runner's board sync has come, as the runner reported it, over the sync its
+   * hello started. The record is written on every report, which the interface reads again while a
+   * sync runs; `runner.synced` is appended once it is done, which lifts the hold on its turns.
+   */
+  async recordRunnerSync(
+    name: Name,
+    report: RunnerSyncProgress & { readonly retryInMs?: number | undefined },
+  ): Promise<Runner> {
+    return this.mutex.run(async () => {
+      const file = this.paths.runner(name);
+      if (!(await exists(file))) {
+        throw new BoardError("NOT_FOUND", `runner ${name} not found`);
+      }
+      const doc = await readMarkdown(file, RunnerSchema);
+      const now = this.now();
+      const { retryInMs, ...progress } = report;
+      const startedAt = doc.data.sync?.startedAt ?? now.toISOString();
+      const done = progress.phase === "done";
+      const sync: RunnerSync = RunnerSyncSchema.parse({
+        ...progress,
+        startedAt,
+        updatedAt: now.toISOString(),
+        ...(retryInMs === undefined || done
+          ? {}
+          : { nextTryAt: new Date(now.getTime() + retryInMs).toISOString() }),
+        ...(done ? { finishedAt: now.toISOString() } : {}),
+      });
+      const next: Runner = RunnerSchema.parse({ ...doc.data, sync });
+      await writeMarkdown(file, next, doc.body);
+      if (done && doc.data.sync?.phase !== "done") {
+        await this.events.append("runner.synced", SYSTEM_ACTOR.name, {
+          name,
+          files: sync.files,
+          bytes: sync.bytes,
+          attempts: sync.attempt,
+          ms: now.getTime() - Date.parse(startedAt),
         });
       }
       return next;
@@ -1940,16 +2021,57 @@ export class Board {
     const args = VerbInputs.post_message.parse(input);
     await this.authorize(actor, "post_message");
     return this.mutex.run(async () => {
+      const keyed =
+        args.idempotency_key === undefined ? {} : { idempotencyKey: args.idempotency_key };
       if (args.thread_id !== undefined) {
         return this.appendThreadMessage(actor.name, args.thread_id, args.body, {
           channel: args.channel,
+          ...keyed,
         });
       }
       if (args.channel === undefined) {
         throw new BoardError("VALIDATION", "a message needs a channel, or a thread_id");
       }
-      return this.appendMessage(actor.name, args.channel, args.body);
+      return this.appendMessage(actor.name, args.channel, args.body, undefined, keyed);
     });
+  }
+
+  /**
+   * The post `author` already stored in `dir` with `key`, among its latest `IDEMPOTENCY_LOOKBACK`
+   * there, or null. A post sent again with its key is answered with it and writes nothing; the key
+   * sent with another body is refused, since a client makes a new key when its text changes.
+   */
+  private async keyedPost(
+    dir: string,
+    author: Name,
+    key: string,
+    body: string,
+  ): Promise<Message | null> {
+    // A message's file is `<id>-<author>.md`, so the author's own are found by name.
+    const own = (await listFiles(dir))
+      .filter((file) => file.slice(27, -".md".length) === author)
+      .slice(-IDEMPOTENCY_LOOKBACK);
+    // Read at once, and only a file whose text holds the key is parsed: under the write lock, the
+    // look costs about what one read does.
+    const texts = await Promise.all(own.map((file) => readFile(path.join(dir, file), "utf8")));
+    for (let at = own.length - 1; at >= 0; at -= 1) {
+      const file = own[at];
+      if (file === undefined || texts[at]?.includes(key) !== true) {
+        continue;
+      }
+      const doc = await readMarkdown(path.join(dir, file), MessageFrontmatterSchema);
+      if (doc.data.idempotencyKey !== key) {
+        continue;
+      }
+      if (doc.body.trim() !== body.trim()) {
+        throw new BoardError(
+          "ALREADY_EXISTS",
+          `idempotency key ${key} was sent with another message, ${doc.data.id}`,
+        );
+      }
+      return { ...doc.data, body: doc.body };
+    }
+    return null;
   }
 
   /**
@@ -3079,20 +3201,74 @@ export class Board {
     await this.authorize(actor, "open_thread");
     return this.mutex.run(async () => {
       await this.assertChannelOpen(args.channel);
+      const key = args.idempotency_key;
+      if (key !== undefined) {
+        const opened = await this.keyedThread(args.channel, actor.name, key, args.title);
+        if (opened !== null) {
+          return opened;
+        }
+      }
       return this.openThreadUnlocked(actor.name, {
         id: this.newId(),
         channel: args.channel,
         title: args.title,
+        ...(key === undefined ? {} : { idempotencyKey: key }),
       });
     });
+  }
+
+  /**
+   * The thread `author` already opened on `channel` with `key`, among the newest
+   * `THREAD_IDEMPOTENCY_LOOKBACK` threads of the channel's scope, or null. An open sent again with
+   * its key is answered with it and writes nothing; the key sent with another title is refused, as
+   * a post's with another body is.
+   */
+  private async keyedThread(
+    channel: ChannelRef,
+    author: Name,
+    key: string,
+    title: string,
+  ): Promise<Thread | null> {
+    const threads = this.paths.threadsOf(channel);
+    // A thread's file is `<id>.md`, so the newest are found by name, whoever opened them.
+    const newest = (await listFiles(threads)).slice(-THREAD_IDEMPOTENCY_LOOKBACK);
+    // Read at once, and only a file whose text holds the key is parsed, as for a post.
+    const texts = await Promise.all(
+      newest.map((file) => readFile(path.join(threads, file), "utf8")),
+    );
+    for (let at = newest.length - 1; at >= 0; at -= 1) {
+      const file = newest[at];
+      if (file === undefined || texts[at]?.includes(key) !== true) {
+        continue;
+      }
+      const doc = await readMarkdown(path.join(threads, file), ThreadFrontmatterSchema);
+      const { data } = doc;
+      if (data.idempotencyKey !== key || data.openedBy !== author || data.channel !== channel) {
+        continue;
+      }
+      if (data.title.trim() !== title.trim()) {
+        throw new BoardError(
+          "ALREADY_EXISTS",
+          `idempotency key ${key} was sent with another title, opening thread ${data.id}`,
+        );
+      }
+      return { ...data, body: doc.body };
+    }
+    return null;
   }
 
   /** Writes a new open thread and its event. Callers hold the mutex and chose where it hangs. */
   private async openThreadUnlocked(
     by: Name,
-    opening: { id: Ulid; channel: ChannelRef; title: string; subject?: ThreadSubject },
+    opening: {
+      id: Ulid;
+      channel: ChannelRef;
+      title: string;
+      subject?: ThreadSubject;
+      idempotencyKey?: string;
+    },
   ): Promise<Thread> {
-    const { id, channel, title, subject } = opening;
+    const { id, channel, title, subject, idempotencyKey } = opening;
     const threads = this.paths.threadsOf(channel);
     await ensureDir(this.paths.threadMessages(threads, id));
     const thread = await this.writeThread(threads, {
@@ -3103,6 +3279,7 @@ export class Board {
       state: "open",
       openedBy: by,
       openedAt: this.now().toISOString(),
+      ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
       body: "",
     });
     await this.events.append("thread.opened", by, {
@@ -4428,7 +4605,8 @@ export class Board {
    * steer, itself; one another process appended would count from the next seed. A turn ended before ends carried their board actions has its
    * transcript read once, here, for the idle count. Mentions are matched with the citizens of
    * the seed, as the Metrics view matches them with today's, and from then on with those of when
-   * each is posted.
+   * each is posted. The turns running are those `watchTurns` gives at each read, never a start
+   * the log holds without an end.
    */
   async countTurns(): Promise<TurnCounters> {
     const clis = new Map<string, CliKind | null>();
@@ -4439,6 +4617,7 @@ export class Board {
       (agent) => clis.get(agent) ?? null,
       (turnId) => actions.get(turnId),
       roster,
+      () => this.turnsInFlight(),
     );
     // Ends appended while the log is read wait, and count once unless the read held them.
     let waiting: BoardEvent[] | null = [];
@@ -4510,6 +4689,17 @@ export class Board {
   async readMemoryCore(agent: Name): Promise<string> {
     const file = this.paths.agentMemoryCore(agent);
     return (await exists(file)) ? (await readLooseMarkdown(file)).body : "";
+  }
+
+  /**
+   * Whether a citizen has written its memory/core.md and its profile.md: each holds more than the
+   * template the board wrote when the citizen was added.
+   */
+  async readHomeWritten(agent: Name): Promise<{ memory: boolean; profile: boolean }> {
+    return {
+      memory: writtenPast(await this.readMemoryCore(agent), MEMORY_CORE_TEMPLATE),
+      profile: writtenPast(await this.readProfile(agent), PROFILE_TEMPLATE),
+    };
   }
 
   /**
@@ -4633,6 +4823,30 @@ export class Board {
       const { [cli]: _dropped, ...kept } = current;
       await writeJson(file, kept);
       return true;
+    });
+  }
+
+  /**
+   * Records that a conversation's session for a CLI ended on `runner` and none is kept, as when a
+   * reflection that began its own session completes: the record names the runner, so the
+   * conversation's next turn is no first turn, and holds no session for the CLI. A record of
+   * another runner goes, as `writeSession` replaces one, since sessions do not move between machines.
+   */
+  async endSession(
+    agent: Name,
+    project: Name,
+    cli: CliKind,
+    runner: Name,
+    part?: string,
+  ): Promise<void> {
+    await this.mutex.run(async () => {
+      const dir = this.sessionDir(agent, project, part);
+      await ensureDir(dir);
+      const file = path.join(dir, "sessions.json");
+      const current = (await exists(file)) ? await readJson(file, SessionsFileSchema) : {};
+      const { [cli]: _ended, ...kept } =
+        current.runner === undefined || current.runner === runner ? current : {};
+      await writeJson(file, { ...kept, runner });
     });
   }
 
@@ -5133,6 +5347,223 @@ export class Board {
   }
 
   /**
+   * Renames a runner, which only the user does, and every record that names it: the projects
+   * living on it, archived ones too, the citizens pinned to it, and every conversation's session
+   * record, so sessions begun there go on resuming under the new name. Its token stays, and now
+   * answers to `to`. Turn records and events keep the name they were written with. The hub
+   * (`RunnerHub.renameRunner`) checks first that nothing runs there.
+   *
+   * The records go first and the runner's token and own record last, so a rename cut short, by a
+   * crash or a failed write, finishes when run again. Until the token moves, `to` is still free;
+   * once it has, its entry under `to` marks the rename as this one, so a record already written
+   * under `to` is kept, being the one the token answers to, and the old one goes. Once the old
+   * record is gone the rename is whole, though a crash right then leaves it unlogged.
+   */
+  async renameRunner(actor: Actor, from: Name, to: Name): Promise<RunnerRenamed> {
+    this.assertUser(actor, "only the user may rename a runner");
+    const parsed = NameSchema.safeParse(to);
+    if (!parsed.success) {
+      throw new BoardError(
+        "VALIDATION",
+        `${JSON.stringify(to)} is no runner name: a name is 1 to 32 lowercase letters, digits, or hyphens, starting with a letter or digit`,
+      );
+    }
+    const name = parsed.data;
+    return this.mutex.run(async () => {
+      const current = await this.readRunner(from);
+      if (name === from) {
+        throw new BoardError("INVALID_STATE", `runner ${from} is already named ${name}`);
+      }
+      const tokens = await this.readRunnerTokens();
+      const finishing = tokens[from] === undefined && tokens[name] !== undefined;
+      const written = await exists(this.paths.runner(name));
+      if (written && !finishing) {
+        throw new BoardError("ALREADY_EXISTS", `runner ${name} already exists`);
+      }
+      const projects: Name[] = [];
+      for (const slug of await listDirs(this.paths.projects())) {
+        if ((await this.readProject(slug)).runner === from) {
+          await this.updateProject(slug, (project) => ({ ...project, runner: name }));
+          projects.push(slug);
+        }
+      }
+      const agents: Name[] = [];
+      for (const agent of await this.listAgents()) {
+        if (agent.homeRunner === from) {
+          await this.updateAgent(agent.name, (each) => ({ ...each, homeRunner: name }));
+          await this.refreshMember(agent.name);
+          agents.push(agent.name);
+        }
+      }
+      // A citizen may have a record for each of hundreds of threads, read under the mutex, so
+      // they are read and written a batch at a time.
+      let sessions = 0;
+      const files = await this.sessionFiles();
+      for (let at = 0; at < files.length; at += SESSION_BATCH) {
+        const renamed = await Promise.all(
+          files.slice(at, at + SESSION_BATCH).map(async (file) => {
+            const record = await readJson(file, SessionsFileSchema);
+            if (record.runner !== from) {
+              return false;
+            }
+            await writeJson(file, { ...record, runner: name });
+            return true;
+          }),
+        );
+        sessions += renamed.filter((each) => each).length;
+      }
+      const { [from]: moving, ...others } = tokens;
+      if (moving !== undefined) {
+        await writeJson(this.runnerTokensFile(), { runners: { ...others, [name]: moving } });
+      }
+      const token = moving ?? tokens[name];
+      let runner: Runner;
+      if (written) {
+        runner = await this.readRunner(name);
+      } else {
+        const doc = await readMarkdown(this.paths.runner(from), RunnerSchema);
+        runner = RunnerSchema.parse({ ...current, name });
+        const heading = `# ${from}\n`;
+        await writeMarkdown(
+          this.paths.runner(name),
+          runner,
+          doc.body.startsWith(heading) ? `# ${name}\n${doc.body.slice(heading.length)}` : doc.body,
+        );
+      }
+      await rm(this.paths.runner(from), { force: true });
+      await this.events.append("runner.renamed", actor.name, {
+        from,
+        to: name,
+        projects,
+        agents,
+        sessions,
+      });
+      // Last, with no wait after it: the runner's next request, a registration included, names it
+      // `to` only once the caller holds the rename, so the hub re-keys before any arrives.
+      if (token !== undefined) {
+        this.runnerTokens.set(token.tokenHash, name);
+      }
+      return { runner, projects, agents, sessions };
+    });
+  }
+
+  /**
+   * Removes a runner, which only the user does, with what names it: `runner` on the archived
+   * projects that lived on it, the pins of the citizens pinned to it, so each is pinned again on its
+   * next turn outside a project, and the CLIs' session ids in every conversation's session record
+   * begun there, so a runner later given the name never tries to resume them, while the record
+   * keeps naming the runner, so the conversation's next turn elsewhere starts afresh as one after a
+   * move does, not as a first turn. Its token stops answering. A project that still
+   * lives there refuses the removal, since its repository is there: the user moves it first. Turn
+   * records and events keep the name. The hub (`RunnerHub.removeRunner`) checks first that nothing
+   * runs there and that the runner is paused or away.
+   *
+   * The records go first, then the token, and the runner's own record last, so a removal cut short,
+   * by a crash or a failed write, finishes when run again: the runner counts as known while its
+   * record or its token's entry is left. Once both are gone the removal is whole, though a crash
+   * right then leaves it unlogged.
+   */
+  async removeRunner(actor: Actor, name: Name): Promise<RunnerRemoved> {
+    this.assertUser(actor, "only the user may remove a runner");
+    const parsed = NameSchema.parse(name);
+    return this.mutex.run(async () => {
+      const tokens = await this.readRunnerTokens();
+      if (!(await exists(this.paths.runner(parsed))) && tokens[parsed] === undefined) {
+        throw new BoardError("NOT_FOUND", `runner ${parsed} not found`);
+      }
+      const living: Name[] = [];
+      const projects: Name[] = [];
+      for (const slug of await listDirs(this.paths.projects())) {
+        const project = await this.readProject(slug);
+        if (project.runner === parsed) {
+          (project.archived === undefined ? living : projects).push(slug);
+        }
+      }
+      if (living.length > 0) {
+        const one = living.length === 1;
+        throw new BoardError(
+          "INVALID_STATE",
+          `runner ${parsed} cannot be removed while ${living.join(", ")} ${one ? "lives" : "live"} there; move ${one ? "it" : "them"} to another runner first`,
+        );
+      }
+      for (const slug of projects) {
+        await this.updateProject(slug, ({ runner: _removed, ...rest }) => rest);
+      }
+      const agents: Name[] = [];
+      for (const agent of await this.listAgents()) {
+        if (agent.homeRunner === parsed) {
+          await this.updateAgent(agent.name, ({ homeRunner: _removed, ...rest }) => rest);
+          await this.refreshMember(agent.name);
+          agents.push(agent.name);
+        }
+      }
+      // Read and written a batch at a time, as a rename does. Only the sessions' ids go, as when a
+      // session ends: a record that kept none, as a removal cut short leaves, counts no more.
+      let sessions = 0;
+      const files = await this.sessionFiles();
+      for (let at = 0; at < files.length; at += SESSION_BATCH) {
+        const cleared = await Promise.all(
+          files.slice(at, at + SESSION_BATCH).map(async (file) => {
+            const record = await readJson(file, SessionsFileSchema);
+            if (
+              record.runner !== parsed ||
+              (record.claude === undefined && record.codex === undefined)
+            ) {
+              return false;
+            }
+            const { claude: _claude, codex: _codex, ...kept } = record;
+            await writeJson(file, kept);
+            return true;
+          }),
+        );
+        sessions += cleared.filter((each) => each).length;
+      }
+      const { [parsed]: removed, ...others } = tokens;
+      if (removed !== undefined) {
+        await writeJson(this.runnerTokensFile(), { runners: others });
+      }
+      for (const [hash, owner] of this.runnerTokens) {
+        if (owner === parsed) {
+          this.runnerTokens.delete(hash);
+        }
+      }
+      await rm(this.paths.runner(parsed), { force: true });
+      await this.events.append("runner.removed", actor.name, {
+        name: parsed,
+        projects,
+        agents,
+        sessions,
+      });
+      return { name: parsed, projects, agents, sessions };
+    });
+  }
+
+  /** Every conversation's session record, each citizen's scopes and the threads, channels, and places beside them. */
+  private async sessionFiles(): Promise<string[]> {
+    const dirs: string[] = [];
+    for (const agent of await listDirs(this.paths.agents())) {
+      for (const scope of await listDirs(this.paths.agentProjects(agent))) {
+        const dir = this.paths.agentProject(agent, scope);
+        dirs.push(dir);
+        for (const kind of ["threads", "channels", "places"]) {
+          for (const part of await listDirs(path.join(dir, kind))) {
+            dirs.push(path.join(dir, kind, part));
+          }
+        }
+      }
+    }
+    const files: string[] = [];
+    for (let at = 0; at < dirs.length; at += SESSION_BATCH) {
+      const batch = dirs
+        .slice(at, at + SESSION_BATCH)
+        .map((dir) => path.join(dir, "sessions.json"));
+      const found = await Promise.all(batch.map((file) => exists(file)));
+      files.push(...batch.filter((_, index) => found[index] === true));
+    }
+    return files;
+  }
+
+  /**
    * Places a project on the runner that will hold its repository, unless it already lives on one,
    * and returns where it lives. Placement is once: every later turn of the project goes there,
    * until the user moves the project (`recordProjectMove`).
@@ -5218,7 +5649,7 @@ export class Board {
   /**
    * Pins an agent's work outside any project to a runner, unless it is pinned already, and returns
    * where it is pinned. With `from`, it moves the pin only while it still names `from`, so two
-   * turns that both find a runner gone move it once.
+   * turns that both find a runner without the agent's CLI move it once.
    */
   async pinAgent(name: Name, runner: Name, from?: Name): Promise<Name> {
     return this.mutex.run(async () => {
@@ -5368,6 +5799,14 @@ export class Board {
     return this.files.read(this.paths.board, paths, () => true);
   }
 
+  /**
+   * The whole projection, for a runner's first copy: its totals, then each file whose path sorts
+   * after `after`, in order, read as it is reached (`FileTree.stream`).
+   */
+  boardStream(after: string | null): AsyncGenerator<BoardStreamStart | StreamedFile> {
+    return this.files.stream(this.paths.board, after, () => true);
+  }
+
   private async writeTurnRecord(record: TurnRecord): Promise<void> {
     const dir = this.sessionDir(record.agent, record.project, conversationPart(record));
     await ensureDir(dir);
@@ -5478,7 +5917,7 @@ export class Board {
       await writeMarkdown(
         this.paths.agentMemoryCore(agent.name),
         { agent: agent.name, updatedAt: agent.createdAt },
-        `# Core memory\n\nShort, curated, loaded on every turn. Keep entries that change future behavior and hold across tasks.\n`,
+        MEMORY_CORE_TEMPLATE,
       );
     }
     if (!(await exists(this.paths.agentProfile(agent.name)))) {
@@ -6500,17 +6939,34 @@ export class Board {
     return { agent, releasedTasks };
   }
 
-  /** Writes one message and its event. Callers hold the mutex and have authorized the author. */
+  /**
+   * Writes one message and its event, unless `idempotencyKey` names one the author stored there
+   * already, which is answered instead. Callers hold the mutex and have authorized the author.
+   */
   private async appendMessage(
     author: Name,
     channel: ChannelRef,
     body: string,
     notice?: MessageNotice,
+    options: { idempotencyKey?: string | undefined } = {},
   ): Promise<Message> {
     await this.assertChannelOpen(channel);
+    const dir = this.paths.channelDir(channel);
+    const { idempotencyKey } = options;
+    if (idempotencyKey !== undefined) {
+      const stored = await this.keyedPost(dir, author, idempotencyKey, body);
+      if (stored !== null) {
+        return stored;
+      }
+    }
     return this.writeMessage(
-      this.paths.channelDir(channel),
-      { author, channel, ...(notice === undefined ? {} : { notice }) },
+      dir,
+      {
+        author,
+        channel,
+        ...(notice === undefined ? {} : { notice }),
+        ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
+      },
       body,
     );
   }
@@ -6520,7 +6976,11 @@ export class Board {
     author: Name,
     threadId: Ulid,
     body: string,
-    options: { channel?: ChannelRef | undefined; step?: MessageStep } = {},
+    options: {
+      channel?: ChannelRef | undefined;
+      step?: MessageStep;
+      idempotencyKey?: string | undefined;
+    } = {},
   ): Promise<Message> {
     const { thread, threads } = await this.findThread(threadId);
     if (thread.state !== "open") {
@@ -6532,13 +6992,22 @@ export class Board {
         `thread ${threadId} belongs to ${thread.channel}; leave channel out or pass that one`,
       );
     }
+    const dir = this.paths.threadMessages(threads, threadId);
+    const { idempotencyKey } = options;
+    if (idempotencyKey !== undefined) {
+      const stored = await this.keyedPost(dir, author, idempotencyKey, body);
+      if (stored !== null) {
+        return stored;
+      }
+    }
     return this.writeMessage(
-      this.paths.threadMessages(threads, threadId),
+      dir,
       {
         author,
         channel: thread.channel,
         thread: threadId,
         ...(options.step === undefined ? {} : { step: options.step }),
+        ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
       },
       body,
     );
@@ -6553,6 +7022,7 @@ export class Board {
       closes?: Ulid;
       step?: MessageStep;
       notice?: MessageNotice;
+      idempotencyKey?: string;
     },
     body: string,
   ): Promise<Message> {

@@ -15,6 +15,7 @@ import {
   type TurnJob,
   type TurnOutcome,
 } from "@stellaris/shared";
+import { syncBoard } from "./board-sync.js";
 import { RunnerClient, RunnerHttpError, unreachable } from "./client.js";
 import { TurnControl } from "./control.js";
 import { runnerOs } from "./enroll.js";
@@ -185,6 +186,10 @@ export class RunnerDaemon {
   private assigned: Name | null = null;
   /** Warm-session reports in order; an outcome waits for them, so the next job sees the session warm. */
   private warmChain: Promise<void> = Promise.resolve();
+  /** The board sync a connection started, until it ends. */
+  private syncing: Promise<void> | null = null;
+  /** Whether a connection opened while a sync ran, which syncs again once that one ends. */
+  private syncAgain = false;
 
   constructor(options: RunnerDaemonOptions) {
     this.client = options.client;
@@ -238,6 +243,7 @@ export class RunnerDaemon {
     this.stopped = true;
     this.abort?.abort();
     this.stopping.abort();
+    await this.syncing;
     await Promise.allSettled(this.running.values());
     await this.executor.close();
     await this.warmChain;
@@ -281,6 +287,7 @@ export class RunnerDaemon {
           imageReads: true,
           imageWrites: true,
           projectMoves: true,
+          boardSync: true,
           capabilities: [...this.capabilities],
           ...(gitIdentityMissing === null ? {} : { gitIdentityMissing }),
           slots: this.slots,
@@ -296,6 +303,10 @@ export class RunnerDaemon {
             everOpened = true;
             opened();
             void this.reportHeld();
+            // The server holds the runner's turns from its hello until it reports the copy synced.
+            if (welcome.boardSync) {
+              this.syncBoard();
+            }
           },
           onMessage: (message) => this.handle(message),
           onMalformed: (problem) =>
@@ -421,6 +432,40 @@ export class RunnerDaemon {
         answer(this.executor.sweep(message.conversation, (held) => this.inUse(held)));
         return;
     }
+  }
+
+  /**
+   * Brings the board copy up to date and reports it once done, which lifts the server's hold on
+   * the runner's turns. Each hello holds them again, so a connection that opens while a sync runs,
+   * as one a connection before this one started, has another run once that one ends, whose end
+   * the server hears after the hello; one that ended unheard would hold the runner for good.
+   */
+  private syncBoard(): void {
+    if (this.syncing !== null) {
+      this.syncAgain = true;
+      return;
+    }
+    this.syncing = (async () => {
+      do {
+        this.syncAgain = false;
+        try {
+          await syncBoard({
+            copy: this.board,
+            remote: this.client.boardTree(),
+            stream: this.client.boardStream(),
+            report: (report) => this.client.syncReport(report),
+            log: this.log,
+            retryMs: this.retryMs,
+            reportEndForMs: this.postForMs,
+            signal: this.stopping.signal,
+          });
+        } catch (error) {
+          this.log.error({ error: describeError(error) }, "the board sync ended");
+        }
+      } while (this.syncAgain && !this.stopped);
+    })().finally(() => {
+      this.syncing = null;
+    });
   }
 
   /** Whether a turn running here is in that citizen's conversation, whose end removes the workspace. */

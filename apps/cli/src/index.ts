@@ -16,12 +16,12 @@ import {
   PlanEditSchema,
   PlanSchema,
   ProposalKindSchema,
-  runnerLimitHold,
   stageIndex,
   VerbNameSchema,
   type Cron,
   type Task,
 } from "@stellaris/shared";
+import { runnerListLine } from "./runner-list.js";
 
 const program = new Command();
 
@@ -207,6 +207,42 @@ runner
   });
 
 runner
+  .command("rename <from> <to>")
+  .description(
+    "Rename a runner and every project, pin, and session that names it; its token stays. Stop the server first, or rename it from the runners view",
+  )
+  .action(async (from: string, to: string) => {
+    const board = await open();
+    const renamed = await board.renameRunner(board.userActor(), from, to);
+    print(renamed, () =>
+      [
+        `Runner ${from} renamed ${renamed.runner.name}`,
+        `Projects living on it: ${renamed.projects.join(", ") || "none"}`,
+        `Citizens pinned to it: ${renamed.agents.join(", ") || "none"}`,
+        `Session records rewritten: ${renamed.sessions}`,
+      ].join("\n"),
+    );
+  });
+
+runner
+  .command("remove <name>")
+  .description(
+    "Remove a runner, unpinning its citizens and clearing its sessions; its token stops working. Refused while a project lives there. Stop the server first, or remove it from the runners view",
+  )
+  .action(async (name: string) => {
+    const board = await open();
+    const removed = await board.removeRunner(board.userActor(), name);
+    print(removed, () =>
+      [
+        `Runner ${removed.name} removed`,
+        `Archived projects that lived on it: ${removed.projects.join(", ") || "none"}`,
+        `Citizens unpinned: ${removed.agents.join(", ") || "none"}`,
+        `Session records cleared: ${removed.sessions}`,
+      ].join("\n"),
+    );
+  });
+
+runner
   .command("list")
   .description("List runners and what they offer")
   .action(async () => {
@@ -216,23 +252,7 @@ runner
     print(runners, () =>
       runners.length === 0
         ? "No runners yet; add one with `runner add <name>`."
-        : runners
-            .map(
-              (each) =>
-                `${each.name}  ${each.status}${each.paused === undefined ? "" : "  paused"}  ${each.os}${
-                  each.version === undefined ? "" : `  v${each.version}`
-                }  ${each.clis.join(",") || "no CLIs yet"}${
-                  each.capabilities.length === 0 ? "" : `  ${each.capabilities.join(",")}`
-                }${Object.keys(each.pausedClis ?? {})
-                  .map((cli) => `  ${cli} paused`)
-                  .join("")}${each.clis
-                  .map((cli) => {
-                    const hold = runnerLimitHold(each, cli, now);
-                    return hold === null ? "" : `  ${cli} held until ${hold.until}`;
-                  })
-                  .join("")}`,
-            )
-            .join("\n"),
+        : runners.map((each) => runnerListLine(each, now)).join("\n"),
     );
   });
 

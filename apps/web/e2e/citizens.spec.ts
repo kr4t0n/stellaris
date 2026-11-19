@@ -10,6 +10,17 @@ async function boxOf(element: Locator) {
   return box;
 }
 
+/** How many lines of its own line height an element shows, and how many its whole text takes. */
+function linesOf(element: Locator) {
+  return element.evaluate((node) => {
+    const lineHeight = Number.parseFloat(getComputedStyle(node).lineHeight);
+    return {
+      shown: node.getBoundingClientRect().height / lineHeight,
+      whole: node.scrollHeight / lineHeight,
+    };
+  });
+}
+
 /**
  * Where an element's text is drawn, leaving out text only screen readers get: a cell's own box
  * spans its whole column, wherever its text sits in it.
@@ -215,6 +226,33 @@ test("a citizen's turns and memory are tabs of its view", async ({ page }) => {
   await expect(view).toContainText("memory/core.md · core.md.conflict-0000ABCD · left 2 days ago");
 });
 
+test("a closed turn shows at most two lines of its report, and opens to the whole of it", async ({
+  page,
+}) => {
+  // 1440 px gives the island 576 px, where the long report runs past two lines many times over.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await fakeBoard(page, { longReport: true });
+  await page.goto("/citizen/desk?tab=turns");
+  const view = page.getByRole("region", { name: "Board content" });
+  const rows = view.locator("summary");
+  await expect(rows).toHaveCount(2);
+  const [long, short] = [rows.nth(0), rows.nth(1)];
+  const longPreview = long.getByText(/^Fixed the solver's tie-breaking/);
+  const shortPreview = short.getByText("Routed the survey request to ada and filed the task.", {
+    exact: true,
+  });
+
+  const longLines = await linesOf(longPreview);
+  expect(longLines.whole, "lines the long report takes whole").toBeGreaterThan(4);
+  expect(longLines.shown, "lines the long report shows").toBeCloseTo(2, 1);
+  const shortLines = await linesOf(shortPreview);
+  expect(shortLines.shown, "lines the short report shows").toBeCloseTo(1, 1);
+
+  await long.click();
+  await expect(longPreview).toBeHidden();
+  await expect(view.locator("p", { hasText: "Nothing waits on the user yet." })).toBeVisible();
+});
+
 test("a heartbeat's turn says what it woke for, whole beside a long task title, unless it ran before the board kept that", async ({
   page,
 }) => {
@@ -303,7 +341,11 @@ test("a turn in flight takes a post into its conversation, and stops on a second
   await box.press("Enter");
   await expect
     .poll(() => board.writes.find((write) => write.path === "/api/verbs/post_message")?.body)
-    .toEqual({ channel: "general", body: "@desk also check the runners" });
+    .toEqual({
+      channel: "general",
+      body: "@desk also check the runners",
+      idempotency_key: expect.stringMatching(/^[0-9a-f]{32}$/),
+    });
   await expect(box).toHaveValue("@desk ");
 
   // The first click asks again; only the second stops.
@@ -463,8 +505,7 @@ test("a project's overview shows its members, tasks, dashboard, and knowledge", 
   page,
 }) => {
   await fakeBoard(page);
-  await page.goto("/");
-  await page.getByRole("button", { name: "Board" }).click();
+  await page.goto("/c/general");
   await page.getByRole("link", { name: "Lab", exact: true }).click();
 
   await expect(page).toHaveURL(/\/p\/lab$/);
@@ -486,15 +527,22 @@ test("a project's overview shows its members, tasks, dashboard, and knowledge", 
   await expect(page).toHaveURL(new RegExp(`/task/${STAGE_TASK}$`));
 });
 
-test("the citizen count opens every citizen with its role and model, and each opens its view", async ({
+test("status opens every citizen with its role and model, and each opens its view", async ({
   page,
 }) => {
   await fakeBoard(page);
-  await page.goto("/");
-  const count = page.getByRole("button", { name: "2 citizens" });
-  await count.click();
+  await page.goto("/c/general");
+  const status = page.getByRole("region", { name: "Governance" }).getByRole("link", {
+    name: /^Status/,
+  });
+  await status.click();
   await expect(page).toHaveURL(/\/citizens$/);
-  await expect(count).toHaveAttribute("aria-pressed", "true");
+  // The Citizens tab is current and counts the active citizens with a CLI, as the view's header does.
+  const tab = page.getByRole("navigation", { name: "Status" }).getByRole("link", {
+    name: /^Citizens/,
+  });
+  await expect(tab).toHaveAttribute("aria-current", "page");
+  await expect(tab).toHaveText("Citizens2");
 
   const view = page.getByRole("region", { name: "Board content" });
   await expect(view.getByRole("heading", { name: "Citizens" })).toBeVisible();
@@ -517,9 +565,9 @@ test("the citizen count opens every citizen with its role and model, and each op
 
   await desk.click();
   await expect(page).toHaveURL(/\/citizen\/desk$/);
-  await count.click();
+  await status.click();
   await expect(page).toHaveURL(/\/citizens$/);
-  await count.click();
+  await page.keyboard.press("Escape");
   await expect(page).toHaveURL(/\/$/);
 });
 

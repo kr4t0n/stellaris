@@ -30,9 +30,10 @@ const PUBLIC = new Map([
 ]);
 
 /**
- * Each line terminator, encoded, which hono 4.13.13 to 4.13.15 let a path end with to skip wildcard
+ * Each line terminator, encoded, which hono 4.4.0 to 4.13.15 let a path end with to skip wildcard
  * middleware (GHSA-h7mg-cq63-vhpq). Asked only under the trees whose token check is wildcard
- * middleware: elsewhere such a path is another path, which reaches no handler.
+ * middleware: elsewhere such a path is another path, which only the interface's `GET /*` or
+ * hono's 404 answers.
  */
 const TERMINATORS = ["%0A", "%0D", "%E2%80%A8", "%E2%80%A9"];
 const CHECKED_TREES = ["/api/", "/runner/"];

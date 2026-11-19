@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { once } from "node:events";
-import { cp, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, cp, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { ServerType } from "@hono/node-server";
@@ -301,6 +301,197 @@ describe("the route table", () => {
         ),
         ...nameRoutes.map((key) => `${key} nothing-here: ${missing.get(key)?.[0] ?? 404}`),
       ],
+      touched: [],
+    });
+  });
+
+  it("refuses a malformed id on every route that takes one, reaching no file", async () => {
+    const eng = { name: "eng-1", role: "engineer" };
+    await board.addAgent(USER, { ...eng, cli: "claude", memberships: ["demo"] });
+    const task = await board.createTask(USER, { project: "demo", title: "Ship it", body: "Ship." });
+    await board.postMessage(eng, { thread_id: task.id, body: "a step" });
+    const proposal = await board.propose(eng, {
+      kind: "channel",
+      charter: { project: "demo", name: "design", purpose: "Design talk" },
+    });
+    const { token: runnerToken } = await board.addRunner(USER, "runner-1");
+    // A task's record, its thread's record and messages, and a proposal's record, copied inside
+    // the data directory and outside it: an encoded slash in an unparsed id reached either, from
+    // the tasks', the threads', or the proposals' folder.
+    const project = path.join(dir, "board", "projects", "demo");
+    for (const folder of [dir, root]) {
+      for (const [from, to] of [
+        [path.join(project, "tasks", `${task.id}.md`), "outside-task.md"],
+        [path.join(project, "threads", `${task.id}.md`), "outside-thread.md"],
+        [path.join(project, "threads", task.id), "outside-thread"],
+        [
+          path.join(dir, "board", "society", "proposals", `${proposal.id}.md`),
+          "outside-proposal.md",
+        ],
+      ] as const) {
+        await cp(from, path.join(folder, to), { recursive: true });
+      }
+      for (const file of await readdir(folder, { recursive: true })) {
+        if (file.startsWith("outside-") && file.endsWith(".md")) {
+          await appendFile(path.join(folder, file), "PLANTED-RECORD\n");
+        }
+      }
+    }
+    // Three folders up from the society's threads or proposals is the data directory, four from
+    // a project's tasks or threads; one more is outside it.
+    const ids = [
+      "x%00",
+      ...[3, 4, 5].flatMap((depth) =>
+        ["task", "thread", "proposal"].map((kind) => `${"..%2F".repeat(depth)}outside-${kind}`),
+      ),
+    ];
+    const outcome = {
+      exitReason: "completed",
+      status: null,
+      error: null,
+      usage: { inputTokens: 0, outputTokens: 0 },
+      costUsd: 0,
+      session: null,
+      model: null,
+      work: null,
+    };
+    // A body each write takes apart from its id, so its answer is the id's; null for one that
+    // reads none.
+    const bodies = new Map<string, object | null>([
+      ["POST /runner/turns/:id/events", { entries: [] }],
+      ["POST /runner/turns/:id/received", null],
+      ["POST /runner/turns/:id/outcome", outcome],
+      ["POST /runner/requests/:id", { ok: true, value: null }],
+      ["ALL /runner/moves/:id/git/*", null],
+    ]);
+    // What a route answers that names no file by its id, malformed or not, and why.
+    const unparsed = new Map<string, [number, string]>([
+      [
+        "POST /runner/requests/:id",
+        [200, "a request's id is a UUID the hub made, looked up in memory and never a path"],
+      ],
+      [
+        "ALL /runner/moves/:id/git/*",
+        [404, "git asks it, and a move it doesn't know, by any id, is no repository to serve"],
+      ],
+    ]);
+    // What a well-formed id of nothing answers where that is not a 404, and why.
+    const missing = new Map<string, [number, string]>([
+      ["POST /runner/turns/:id/events", [200, "a turn's steps the hub doesn't hold are dropped"]],
+      ["POST /runner/turns/:id/received", [200, "a receipt for a job it didn't send is dropped"]],
+      ["POST /runner/turns/:id/outcome", [200, "an outcome of a turn the host doesn't hold too"]],
+    ]);
+    const idRoutes = [...routeKeys()].filter((key) => key.includes("/:id"));
+    expect(idRoutes).toContain("GET /api/threads/:id");
+    expect(idRoutes.filter((key) => !key.startsWith("GET ") && !bodies.has(key))).toEqual([]);
+    expect(
+      [...bodies.keys(), ...unparsed.keys(), ...missing.keys()].filter(
+        (key) => !idRoutes.includes(key),
+      ),
+    ).toEqual([]);
+    const ask = async (key: string, id: string) => {
+      const [method = "", pattern = ""] = key.split(" ");
+      const body = bodies.get(key) ?? null;
+      const target = pathOf(pattern, { id }).replace(/\/git\/x$/, "/git/info/refs");
+      const token = pattern.startsWith("/runner/") ? runnerToken : userToken;
+      const response = await fetch(
+        `${url}${target}${target.endsWith("/info/refs") ? "?service=git-upload-pack" : ""}`,
+        {
+          method: method === "ALL" ? "GET" : method,
+          headers: {
+            authorization: `Bearer ${token}`,
+            ...(body === null ? {} : { "content-type": "application/json" }),
+          },
+          ...(body === null ? {} : { body: JSON.stringify(body) }),
+        },
+      );
+      return { status: response.status, text: await response.text() };
+    };
+
+    const before = await filesUnder(root);
+    const answers: string[] = [];
+    for (const key of idRoutes) {
+      for (const id of ids) {
+        const { status, text } = await ask(key, id);
+        const named = text.includes(root) || text.includes("outside-");
+        const planted = text.includes("PLANTED-RECORD");
+        answers.push(
+          `${key} ${id}: ${status} ${text.match(/"error":"\w+"/)?.[0] ?? ""}${named ? " names a path" : ""}${planted ? " reads a planted record" : ""}`,
+        );
+      }
+    }
+    const after = await filesUnder(root);
+    const touched = [...new Set([...before.keys(), ...after.keys()])]
+      .filter((file) => before.get(file) !== after.get(file))
+      .map((file) => path.relative(root, file));
+    const nothing = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+    for (const key of idRoutes) {
+      answers.push(`${key} ${nothing}: ${(await ask(key, nothing)).status}`);
+    }
+
+    const refused = (key: string) => {
+      const status = unparsed.get(key)?.[0];
+      return status === undefined
+        ? `400 "error":"VALIDATION"`
+        : `${status} ${status === 404 ? `"error":"NOT_FOUND"` : ""}`;
+    };
+    expect({ answers, touched }).toEqual({
+      answers: [
+        ...idRoutes.flatMap((key) => ids.map((id) => `${key} ${id}: ${refused(key)}`)),
+        ...idRoutes.map(
+          (key) => `${key} ${nothing}: ${missing.get(key)?.[0] ?? unparsed.get(key)?.[0] ?? 404}`,
+        ),
+      ],
+      touched: [],
+    });
+  });
+
+  it("refuses a malformed channel reference, reaching no file", async () => {
+    await board.postMessage(USER, { channel: "demo/general", body: "a post" });
+    // A project's record one folder above the projects', and a channel's messages beside it: an
+    // unparsed reference's project of `..` reached both.
+    const boardDir = path.join(dir, "board");
+    await cp(
+      path.join(boardDir, "projects", "demo", "project.md"),
+      path.join(boardDir, "project.md"),
+    );
+    const planted = path.join(boardDir, "channels", "general");
+    await cp(path.join(boardDir, "projects", "demo", "channels", "general"), planted, {
+      recursive: true,
+    });
+    for (const file of await readdir(planted)) {
+      await appendFile(path.join(planted, file), "PLANTED-POST\n");
+    }
+    const refRoutes = [...routeKeys()].filter((key) => key.includes("/:ref"));
+    expect(refRoutes).toContain("GET /api/channels/:ref{.+}");
+    const malformed = ["x%00", "..%2Fgeneral", "DEMO%2Fgeneral", "demo%2F..%2Fgeneral"];
+
+    const before = await filesUnder(root);
+    const answers: string[] = [];
+    for (const key of refRoutes) {
+      const [method = "", pattern = ""] = key.split(" ");
+      for (const ref of [...malformed, "nothing-here", "demo%2Fgeneral"]) {
+        const response = await fetch(`${url}${pathOf(pattern, { ref })}`, {
+          method,
+          headers: { authorization: `Bearer ${userToken}` },
+        });
+        const text = await response.text();
+        answers.push(
+          `${key} ${ref}: ${response.status} ${text.match(/"error":"\w+"/)?.[0] ?? ""}${text.includes("PLANTED-POST") ? " reads the planted posts" : ""}`,
+        );
+      }
+    }
+    const after = await filesUnder(root);
+    const touched = [...new Set([...before.keys(), ...after.keys()])]
+      .filter((file) => before.get(file) !== after.get(file))
+      .map((file) => path.relative(root, file));
+
+    expect({ answers, touched }).toEqual({
+      answers: refRoutes.flatMap((key) => [
+        ...malformed.map((ref) => `${key} ${ref}: 400 "error":"VALIDATION"`),
+        `${key} nothing-here: 404 "error":"NOT_FOUND"`,
+        `${key} demo%2Fgeneral: 200 `,
+      ]),
       touched: [],
     });
   });

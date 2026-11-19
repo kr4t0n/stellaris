@@ -448,14 +448,16 @@ export function createApp(deps: AppDependencies): Hono<Env> {
 
   // Projects, tasks, channels, threads
   api.get("/projects", async (c) => c.json(await board.listProjects()));
-  api.get("/projects/:slug", async (c) => c.json(await board.readProject(c.req.param("slug"))));
-  api.get("/projects/:slug/tasks", async (c) => c.json(await board.listTasks(c.req.param("slug"))));
-  api.get("/projects/:slug/dashboard", async (c) =>
-    c.json(await board.readDashboard(c.req.param("slug"))),
-  );
-  api.get("/projects/:slug/knowledge", async (c) =>
-    c.json(await board.listKnowledge(c.req.param("slug"))),
-  );
+  // A slug names a folder of the board's, so it is parsed before anything reads one: a NUL or an
+  // encoded slash in it would reach the path.
+  const slugOf = (c: Context<Env>) => NameSchema.parse(c.req.param("slug"));
+  api.get("/projects/:slug", async (c) => c.json(await board.readProject(slugOf(c))));
+  api.get("/projects/:slug/tasks", async (c) => c.json(await board.listTasks(slugOf(c))));
+  api.get("/projects/:slug/dashboard", async (c) => c.json(await board.readDashboard(slugOf(c))));
+  api.get("/projects/:slug/knowledge", async (c) => {
+    const project = await board.readProject(slugOf(c));
+    return c.json(await board.listKnowledge(project.slug));
+  });
   // One path on a branch of a project's repository, read on the runner the project lives on.
   const branchFile = async (c: Context<Env>, project: string, branch: string, file: string) => {
     if (deps.runners === undefined) {
@@ -465,23 +467,21 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   };
   // The project's code as its default branch has it in the clone on its runner.
   const projectFile = async (c: Context<Env>, file: string) => {
-    const project = await board.readProject(NameSchema.parse(c.req.param("slug")));
+    const project = await board.readProject(slugOf(c));
     return branchFile(c, project.slug, project.defaultBranch, file);
   };
   api.get("/projects/:slug/files", (c) => projectFile(c, ""));
   // The user moves a project to another runner, carrying its repository; answered once it ends.
   api.put("/projects/:slug/runner", async (c) => {
+    const slug = slugOf(c);
     const body = ProjectRunnerBodySchema.parse(await c.req.json());
     if (deps.runners === undefined) {
       throw new BoardError("NOT_FOUND", "this board has no runners to move a project between");
     }
     return c.json(
-      await deps.runners.moveProject(
-        c.get("actor"),
-        NameSchema.parse(c.req.param("slug")),
-        body.runner,
-        { withoutBranches: body.withoutBranches },
-      ),
+      await deps.runners.moveProject(c.get("actor"), slug, body.runner, {
+        withoutBranches: body.withoutBranches,
+      }),
     );
   });
   api.get("/projects/:slug/files/:path{.+}", (c) => projectFile(c, c.req.param("path")));

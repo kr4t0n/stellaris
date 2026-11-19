@@ -182,6 +182,9 @@ export class RunnerDaemon {
   /** Aborted by `stop`, which ends the wait between connections at once. */
   private readonly stopping = new AbortController();
   private stopped = false;
+  /** The stop under way, which a second `stop` waits for. */
+  private halting: Promise<void> | null = null;
+  private readonly removal = Promise.withResolvers<void>();
   private loop: Promise<void> | null = null;
   private assigned: Name | null = null;
   /** Warm-session reports in order; an outcome waits for them, so the next job sees the session warm. */
@@ -235,11 +238,25 @@ export class RunnerDaemon {
   }
 
   /**
+   * Resolves once the server has said the user removed this runner and the runner has stopped as
+   * `stop` stops it, after which the server refuses its token; never otherwise.
+   */
+  get removed(): Promise<void> {
+    return this.removal.promise;
+  }
+
+  /**
    * Stops taking work, waits for the turns in flight to report, and lets warm sessions go. The
    * stream closes first, so no job arrives while the runner drains; everything else travels as
-   * posts, which still reach the server.
+   * posts, which still reach the server. A second call, as a signal during a removal's stop, waits
+   * for the first.
    */
-  async stop(): Promise<void> {
+  stop(): Promise<void> {
+    this.halting ??= this.halt();
+    return this.halting;
+  }
+
+  private async halt(): Promise<void> {
     this.stopped = true;
     this.abort?.abort();
     this.stopping.abort();
@@ -367,6 +384,15 @@ export class RunnerDaemon {
       });
       this.running.set(job.turnId, run);
       void this.acknowledge(job.turnId);
+      return;
+    }
+    if (message.type === "removed") {
+      // The server refuses the token from here on, so asking again would only be refused; a 401
+      // with no word before it is still tried again, as from a server restored from an older copy.
+      if (!this.stopped) {
+        this.log.warn({ runner: this.assigned }, "the board removed this runner; stopping");
+        void this.stop().then(() => this.removal.resolve());
+      }
       return;
     }
     const answer = (work: Promise<unknown>): void => {

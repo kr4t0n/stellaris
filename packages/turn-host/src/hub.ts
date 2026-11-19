@@ -1134,9 +1134,10 @@ export class RunnerHub implements TurnRunner {
    * any moment, so the user stops its work first. The board clears every record that names it
    * (`Board.removeRunner`). The hub then lets go of its seat, its limit reads and tries, and its
    * warm sessions' tokens, has the model catalog forget it, and ends its stream without recording a
-   * disconnect, since its record is gone. Its token is refused from then on: a runner still running
-   * asks again every 15 seconds until its process stops, and one started again asks to enroll, or
-   * exits when its token came from the environment.
+   * disconnect, since its record is gone, once it has sent `removed` down it. Its token is refused
+   * from then on: a connected runner stops on that message and its process exits, while one away,
+   * or from before, asks again every 15 seconds until its process stops; one started again asks to
+   * enroll, or exits when its token came from the environment.
    */
   async removeRunner(actor: Actor, name: Name): Promise<RunnerRemoved> {
     if (actor.role !== USER_ROLE) {
@@ -1229,7 +1230,7 @@ export class RunnerHub implements TurnRunner {
   /**
    * Lets go of what the hub holds of a removed runner: its seat, with its timers, its limit reads
    * and tries, and its warm sessions' tokens, and has the model catalog forget it. Its stream ends
-   * last, and records no disconnect: `attach`'s close finds the seat let go.
+   * last, after `removed`, and records no disconnect: `attach`'s close finds the seat let go.
    */
   private forget(runner: Name): void {
     const seat = this.seats.get(runner);
@@ -1252,9 +1253,11 @@ export class RunnerHub implements TurnRunner {
         clearTimeout(timer);
       }
       seat.unacked.clear();
-      const end = seat.end;
+      const { send, end } = seat;
       seat.send = null;
       seat.end = null;
+      // Told before its stream ends, the runner stops rather than ask again with a refused token.
+      send?.({ type: "removed" });
       end?.();
     }
     this.runnerChanged(runner);

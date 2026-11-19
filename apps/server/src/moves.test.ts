@@ -584,7 +584,7 @@ describe("moving a project to another runner", () => {
       vi.waitFor(
         () => {
           const found = sent[name]?.find((message) => message.type === type);
-          if (found === undefined || found.type === "turn") {
+          if (found === undefined || !("request" in found)) {
             throw new Error(`no ${type} for ${name} yet`);
           }
           return found;
@@ -622,7 +622,7 @@ describe("moving a project to another runner", () => {
       vi.waitFor(
         () => {
           const found = sent[name]?.filter((message) => message.type === type).at(index);
-          if (found === undefined || found.type === "turn") {
+          if (found === undefined || !("request" in found)) {
             throw new Error(`no ${type} ${index} for ${name} yet`);
           }
           return found;

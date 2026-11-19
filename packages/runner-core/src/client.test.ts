@@ -108,6 +108,33 @@ describe("RunnerClient", () => {
     }
   });
 
+  it("skips a message of a type it doesn't know, as a runner from before skips `removed`, and reads on", async () => {
+    const after: RunnerMessage = {
+      type: "stop",
+      request: "after",
+      turnId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    };
+    const frames = [
+      ": attached\n\n",
+      `event: later\ndata: ${JSON.stringify({ type: "later" })}\n\n`,
+      `event: stop\ndata: ${JSON.stringify(after)}\n\n`,
+    ];
+    const taken: RunnerMessage[] = [];
+    const skipped: string[] = [];
+    const client = new RunnerClient("http://server", "token", streamingFetch(frames, 0), 5_000);
+    const stop = new AbortController();
+    const held = client.stream(stop.signal, {
+      onMessage: (message) => {
+        taken.push(message);
+        stop.abort();
+      },
+      onMalformed: (problem) => skipped.push(problem),
+    });
+    await expect(held).rejects.toThrow("aborted");
+    expect(taken).toEqual([after]);
+    expect(skipped).toHaveLength(1);
+  });
+
   it("describes an error with the causes fetch keeps beneath it", () => {
     const reset = Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" });
     const timeout = Object.assign(new Error("Connect Timeout Error"), {

@@ -827,6 +827,12 @@ export const RunnerMessageSchema = z.discriminatedUnion("type", [
     request: z.string().min(1),
     conversation: WorkspaceConversationSchema,
   }),
+  /**
+   * The user removed this runner, whose token the server refuses from now on: the last message of
+   * its stream, unanswered. The runner stops as it does when stopped and its process exits; one
+   * from before skips it and asks again until its process is stopped.
+   */
+  z.object({ type: z.literal("removed") }),
 ]);
 export type RunnerMessage = z.infer<typeof RunnerMessageSchema>;
 

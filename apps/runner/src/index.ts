@@ -171,6 +171,14 @@ log.info(
   "runner started",
 );
 
+// The user removed this runner on the board, and it has stopped: it exits with 0, as a signal's
+// stop does, so a supervisor that restarts only a failure leaves it stopped. Its saved credentials
+// stay, so started again it asks to enroll, as it would with them gone.
+void runner.removed.then(() => {
+  log.info({ runner: runner.name }, "runner removed from the board; exiting");
+  process.exit(0);
+});
+
 const shutdown = async (signal: string): Promise<void> => {
   log.info({ signal }, "runner shutting down; waiting for running turns");
   await runner.stop();

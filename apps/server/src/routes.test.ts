@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Board } from "@stellaris/board-core";
@@ -1060,6 +1060,52 @@ describe("board server routes", () => {
     }
     await reader.cancel();
     expect(text).toContain("event: ping");
+  });
+
+  it("reads the log past an event of a type this board doesn't know, as a page and as a stream", async () => {
+    const app = createApp({ board, version: "t" });
+    const since = (await board.latestEventId()) ?? "";
+    await board.postMessage(USER, { channel: "demo/general", body: "before" });
+    const last = (await board.latestEventId()) ?? "";
+    // A newer board's event, in the millisecond of the post, before the next one's.
+    const newer = {
+      id: `${last.slice(0, 10)}${"Z".repeat(16)}`,
+      ts: new Date().toISOString(),
+      type: "garden.watered",
+      actor: "user",
+      payload: {},
+    };
+    const log = path.join(dir, "events", "log.jsonl");
+    await appendFile(log, `${JSON.stringify(newer)}\n`, "utf8");
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    await board.postMessage(USER, { channel: "demo/dev", body: "after" });
+    const lines = (await readFile(log, "utf8")).trimEnd().split("\n");
+    const known = lines
+      .slice(lines.findIndex((line) => line.includes(since)) + 1)
+      .filter((line) => !line.includes(newer.id))
+      .map((line): unknown => JSON.parse(line));
+    expect(known).toHaveLength(2);
+
+    const page = await app.request(`/api/events?since=${since}`, { headers });
+    expect(page.status).toBe(200);
+    expect(await page.json()).toEqual(known);
+    const stream = await app.request(`/api/events/stream?since=${since}`, { headers });
+    const frames = await readSse(stream, 2);
+    expect(frames.map((frame): unknown => JSON.parse(frame))).toEqual(known);
+  });
+
+  it("still answers a malformed event of a type it knows with a 400", async () => {
+    const app = createApp({ board, version: "t" });
+    const since = (await board.latestEventId()) ?? "";
+    const unpaid = {
+      id: `${since.slice(0, 10)}${"Z".repeat(16)}`,
+      ts: new Date().toISOString(),
+      type: "message.posted",
+      actor: "user",
+    };
+    await appendFile(path.join(dir, "events", "log.jsonl"), `${JSON.stringify(unpaid)}\n`, "utf8");
+    const page = await app.request(`/api/events?since=${since}`, { headers });
+    expect(page.status).toBe(400);
   });
 
   it("replays and streams live turn events", async () => {

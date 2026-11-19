@@ -2,6 +2,7 @@ import { appendFile, open, stat } from "node:fs/promises";
 import path from "node:path";
 import {
   BoardEventSchema,
+  unknownEventType,
   type BoardEvent,
   type BoardEventType,
   type Name,
@@ -9,11 +10,14 @@ import {
 } from "@stellaris/shared";
 import { ensureDir } from "./fs.js";
 
-/** Every line starts with the event's id, which `append` writes first; old lines skip unparsed. */
-const LEADING_ID = /^\{"id":"([0-9A-HJKMNP-TV-Z]{26})"/;
+/**
+ * Every line `append` writes starts with the event's id, time, and type, in that order, which a
+ * scan reads without parsing the line; a line that doesn't is parsed whole.
+ */
+const LEADING_FIELDS = /^\{"id":"([0-9A-HJKMNP-TV-Z]{26})","ts":"[^"\\]*","type":"([^"\\]*)"/;
 
-/** Long enough to hold `{"id":"<26 characters>"`, which is all `LEADING_ID` looks at. */
-const ID_PREFIX_BYTES = 64;
+/** Long enough for `LEADING_FIELDS` to read a type of up to 80 characters. */
+const PREFIX_BYTES = 160;
 
 const NEWLINE = 0x0a;
 
@@ -36,6 +40,13 @@ function readLine(text: string, id: Ulid): BoardEvent | null {
   return event.success && event.data.id === id ? event.data : null;
 }
 
+/** Where the log says what it skipped; the board server's is its own log. */
+export interface EventLogWarnings {
+  warn(context: object, message: string): void;
+}
+
+const SILENT: EventLogWarnings = { warn() {} };
+
 /** One complete line of the log: its event's id and the bytes it spans, newline excluded. */
 interface LogLine {
   readonly id: Ulid;
@@ -53,10 +64,13 @@ interface Piece {
 /**
  * Append-only JSONL log of every board change. Reads go through an index of the complete lines
  * seen so far, extended by the bytes appended since, so a read decodes only the lines it returns:
- * the scheduler and every board-event stream read it every second or less.
+ * the scheduler and every board-event stream read it every second or less. The index leaves out
+ * an event of a type this build doesn't know, as a newer board's before a rollback, so no read
+ * returns or counts one, and says so once for each such type.
  */
 export class EventLog {
   private lines: LogLine[] = [];
+  private readonly skipped = new Set<string>();
   /** Bytes the index covers: always the end of a complete line. */
   private indexed = 0;
   /** The indexed file, to tell a replaced log from a grown one. */
@@ -68,6 +82,7 @@ export class EventLog {
     private readonly file: string,
     private readonly newId: () => Ulid,
     private readonly now: () => Date,
+    private readonly warnings: EventLogWarnings = SILENT,
   ) {}
 
   async append(
@@ -251,17 +266,37 @@ export class EventLog {
     const added = await this.readBytes(this.indexed, info.size);
     let start = 0;
     for (let at = added.indexOf(NEWLINE); at >= 0; at = added.indexOf(NEWLINE, start)) {
-      const prefix = added.toString("utf8", start, Math.min(at, start + ID_PREFIX_BYTES));
+      const prefix = added.toString("utf8", start, Math.min(at, start + PREFIX_BYTES));
       if (prefix.trim().length > 0) {
-        const id =
-          LEADING_ID.exec(prefix)?.[1] ??
-          BoardEventSchema.parse(JSON.parse(added.toString("utf8", start, at))).id;
-        this.lines.push({ id, start: this.indexed + start, end: this.indexed + at });
+        const id = this.knownId(prefix, () => added.toString("utf8", start, at));
+        if (id !== null) {
+          this.lines.push({ id, start: this.indexed + start, end: this.indexed + at });
+        }
       }
       start = at + 1;
     }
     // A line still being written waits for its newline, and the next scan.
     this.indexed += start;
+  }
+
+  /**
+   * The id of the event a line holds, read from its leading fields, or from the whole line when it
+   * has none; null for an event of a type this build doesn't know. A known type's malformed event
+   * throws here, or, with its leading fields, at the read that returns it.
+   */
+  private knownId(prefix: string, line: () => string): Ulid | null {
+    const leading = LEADING_FIELDS.exec(prefix);
+    const value: unknown =
+      leading === null ? JSON.parse(line()) : { id: leading[1], type: leading[2] };
+    const unknown = unknownEventType(value);
+    if (unknown !== null) {
+      if (!this.skipped.has(unknown)) {
+        this.skipped.add(unknown);
+        this.warnings.warn({ type: unknown }, "skipping events of a type this board doesn't know");
+      }
+      return null;
+    }
+    return leading?.[1] ?? BoardEventSchema.parse(value).id;
   }
 
   private async readBytes(from: number, to: number): Promise<Buffer> {

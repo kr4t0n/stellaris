@@ -166,7 +166,7 @@ import {
 } from "@stellaris/shared";
 import { MENTION_PATTERN } from "@stellaris/shared/mentions";
 import { BoardError } from "./errors.js";
-import { EventLog } from "./events.js";
+import { EventLog, type EventLogWarnings } from "./events.js";
 import { FileTree, type StreamedFile } from "./files.js";
 import { HomeRepos } from "./homes.js";
 import { withoutMetadata } from "@stellaris/shared/image-metadata";
@@ -264,6 +264,8 @@ export interface BoardOptions {
   readonly leaseMs?: number | undefined;
   /** Clock, injectable for tests. */
   readonly now?: (() => Date) | undefined;
+  /** Where the board says what it reads past, as an event of a type it doesn't know; silent unset. */
+  readonly log?: EventLogWarnings | undefined;
 }
 
 export interface InitInput {
@@ -845,7 +847,7 @@ export class Board {
     this.moves = new MoveRepos(this.paths.moves());
     this.leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS;
     this.now = options.now ?? (() => new Date());
-    this.events = new EventLog(this.paths.eventLog(), () => this.newId(), this.now);
+    this.events = new EventLog(this.paths.eventLog(), () => this.newId(), this.now, options.log);
   }
 
   /** Creates a society: channels, seed roles, and the user. Returns the user token once. */

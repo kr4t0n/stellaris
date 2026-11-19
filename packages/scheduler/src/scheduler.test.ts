@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -306,6 +306,25 @@ describe("Scheduler", () => {
     await scheduler.tick();
     await scheduler.drain();
     expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind])).toEqual([["rev-1", "mention"]]);
+  });
+
+  it("reads on past an event of a type this board doesn't know, as after a rollback", async () => {
+    const { board, runner, scheduler } = await setup();
+    const last = (await board.latestEventId()) ?? "";
+    // A newer board's event, in the millisecond of the last one, before the next one's.
+    const newer = {
+      id: `${last.slice(0, 10)}${"Z".repeat(16)}`,
+      ts: clock.toISOString(),
+      type: "garden.watered",
+      actor: "user",
+      payload: {},
+    };
+    await appendFile(path.join(dir, "events", "log.jsonl"), `${JSON.stringify(newer)}\n`, "utf8");
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 please start" });
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind])).toEqual([["eng-1", "mention"]]);
   });
 
   it("holds dispatches while paused and releases them on resume", async () => {

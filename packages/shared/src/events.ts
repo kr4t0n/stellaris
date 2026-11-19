@@ -86,6 +86,29 @@ export const BoardEventSchema = z.object({
 });
 export type BoardEvent = z.infer<typeof BoardEventSchema>;
 
+const KNOWN_EVENT_TYPES: ReadonlySet<string> = new Set(BOARD_EVENT_TYPES);
+
+/**
+ * The type an event names when it is a string this build doesn't know, as a type a newer board
+ * added; null otherwise. Every reader skips such an event and reads on, so a board rolled back past
+ * the release that added a type still reads its log.
+ */
+export function unknownEventType(value: unknown): string | null {
+  if (typeof value !== "object" || value === null || !("type" in value)) {
+    return null;
+  }
+  return typeof value.type === "string" && !KNOWN_EVENT_TYPES.has(value.type) ? value.type : null;
+}
+
+/**
+ * The event `value` holds, or null for one of a type this build doesn't know (`unknownEventType`).
+ * Anything else that doesn't read as an event, a known type's malformed one included, throws as
+ * `BoardEventSchema.parse` does.
+ */
+export function readBoardEvent(value: unknown): BoardEvent | null {
+  return unknownEventType(value) === null ? BoardEventSchema.parse(value) : null;
+}
+
 /**
  * The tokens a turn used. `inputTokens` is the input neither read from the cache nor written to
  * it, so the turn's whole input is the sum of the three input counts, on either CLI.

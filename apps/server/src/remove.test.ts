@@ -11,7 +11,7 @@ import {
   type RunnerMessage,
 } from "@stellaris/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { startTestSociety, type TestSociety } from "./testing/harness.js";
+import { startTestSociety, TURN_START_WAIT, type TestSociety } from "./testing/harness.js";
 import { addWorkRoles, USER } from "./testing/scripted-backend.js";
 
 /** A turn that ends at once, done. */
@@ -161,7 +161,7 @@ describe("removing a runner", () => {
     // Paused while a turn runs there, it waits for the turn.
     gate = Promise.withResolvers<void>();
     const running = society.run(dispatch);
-    await expect.poll(() => turns).toBe(2);
+    await expect.poll(() => turns, TURN_START_WAIT).toBe(2);
     await board.setRunnerPaused(USER, "pod", { paused: true });
     expect(await remove()).toEqual({
       status: 409,

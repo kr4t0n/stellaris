@@ -6,7 +6,7 @@ import { Scheduler } from "@stellaris/scheduler";
 import { ZERO_USAGE, type AgentBackend } from "@stellaris/runner-core";
 import { CliQuotaSchema, type CliKind, type CliQuota } from "@stellaris/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { startTestSociety, type TestSociety } from "./testing/harness.js";
+import { startTestSociety, TURN_START_WAIT, type TestSociety } from "./testing/harness.js";
 import { addWorkRoles, USER } from "./testing/scripted-backend.js";
 
 describe("pausing a runner, or one CLI on it", () => {
@@ -108,7 +108,7 @@ describe("pausing a runner, or one CLI on it", () => {
     await wake("rev-1", "lab");
     await wake("eng-2", "yard");
     await scheduler.tick();
-    await expect.poll(() => ran).toEqual(["eng-2@far"]);
+    await expect.poll(() => ran, TURN_START_WAIT).toEqual(["eng-2@far"]);
     for (let i = 0; i < 3; i += 1) {
       await scheduler.tick();
     }

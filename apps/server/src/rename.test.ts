@@ -5,7 +5,7 @@ import { Board, BoardError } from "@stellaris/board-core";
 import { ZERO_USAGE, type AgentBackend, type TurnResult } from "@stellaris/runner-core";
 import { TurnDispatchSchema, type ModelOption } from "@stellaris/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { startTestSociety, type TestSociety } from "./testing/harness.js";
+import { startTestSociety, TURN_START_WAIT, type TestSociety } from "./testing/harness.js";
 import { addWorkRoles, USER } from "./testing/scripted-backend.js";
 
 /** A turn that ends at once, done. */
@@ -122,7 +122,7 @@ describe("renaming a runner", () => {
     // While a turn runs there, the rename is refused, saying to pause the runner, and changes nothing.
     gate = Promise.withResolvers<void>();
     const running = society.run(dispatch);
-    await expect.poll(() => ran.length).toBe(2);
+    await expect.poll(() => ran.length, TURN_START_WAIT).toBe(2);
     const refused = await rename("gpu-1");
     expect(refused.status).toBe(409);
     expect(await refused.json()).toEqual({

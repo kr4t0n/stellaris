@@ -191,7 +191,7 @@ One long-running process, the board server, hosts the only writer of the data di
 - A browser test that presses again before one of the page's own timers fires moves the page's clock between the presses with `page.clock`, never waits a fixed time ([the page's clock](./docs/internals/testing.md#a-browser-test-that-races-one-of-the-pages-timers-runs-on-the-pages-clock)).
 - A test that imports another workspace package reads that package's `dist/`, so run `pnpm build` before testing a change another package's tests cover.
 - A wait for a turn on a test society's runner to reach its CLI passes `TURN_START_WAIT` (`apps/server/src/testing/harness.ts`), since the runner's git work before it outlasts Vitest's 1 s default under load; no other wait takes it ([the wait](./docs/internals/testing.md#a-wait-for-a-turn-to-start-takes-turn_start_wait)).
-- A wait for a test society's runner to connect again, after a rename or its network's return, passes `RECONNECT_WAIT` from the same file, and a test that stops work once it reaches a point waits for what reports that point, never a fixed time ([reconnects](./docs/internals/testing.md#a-wait-for-a-runner-to-connect-again-takes-reconnect_wait), [stopping](./docs/internals/testing.md#a-test-that-stops-work-at-a-point-waits-for-that-point)).
+- A wait for a runner of a test board's server to connect again, whatever ended its stream, passes `RECONNECT_WAIT` from the same file, and a test that stops work once it reaches a point waits for what reports that point, never a fixed time ([reconnects](./docs/internals/testing.md#a-wait-for-a-runner-to-connect-again-takes-reconnect_wait), [stopping](./docs/internals/testing.md#a-test-that-stops-work-at-a-point-waits-for-that-point)).
 
 ## Gotchas
 

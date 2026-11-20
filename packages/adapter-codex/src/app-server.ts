@@ -147,12 +147,24 @@ const HTTP_FAILURES = [
 ];
 
 /**
+ * Codex's words for a request that got no answer (`ConnectionFailedError`), behind any prefix such
+ * as a compaction's. Up to 0.165.0 that failure was the only `httpConnectionFailed` with no status;
+ * 0.170.0 sends an in-stream `access_program_not_enabled` refusal so too, in the provider's words
+ * or "The requested access program is not enabled.", and never retries it itself.
+ */
+const CONNECTION_FAILED = "Connection failed: ";
+
+/**
  * Whether an app-server error says the model service turned the turn away for now: one of the
  * codes above, or a request that failed with no answer, a 429, or a 5xx. Any other 4xx, a policy,
- * the context window, or a sign-in is not worth sending again.
+ * the context window, or a sign-in is not worth sending again. A status-less
+ * `httpConnectionFailed` is a request with no answer only in Codex's words for one.
  */
 export function isTransient(error: unknown): boolean {
-  const info = isDict(error) ? error["codexErrorInfo"] : undefined;
+  if (!isDict(error)) {
+    return false;
+  }
+  const info = error["codexErrorInfo"];
   if (typeof info === "string") {
     return TRANSIENT_ERRORS.has(info);
   }
@@ -163,7 +175,12 @@ export function isTransient(error: unknown): boolean {
     const failure = info[kind];
     if (isDict(failure)) {
       const status = failure["httpStatusCode"];
-      return typeof status !== "number" || status === 429 || status >= 500;
+      if (typeof status === "number") {
+        return status === 429 || status >= 500;
+      }
+      return (
+        kind !== "httpConnectionFailed" || (str(error["message"]) ?? "").includes(CONNECTION_FAILED)
+      );
     }
   }
   return false;

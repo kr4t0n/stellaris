@@ -274,6 +274,9 @@ const SHAPES: readonly (readonly ["claude" | "codex", FailedTurnEnd, string])[] 
     failed("the runner could not run the turn: Error: EIO: i/o error, scandir '/work/demo'"),
     "other",
   ],
+  // Codex 0.170.0's words for an access-program refusal with no message of the provider's, which
+  // the adapter does not mark transient.
+  ["codex", failed("The requested access program is not enabled."), "other"],
   ["codex", failed(null), "other"],
 ];
 

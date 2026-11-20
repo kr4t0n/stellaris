@@ -1667,7 +1667,6 @@ describe("isTransient", () => {
       true,
     ],
     ["flex capacity", "flexUnavailable", true],
-    ["no connection", { httpConnectionFailed: { httpStatusCode: null } }, true],
     ["a 502 on the stream", { responseStreamConnectionFailed: { httpStatusCode: 502 } }, true],
     ["a dropped stream", { responseStreamDisconnected: {} }, true],
     ["a 401", { httpConnectionFailed: { httpStatusCode: 401 } }, false],
@@ -1681,5 +1680,29 @@ describe("isTransient", () => {
     ["no code", undefined, false],
   ])("%s", (_case, codexErrorInfo, transient) => {
     expect(isTransient({ message: "failed", codexErrorInfo })).toBe(transient);
+  });
+
+  /**
+   * An `httpConnectionFailed` with no status, told apart by its words. The first and third are what
+   * 0.165.0 and 0.170.0 sent for a provider at a closed port, with unbounded connection retries
+   * off, and 0.170.0 for a failed stream with the code `access_program_not_enabled`; the second is
+   * a compaction's prefix, and the last Codex's words for a refusal with no message.
+   */
+  it.each([
+    ["a request with no answer", "Connection failed: error sending request", true],
+    [
+      "a compaction's request with no answer",
+      "Error running remote compact task: Connection failed: error sending request",
+      true,
+    ],
+    ["an access-program refusal in the stream", "stub access_program_not_enabled", false],
+    [
+      "an access-program refusal in Codex's words",
+      "The requested access program is not enabled.",
+      false,
+    ],
+  ])("no status: %s", (_case, message, transient) => {
+    const codexErrorInfo = { httpConnectionFailed: { httpStatusCode: null } };
+    expect(isTransient({ message, codexErrorInfo })).toBe(transient);
   });
 });

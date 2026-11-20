@@ -159,7 +159,7 @@ pnpm build          # compile every package and app with tsc -b
 pnpm typecheck      # the same tsc -b, since the build is the type check
 pnpm test           # vitest across packages and apps
 pnpm test:e2e       # Playwright against the built interface; build and build:web first
-pnpm lint           # type-aware oxlint, the iOS layout check, markdown links; after build
+pnpm lint           # oxlint, the iOS layout check, links, names' case; after build
 pnpm lint:fix       # oxlint, applying the fixes it can
 pnpm format         # oxfmt, writing formatting
 pnpm format:check   # oxfmt, checking formatting

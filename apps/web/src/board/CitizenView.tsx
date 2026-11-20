@@ -33,7 +33,7 @@ import { ModelForm } from "./ModelForm.js";
 import { RunnerForm } from "./RunnerForm.js";
 import { StickyList } from "./StickyList.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
-import { CitizenQuota } from "./Quota.js";
+import { CitizenQuota } from "./QuotaReadouts.js";
 import { time, TranscriptSteps, TurnFooter } from "./Transcript.js";
 import { TurnControls } from "./TurnControls.js";
 import { useStoredTurn } from "./useStoredTurn.js";

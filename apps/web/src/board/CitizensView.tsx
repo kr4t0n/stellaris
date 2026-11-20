@@ -14,7 +14,7 @@ import {
 } from "../lib/session.js";
 import { runnersOf, scopeName, tokenUseCell } from "./citizen.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
-import { QuotaMark } from "./Quota.js";
+import { QuotaMark } from "./QuotaReadouts.js";
 
 const WINDOWS: ReadonlyArray<{
   readonly window: MetricsWindow;

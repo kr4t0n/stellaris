@@ -198,6 +198,8 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
   });
   // As the server does before it answers: a society stopped before has no runner attached.
   await hub.markAllAway();
+  // As the server does once it answers: the reads of threads, channels, and messages are indexed.
+  await board.indexReads();
   board.watchTurns(() => host.inFlight());
   board.readImagesWith((actor, file) => hub.readTurnImage(actor, file));
   board.openImagesWith((actor, image) => hub.writeTurnImage(actor, image));

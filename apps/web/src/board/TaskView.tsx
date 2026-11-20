@@ -7,15 +7,7 @@ import { LinkedText } from "../components/Entities.js";
 import { Markdown } from "../components/Markdown.js";
 import { namesNothing } from "../lib/api.js";
 import { ago, firstParagraph } from "../lib/format.js";
-import {
-  useMembers,
-  useNow,
-  useProjects,
-  useSession,
-  useTask,
-  useThread,
-  useThreads,
-} from "../lib/session.js";
+import { useMembers, useNow, useProjects, useSession, useTask, useThread } from "../lib/session.js";
 import { Citizen, useDisplayName } from "./Avatar.js";
 import { ActionButton, Composer, type ComposerAction } from "./Composer.js";
 import { stageForYou } from "./governance.js";
@@ -424,15 +416,12 @@ export function TaskView() {
   const { taskId } = useParams({ from: "/task/$taskId" });
   const { message: target } = useSearch({ from: "/task/$taskId" });
   const task = useTask(taskId);
-  const threads = useThreads();
   const projects = useProjects();
   const members = useMembers();
   const now = useNow(30_000);
   const displayName = useDisplayName();
-  // A task's thread takes the task's id.
-  const messages = useThread(
-    threads.data?.some((candidate) => candidate.id === taskId) === true ? taskId : null,
-  );
+  // A task's thread takes the task's id, so it is read at once; "not found" means it has none.
+  const messages = useThread(taskId);
   const approve = useApprove(task.data);
 
   if (task.data === undefined) {
@@ -445,7 +434,7 @@ export function TaskView() {
   const current = task.data;
   const phase = phaseOf(current);
   const project = projects.data?.find((candidate) => candidate.slug === current.project);
-  const thread = threads.data?.find((candidate) => candidate.id === current.id);
+  const thread = messages.data?.thread;
   return (
     <>
       <PaneHeader
@@ -488,11 +477,11 @@ export function TaskView() {
           className="px-4 pb-3"
         >
           <section aria-label="Thread">
-            {threads.data === undefined ? null : thread === undefined ? (
+            {namesNothing(messages.error) ? (
               <p className="mt-3 text-meta">No thread on this task.</p>
             ) : (
               <SubjectThread
-                thread={thread}
+                id={current.id}
                 now={now}
                 task={current}
                 target={target}

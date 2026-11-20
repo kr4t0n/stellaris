@@ -218,7 +218,7 @@ A stop that comes while the runner is connecting, as when it says hello again af
 
 ### Two writer processes are a development-only compromise
 
-The admin CLI writes the data directory directly. While the server runs, act as the user through the HTTP API with the user token instead, except for `turn run`, whose single appended event is harmless.
+The admin CLI writes the data directory directly. While the server runs, act as the user through the HTTP API with the user token instead, except for `turn run`, whose single appended event is harmless. A post, a thread, or a task the CLI writes then would also stay out of the server's reads until it restarts, since the server answers them from its [read index](board.md#the-reads-of-threads-channels-and-messages-are-answered-from-an-index-held-to-the-files).
 
 ### A runner's waits must hold its process open
 

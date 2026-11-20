@@ -4,11 +4,13 @@ import {
   CONTENT_MIN,
   askBoxPlacement,
   besidePanel,
-  besideSky,
+  bothLayoutsFit,
   contentWidth,
   defaultContentWidth,
   readBoardLayout,
   saveBoardLayout,
+  shownLayout,
+  skyHolds,
   skyRoom,
   toggledWidth,
   widestContentWidth,
@@ -21,6 +23,21 @@ function placed(window: number, layout: BoardLayout) {
     window,
     skyRoom(layout, contentWidth(window, null, layout), window),
     layout,
+  );
+}
+
+/** What the sky's room holds beside the sky, with the content 420 px wide. */
+function besideHolds(window: number, root: number) {
+  return skyHolds(window, skyRoom("beside", 420, window), root, "beside");
+}
+
+/** What the sky's room holds around the sky, with the content at its default. */
+function aroundHolds(window: number, root: number) {
+  return skyHolds(
+    window,
+    skyRoom("around", contentWidth(window, null, "around"), window),
+    root,
+    "around",
   );
 }
 
@@ -109,16 +126,42 @@ describe("the sky's room", () => {
 
   it("beside the sky, holds the hint from 32 px and 15.5 root ems, and the camera's buttons from 4.25 root ems", () => {
     // At a 16 px root: 280 and 68 px.
-    expect(besideSky(988, skyRoom("beside", 420, 988), 16)).toEqual({ hint: true, camera: true });
-    expect(besideSky(987, skyRoom("beside", 420, 987), 16)).toEqual({ hint: false, camera: true });
-    expect(besideSky(776, skyRoom("beside", 420, 776), 16).camera).toBe(true);
-    expect(besideSky(775, skyRoom("beside", 420, 775), 16).camera).toBe(false);
+    expect(besideHolds(988, 16)).toEqual({ hint: true, camera: true });
+    expect(besideHolds(987, 16)).toEqual({ hint: false, camera: true });
+    expect(besideHolds(776, 16).camera).toBe(true);
+    expect(besideHolds(775, 16).camera).toBe(false);
     // At a 20 px root, 342 and 85 px.
-    expect(besideSky(1050, skyRoom("beside", 420, 1050), 20).hint).toBe(true);
-    expect(besideSky(1049, skyRoom("beside", 420, 1049), 20).hint).toBe(false);
+    expect(besideHolds(1050, 20).hint).toBe(true);
+    expect(besideHolds(1049, 20).hint).toBe(false);
     // In a narrow window, beside the rail and the content.
-    expect(besideSky(600, skyRoom("beside", 420, 600), 16)).toEqual({ hint: false, camera: true });
-    expect(besideSky(360, skyRoom("beside", 420, 360), 16)).toEqual({ hint: false, camera: false });
+    expect(besideHolds(600, 16)).toEqual({ hint: false, camera: true });
+    expect(besideHolds(360, 16)).toEqual({ hint: false, camera: false });
+  });
+
+  it("around the sky, holds the hint as beside it, and the camera's buttons from 16 px and 2.25 root ems", () => {
+    // At a 16 px root, the default content 420 wide up to 1050: the room is the window less 740.
+    expect(aroundHolds(1020, 16)).toEqual({ hint: true, camera: true });
+    expect(aroundHolds(1019, 16)).toEqual({ hint: false, camera: true });
+    expect(aroundHolds(792, 16).camera).toBe(true);
+    expect(aroundHolds(791, 16).camera).toBe(false);
+    expect(aroundHolds(724, 16)).toEqual({ hint: false, camera: false });
+    // At a 20 px root, 342 and 61 px, the content two fifths of the window past 1050.
+    expect(aroundHolds(1103, 20).hint).toBe(true);
+    expect(aroundHolds(1102, 20).hint).toBe(false);
+    expect(aroundHolds(801, 20).camera).toBe(true);
+    expect(aroundHolds(800, 20).camera).toBe(false);
+  });
+});
+
+describe("a narrow window", () => {
+  it("shows the board beside the sky below 724 px, whichever this browser chose, and both layouts from 724", () => {
+    expect(shownLayout("around", 723)).toBe("beside");
+    expect(shownLayout("around", 320)).toBe("beside");
+    expect(shownLayout("around", 724)).toBe("around");
+    expect(shownLayout("beside", 723)).toBe("beside");
+    expect(shownLayout("beside", 1440)).toBe("beside");
+    expect(bothLayoutsFit(723)).toBe(false);
+    expect(bothLayoutsFit(724)).toBe(true);
   });
 });
 

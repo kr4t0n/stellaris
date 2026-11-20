@@ -8,7 +8,9 @@ function fromNow(ms: number): string {
 
 /** A runner row's cells, one a column. */
 function cellsOf(row: Locator): Locator {
-  return row.locator(":scope > *");
+  // The OS, the version, the capabilities, and the projects sit in one `contents` box, cells of the
+  // row's grid on one line and one cell under the name on two.
+  return row.locator(":scope > :not(.contents), :scope > .contents > *");
 }
 
 /**
@@ -183,7 +185,7 @@ test("the Runners tab opens the runners view, and Esc closes the board", async (
   ]);
   // Every row keeps the same eight cells, so each column holds the same thing; the runner's pause,
   // rename, and removal share the last.
-  const cells = (row: number) => rows.nth(row).locator(":scope > *");
+  const cells = (row: number) => cellsOf(rows.nth(row));
   for (const row of [0, 1, 2]) {
     await expect(cells(row)).toHaveCount(8);
   }
@@ -229,7 +231,7 @@ test("the user pauses a runner, and one CLI on it apart from it, then resumes ea
   await page.goto("/runners");
   const rows = page.getByRole("list", { name: "Registered" }).getByRole("listitem");
   const pod = rows.nth(0);
-  const state = pod.locator(":scope > *").nth(6);
+  const state = cellsOf(pod).nth(6);
   await expect(state).toHaveText("connected");
 
   // A CLI's mark pauses that CLI on that runner alone, from the keyboard. It keeps the focus while
@@ -252,7 +254,7 @@ test("the user pauses a runner, and one CLI on it apart from it, then resumes ea
   await expect(state).toHaveClass(/text-amber-300/);
   await expect(state).toHaveAttribute("title", /^connected; claude paused /);
   await expect(page.getByText("2 connected · 1 away · 1 paused ·")).toBeVisible();
-  await expect(rows.nth(1).locator(":scope > *").nth(6)).toHaveText("connected");
+  await expect(cellsOf(rows.nth(1)).nth(6)).toHaveText("connected");
 
   // The runner's own pause covers every CLI and keeps the CLI's apart.
   const whole = pod.getByRole("button", { name: /^(Pause|Resume) pod$/ });
@@ -276,7 +278,7 @@ test("the user pauses a runner, and one CLI on it apart from it, then resumes ea
   const laptop = rows.nth(2);
   await expect(claude).toHaveAttribute("aria-disabled", "false");
   await laptop.getByRole("button", { name: "Pause laptop" }).click();
-  await expect(laptop.locator(":scope > *").nth(6)).toHaveText("away · paused");
+  await expect(cellsOf(laptop).nth(6)).toHaveText("away · paused");
 
   // One write a press, the press made while one was on its way none.
   expect(board.writes).toEqual([
@@ -410,7 +412,7 @@ test("a refusal from the keyboard leaves the focus in the field, renaming or app
   await expect(name).toHaveValue("pod");
 });
 
-test("the user removes a runner from a red button in its row, which names what changes and says why the board refused", async ({
+test("the user removes a runner from a red button in its row, with a line under the name that says what changes, and says why the board refused", async ({
   page,
 }) => {
   // desk is pinned to pod and in a turn there; lab lives on laptop, and iphone, archived, did.
@@ -422,8 +424,8 @@ test("the user removes a runner from a red button in its row, which names what c
   await expect(rows).toHaveCount(3);
   const removals = () => board.writes.filter((write) => /^\/api\/runners\/[^/]+$/.test(write.path));
 
-  // The bin turns into a red Remove in the same cell, in place of the row's controls, named for
-  // what it changes. It takes no press for its first moments, so a double click on the bin, its
+  // The bin turns into a red Remove in the same cell, in place of the row's controls, and a line
+  // under the row says what it changes. It takes no press for its first moments, so a double click on the bin, its
   // second click 150 ms later on the page's clock and landing on the Remove, removes nothing.
   const laptop = rows.nth(2);
   const bin = laptop.getByRole("button", { name: "Remove laptop…" });
@@ -441,10 +443,20 @@ test("the user removes a runner from a red button in its row, which names what c
   // The user's muted red, read with the mouse off it.
   await page.mouse.move(0, 0);
   await expect(remove).toHaveCSS("background-color", "rgb(220, 63, 63)");
+  // The line starts under the name, as a syncing runner's does, and is the button's description, so
+  // a screen reader hears it with the button; no tooltip says it again.
   const changes = "Clears archived iphone · its token stops working";
-  await expect(remove).toHaveAttribute("title", changes);
+  const line = laptop.getByRole("paragraph").filter({ hasText: changes });
+  await expect(line).toHaveText(changes);
+  const [lineAt, nameAt] = await Promise.all([
+    line.boundingBox(),
+    cellsOf(laptop).nth(1).boundingBox(),
+  ]);
+  expect(lineAt?.x).toBe(nameAt?.x);
+  expect(lineAt?.y).toBeGreaterThan((nameAt?.y ?? 0) + (nameAt?.height ?? 0) - 1);
+  await expect(remove).not.toHaveAttribute("title");
   await expect(remove).toHaveAccessibleDescription(changes);
-  await expect(cellsOf(laptop)).toHaveCount(8);
+  await expect(cellsOf(laptop)).toHaveCount(9);
   await expect(cellsOf(laptop).nth(7).getByRole("button")).toHaveCount(1);
   expect(removals()).toEqual([]);
   // Once it takes a press, the board refuses while lab lives there, on a line under the row.
@@ -455,10 +467,18 @@ test("the user removes a runner from a red button in its row, which names what c
     "runner laptop cannot be removed while lab lives there; move it to another runner first",
   );
   await expect(remove).toBeFocused();
-  // Escape puts the controls back with the bin focused, and the refusal goes; the board stays open.
+  // The refusal goes under the line, which stays.
+  const [kept, refusal] = await Promise.all([
+    line.boundingBox(),
+    laptop.getByRole("alert").boundingBox(),
+  ]);
+  expect(refusal?.y).toBeGreaterThanOrEqual((kept?.y ?? 0) + (kept?.height ?? 0));
+  // Escape puts the controls back with the bin focused, and the line and the refusal go; the board
+  // stays open.
   await page.keyboard.press("Escape");
   await expect(remove).toHaveCount(0);
   await expect(bin).toBeFocused();
+  await expect(line).toHaveCount(0);
   await expect(laptop.getByRole("alert")).toHaveCount(0);
   await expect(page).toHaveURL("/runners");
 
@@ -467,7 +487,8 @@ test("the user removes a runner from a red button in its row, which names what c
   const pod = rows.nth(0);
   await pod.getByRole("button", { name: "Remove pod…" }).click();
   const removePod = pod.getByRole("button", { name: "Remove pod", exact: true });
-  await expect(removePod).toHaveAttribute("title", "Unpins desk · its token stops working");
+  await expect(pod.getByRole("paragraph")).toHaveText(["Unpins desk · its token stops working"]);
+  await expect(removePod).toHaveAccessibleDescription("Unpins desk · its token stops working");
   await expect(removePod).toHaveAttribute("aria-disabled", "false");
   await page.keyboard.press("Enter");
   await expect(pod.getByRole("alert")).toHaveText(
@@ -484,7 +505,8 @@ test("the user removes a runner from a red button in its row, which names what c
   await expect(studio.getByRole("button", { name: "Resume studio" })).toBeVisible();
   await studio.getByRole("button", { name: "Remove studio…" }).click();
   const removeStudio = studio.getByRole("button", { name: "Remove studio", exact: true });
-  await expect(removeStudio).toHaveAttribute("title", "Its token stops working");
+  await expect(studio.getByRole("paragraph")).toHaveText(["Its token stops working"]);
+  await expect(removeStudio).toHaveAccessibleDescription("Its token stops working");
   await expect(removeStudio).toHaveAttribute("aria-disabled", "false");
   await removeStudio.click();
   await expect(rows).toHaveCount(2);
@@ -675,7 +697,7 @@ test("a runner names the CLI its limit holds, apart from the user's pause", asyn
   await fakeBoard(page, { quotas: "limited" });
   await page.goto("/runners");
   const pod = page.getByRole("list", { name: "Registered" }).getByRole("listitem").nth(0);
-  const state = pod.locator(":scope > *").nth(6);
+  const state = cellsOf(pod).nth(6);
   // pod's Claude is limited for 40 minutes: its turns there wait, which the row says, and its mark
   // still offers the user's own pause.
   await expect(state).toHaveText("claude held");
@@ -878,7 +900,7 @@ test("a runner syncing its board copy says how far it has come, and after a fail
   await page.goto("/runners");
   await expect(page.getByText(/· 1 syncing ·/)).toBeVisible();
   const studio = page.getByRole("list", { name: "Registered" }).getByRole("listitem").nth(1);
-  const cells = studio.locator(":scope > *");
+  const cells = cellsOf(studio);
   // The state names the sync, which is not the user's pause: the pause control still offers Pause.
   await expect(cells.nth(6)).toHaveText("syncing");
   await expect(cells.nth(6)).toHaveAttribute("title", /^connected; syncing its board copy since/);

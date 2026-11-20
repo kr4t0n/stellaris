@@ -554,19 +554,26 @@ export function RunnersView() {
           <p className="px-2 py-2 text-meta">No runners yet.</p>
         ) : null}
         {/* Rows are subgrids of one grid, so each column is as wide as its widest cell. The
-            capabilities and the projects give way to the rest, cut at their ends, and then a
-            state of several parts.
+            capabilities give way to the rest, cut at their end, and the projects down to 2 root
+            ems, or 1.5 while a red Remove shows, which is 6 px wider than the marks at a 16 px
+            root; then a state of several parts.
             Under 25 root ems, which a 420 px island holds at a 16 px root font but not at a larger
             one, a row takes two lines: the marks, the name, the state, and the controls, and under
             the name one cell of the OS, the version, the capabilities, and the projects, cut at
-            the row's end, so they hold no column the name's line shares. The query counts the room
-            the view's scrollbar takes, so the gaps are pixels, 12 as at a 16 px root, which leaves
-            one line at a 20 px root room for it from 25 ems up. */}
+            the row's end, so they hold no column the name's line shares: the name's column takes
+            only the name's own minimum (`minmax(auto, …)`), since that cell's whole text would
+            otherwise be its minimum. The query counts the room the view's scrollbar takes, so the
+            gaps are pixels, 12 as at a 16 px root, which leaves one line at a 20 px root room for
+            it from 25 ems up. */}
         <ul
           ref={control("list")}
           tabIndex={-1}
           aria-label="Registered"
-          className="focus-visible:outline-none grid grid-cols-[auto_auto_auto_auto_minmax(0,max-content)_minmax(0,1fr)_auto_auto] gap-x-[12px] @max-[25rem]:grid-cols-[auto_minmax(min-content,1fr)_auto_auto]"
+          className={
+            opened?.form === "remove"
+              ? "focus-visible:outline-none grid grid-cols-[auto_auto_auto_auto_minmax(0,max-content)_minmax(1.5rem,1fr)_auto_auto] gap-x-[12px] @max-[25rem]:grid-cols-[auto_minmax(auto,1fr)_auto_auto]"
+              : "focus-visible:outline-none grid grid-cols-[auto_auto_auto_auto_minmax(0,max-content)_minmax(2rem,1fr)_auto_auto] gap-x-[12px] @max-[25rem]:grid-cols-[auto_minmax(auto,1fr)_auto_auto]"
+          }
         >
           {registered.map((runner) => {
             const clis = runner.clis.length === 0 ? "no CLI" : runner.clis.join(", ");

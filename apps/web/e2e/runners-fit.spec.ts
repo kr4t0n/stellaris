@@ -41,6 +41,11 @@ for (const root of [16, 20, 24]) {
         },
         "pod",
       );
+      // And pod's second line is as long as a busy runner's: five capabilities, five projects.
+      board.setPodHoldings(
+        ["python", "node", "go", "rust", "k8s"],
+        ["atlas", "handbook", "infrastructure", "nexus", "starlight"],
+      );
       await page.goto("/runners");
       const list = page.getByRole("list", { name: "Registered" });
       await expect(list.getByRole("listitem")).toHaveCount(3);
@@ -106,6 +111,9 @@ for (const root of [16, 20, 24]) {
                 })
                 .map(([label]) => label),
               reached: reached.length,
+              // Each row's projects' width, which on one line keeps 2 root ems, or 1.5 while the red
+              // Remove shows.
+              projects: cells.map((row) => row[5]?.getBoundingClientRect().width ?? Number.NaN),
               // The states cut short: only one of several parts may be.
               cut: cells
                 .map((row) => row[6])
@@ -134,6 +142,10 @@ for (const root of [16, 20, 24]) {
             fit.cut.filter((said) => said === "codex paused · claude held · syncing"),
           );
           expect(fit.oneLine, at).toEqual(fit.oneLine.map(() => island >= ONE_LINE[root]!));
+          if (island >= ONE_LINE[root]!) {
+            const least = (state === "marks" ? 2 : 1.5) * root - 0.5;
+            expect(Math.min(...fit.projects), at).toBeGreaterThanOrEqual(least);
+          }
         }
       }
     });

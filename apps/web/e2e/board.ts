@@ -1120,6 +1120,8 @@ export interface FakeBoard {
   opened(title: string): number;
   /** Gives a runner's record, studio's unless named, this board sync, as its runner reported it, or none. */
   setSync(sync: Record<string, unknown> | null, runner?: "pod" | "studio"): void;
+  /** Gives pod these capabilities and these projects living on it, as a busy runner has. */
+  setPodHoldings(capabilities: readonly string[], projects: readonly string[]): void;
 }
 
 /** The citizens `setWorking` puts in turns, in order. */
@@ -1377,12 +1379,15 @@ export async function fakeBoard(
     const sync = syncs.get(runner);
     return sync === undefined ? {} : { sync };
   };
+  // pod's capabilities, and the projects living on it beside lab.
+  let podCapabilities: readonly string[] = [];
+  let podProjects: Array<Record<string, unknown>> = [];
   const everyRunner = (): Array<Record<string, unknown>> => [
     {
       name: named("pod"),
       os: "linux",
       clis: ["claude", "codex"],
-      capabilities: [],
+      capabilities: podCapabilities,
       version: "0.3.11",
       gitIdentityMissing: ["email"],
       status: "connected",
@@ -2165,7 +2170,7 @@ export async function fakeBoard(
           role("steward", ["ops_event"]),
         ]);
       case "/api/projects":
-        return json(route, archived ? [lab, ARCHIVED_PROJECT] : [lab]);
+        return json(route, [lab, ...(archived ? [ARCHIVED_PROJECT] : []), ...podProjects]);
       case "/api/projects/lab/tasks":
         return json(route, [task]);
       case `/api/tasks/${STAGE_TASK}`:
@@ -2315,6 +2320,16 @@ export async function fakeBoard(
         (each) => each["body"] === text,
       ).length,
     opened: (title) => [...asks.values()].filter((each) => each.thread["title"] === title).length,
+    setPodHoldings: (capabilities, projects) => {
+      podCapabilities = capabilities;
+      podProjects = projects.map((slug) => ({
+        ...PROJECT,
+        slug,
+        name: slug,
+        members: [],
+        runner: named("pod"),
+      }));
+    },
     setSync: (sync, runner = "studio") => {
       if (sync === null) {
         syncs.delete(runner);

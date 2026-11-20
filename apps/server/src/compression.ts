@@ -10,7 +10,8 @@ const compressed = compress({ contentTypeFilter: JSON_ANSWER });
  * Sets the length of a JSON answer, whose text is whole in memory already: `compress` leaves an
  * answer under its threshold, a kilobyte, alone only by its `content-length`, which `c.json` never
  * sets, so without it every answer would be compressed, `{"paused":true}` too. An answer to a
- * request with no `accept-encoding` is never compressed, so it is left as the route gave it.
+ * request with no `accept-encoding` is never compressed, so it isn't measured; `compress` still
+ * marks it `vary: accept-encoding`, whatever its size.
  */
 async function measure(c: Context): Promise<void> {
   const answer = c.res;

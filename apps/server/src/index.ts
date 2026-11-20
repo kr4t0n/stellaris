@@ -171,6 +171,21 @@ const shutdown = async (signal: string): Promise<void> => {
 process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
+// The read index answers the reads of threads, channels, and messages. Its seed reads every message
+// file once, seconds on a large board, so it comes once the server answers; until it is done those
+// reads read the files. One that fails leaves them on the files and is tried again a minute later.
+const seedReads = async (): Promise<void> => {
+  const started = Date.now();
+  try {
+    await board.indexReads();
+    log.info({ ms: Date.now() - started }, "read index seeded");
+  } catch (error) {
+    log.error({ err: error }, "could not seed the read index; trying again in a minute");
+    setTimeout(() => void seedReads(), 60_000).unref();
+  }
+};
+await seedReads();
+
 // The seed reads the transcripts of turns ended before ends carried their board actions, seconds
 // on a large board, so it comes once the scheduler runs and can drain, rather than holding its
 // wakes; what the scheduler logs meanwhile counts once all the same. One that fails leaves the

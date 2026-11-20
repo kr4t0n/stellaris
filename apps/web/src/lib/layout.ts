@@ -15,18 +15,27 @@ export const ASK_NARROWEST = 280;
 /** The sky's room below which, around the sky, the ask box leaves it for the window's middle. */
 const ASK_ROOM = 460;
 /**
- * Beside the sky, the sky's room right of the panel that holds the ask hint in its middle, clear of
- * the camera's buttons at its right foot: 32 px and 15.5 root ems. That is two sides of 16 px and
- * 2.75 root ems (`HINT_SIDE`: the buttons' 2.25 root ems, 16 px in from the window's edge, and a
- * gap of half an em), and 10 root ems for the hint at its narrowest, an unread answer's with its
+ * The sky's room, right of the panel beside the sky or between the islands around it, that holds
+ * the ask hint in its middle, clear of the camera's buttons at its right foot: 32 px and 15.5 root
+ * ems. That is two sides of 16 px and 2.75 root ems (`HINT_SIDE`: the buttons' 2.25 root ems, 16 px
+ * in from the room's right end, and a gap of half an em), and 10 root ems for the hint at its
+ * narrowest, an unread answer's with its
  * news cut to nothing: 141 px at a 16 px root and 170 at 20, under 10 root ems from 12 to 24 px,
  * since its key's 11 px text doesn't follow the root font.
  */
 const HINT_ROOM_EMS = 15.5;
-/** Each side of the hint's row beside the sky, which keeps it clear of the camera's buttons. */
+/** Each side of the hint's row while the board is open, which keeps it clear of the camera's buttons. */
 export const HINT_SIDE = "calc(16px + 2.75rem)";
 /** The room that holds the camera's buttons, 16 px clear of the panel and of the window's edge. */
 const CAMERA_ROOM_EMS = 4.25;
+/** The camera's buttons' own width. */
+const CAMERA_EMS = 2.25;
+/**
+ * The narrowest window that holds the navigator beside the narrowest content around the sky, with
+ * the gaps to the window's edges and between them. Around the sky, a narrower window shows the
+ * board beside the sky.
+ */
+export const AROUND_NARROWEST = NAVIGATOR_WIDTH + CONTENT_MIN + 3 * ISLAND_MARGIN;
 
 /**
  * Where the open board sits: `around` the sky, the navigator island on the left and the content
@@ -59,6 +68,20 @@ export function defaultContentWidth(window: number): number {
 export function widestContentWidth(window: number, layout: BoardLayout): number {
   const margins = layout === "around" ? 3 : 2;
   return Math.max(CONTENT_MIN, window - NAVIGATOR_WIDTH - margins * ISLAND_MARGIN);
+}
+
+/**
+ * Where the board is drawn in a window `window` wide: where this browser chose, unless it chose
+ * around the sky and the window is too narrow for that, where it is drawn beside the sky, keeping
+ * the choice for a wider window.
+ */
+export function shownLayout(chosen: BoardLayout, window: number): BoardLayout {
+  return chosen === "around" && window < AROUND_NARROWEST ? "beside" : chosen;
+}
+
+/** Whether a window `window` wide holds both layouts, so the switch between them has a use. */
+export function bothLayoutsFit(window: number): boolean {
+  return window >= AROUND_NARROWEST;
 }
 
 /** The width the content takes: the chosen one, held within what the window allows. */
@@ -111,19 +134,25 @@ export function skyRoom(layout: BoardLayout, content: number, window: number): S
 }
 
 /**
- * Beside the sky, what the sky's room right of the panel holds, at a root font of `rootPx`: the
- * ask hint in its middle, which a narrower room leaves out, as Space still opens the ask box; and
- * the camera's buttons, which hide where the panel would cover them.
+ * What the sky's room holds while the board is open, at a root font of `rootPx`: the ask hint in
+ * its middle, which a narrower room leaves out, as Space still opens the ask box; and the camera's
+ * buttons, which hide where an island would cover them. Beside the sky they need 4.25 root ems
+ * right of the panel; around it, where they sit 16 px in from the room's right end and the room
+ * starts 16 px clear of the navigator, 16 px and their own 2.25 root ems.
  */
-export function besideSky(
+export function skyHolds(
   window: number,
   room: SkyRoom,
   rootPx: number,
+  layout: BoardLayout,
 ): { hint: boolean; camera: boolean } {
-  const sky = window - room.left;
+  const sky = window - room.left - room.right;
   return {
     hint: sky >= 2 * ISLAND_MARGIN + HINT_ROOM_EMS * rootPx,
-    camera: sky >= CAMERA_ROOM_EMS * rootPx,
+    camera:
+      layout === "beside"
+        ? sky >= CAMERA_ROOM_EMS * rootPx
+        : sky >= ISLAND_MARGIN + CAMERA_EMS * rootPx,
   };
 }
 

@@ -212,7 +212,8 @@ export function Navigator({
   activeView: StatusView | null;
   /** Where the board sits: an island of its own around the sky, or the panel's first column beside it. */
   layout: BoardLayout;
-  onLayout: (layout: BoardLayout) => void;
+  /** Chooses where the board sits; none while the window holds one layout alone, as no switch shows. */
+  onLayout: ((layout: BoardLayout) => void) | undefined;
   activeChannel: string | null;
   /** The project whose tasks are open, when a tasks view or a task is. */
   activeTasks: string | null;
@@ -290,7 +291,7 @@ export function Navigator({
         <span className="text-caps">Board</span>
         {over ? null : (
           <div className="flex items-center gap-1">
-            <LayoutSwitch layout={layout} onLayout={onLayout} />
+            {onLayout === undefined ? null : <LayoutSwitch layout={layout} onLayout={onLayout} />}
             <CloseBoard />
           </div>
         )}
@@ -382,7 +383,8 @@ export function Navigator({
 
 /**
  * The navigator folded beside the sky, in a window too narrow for it beside the content: a column
- * of its three buttons, the channels, the layout switch, and Close. The channels open the
+ * of its two buttons, the channels and Close, with no layout switch, since a window this narrow
+ * holds the board beside the sky alone. The channels open the
  * navigator over the content, which closes again on the channels' button, on a choice in it, on a
  * press anywhere else, or on the focus moving anywhere else, as Tab past its last link does; the
  * Playground's Escape closes it too, before the board. Its `children`
@@ -390,15 +392,11 @@ export function Navigator({
  * among the panel's columns and its view stays mounted.
  */
 export function NavigatorRail({
-  layout,
-  onLayout,
   open,
   onToggle,
   onClose,
   children,
 }: {
-  layout: BoardLayout;
-  onLayout: (layout: BoardLayout) => void;
   open: boolean;
   onToggle: () => void;
   onClose: () => void;
@@ -471,7 +469,6 @@ export function NavigatorRail({
       <div ref={over} className="contents">
         {children}
       </div>
-      <LayoutSwitch layout={layout} onLayout={onLayout} />
       <CloseBoard />
     </section>
   );

@@ -1118,8 +1118,8 @@ export interface FakeBoard {
   stored(body: string): number;
   /** The threads opened with this title. */
   opened(title: string): number;
-  /** Gives studio's record this board sync, as its runner reported it, or none. */
-  setSync(sync: Record<string, unknown> | null): void;
+  /** Gives a runner's record, studio's unless named, this board sync, as its runner reported it, or none. */
+  setSync(sync: Record<string, unknown> | null, runner?: "pod" | "studio"): void;
 }
 
 /** The citizens `setWorking` puts in turns, in order. */
@@ -1371,8 +1371,12 @@ export async function fakeBoard(
   // Each runner's name now, by the name it started with; a rename moves its pauses with it.
   const runnerNames = new Map<string, string>();
   const named = (runner: string): string => runnerNames.get(runner) ?? runner;
-  // studio's board sync, as its runner last reported it; the view reads it while it holds studio.
-  let studioSync: Record<string, unknown> | null = null;
+  // Each runner's board sync, as its runner last reported it; the view reads it while it holds one.
+  const syncs = new Map<string, Record<string, unknown>>();
+  const syncOf = (runner: string): Record<string, unknown> => {
+    const sync = syncs.get(runner);
+    return sync === undefined ? {} : { sync };
+  };
   const everyRunner = (): Array<Record<string, unknown>> => [
     {
       name: named("pod"),
@@ -1384,6 +1388,7 @@ export async function fakeBoard(
       status: "connected",
       quotas: podQuotas,
       ...pausesOf(named("pod")),
+      ...syncOf("pod"),
     },
     {
       name: named("studio"),
@@ -1395,7 +1400,7 @@ export async function fakeBoard(
       status: "connected",
       quotas: studioQuotas,
       ...pausesOf(named("studio")),
-      ...(studioSync === null ? {} : { sync: studioSync }),
+      ...syncOf("studio"),
     },
     {
       name: named("laptop"),
@@ -2310,8 +2315,12 @@ export async function fakeBoard(
         (each) => each["body"] === text,
       ).length,
     opened: (title) => [...asks.values()].filter((each) => each.thread["title"] === title).length,
-    setSync: (sync) => {
-      studioSync = sync;
+    setSync: (sync, runner = "studio") => {
+      if (sync === null) {
+        syncs.delete(runner);
+      } else {
+        syncs.set(runner, sync);
+      }
     },
   };
 }

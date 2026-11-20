@@ -685,7 +685,10 @@ async function fitsBeside(page: Page, width: number, height: number, hint: boole
     send,
     page.getByRole("button", { name: /^Width of the board's content/ }),
     page.getByRole("link", { name: "Close the board" }),
-    page.getByRole("button", { name: "Put the board around the sky", exact: true }),
+    // The switch shows only where both layouts fit.
+    ...(width >= 724
+      ? [page.getByRole("button", { name: "Put the board around the sky", exact: true })]
+      : []),
     ...(hint ? [hintButton] : []),
   ]) {
     await control.focus();
@@ -714,6 +717,113 @@ for (const width of [320, 360, 480, 600, 700, 707]) {
     });
     await page.getByRole("button", { name: "Show the board's channels" }).focus();
     expect(await page.evaluate(() => document.querySelector("main")?.scrollLeft)).toBe(0);
+  });
+}
+
+for (const width of [320, 360, 480, 600, 707, 708, 716, 723]) {
+  test(`around the sky in a ${width} px window, too narrow for the islands side by side, the board is drawn beside the sky with no switch, and the choice stays`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await page.addInitScript(() => {
+      localStorage.setItem("stellaris.boardLayout", "around");
+    });
+    await fakeBoard(page);
+    await page.goto("/c/general");
+    // As beside the sky: one panel inside the window, its navigator folded to the rail below 708
+    // px, Send and every control inside the window, and the hint left out.
+    await fitsBeside(page, width, 800, false);
+    const content = page.getByRole("region", { name: "Board content" });
+    const navigator = page.getByRole("region", { name: "Board navigator" });
+    const rail = page.getByRole("region", { name: "Board", exact: true });
+    const first = width < 708 ? rail : navigator;
+    await expect(first).toBeVisible();
+    await expect(width < 708 ? navigator : rail).toHaveCount(0);
+    const [left, right] = [await boxOf(first), await boxOf(content)];
+    expect(overlap(left, right)).toBe(false);
+    expect(right.x).toBe(left.x + left.width);
+    // Only one layout fits, so there is no switch, and the choice stays for a wider window.
+    await expect(page.getByRole("button", { name: /^Put the board / })).toHaveCount(0);
+    expect(await page.evaluate(() => localStorage.getItem("stellaris.boardLayout"))).toBe("around");
+  });
+}
+
+test("a window widening past 724 px puts the board around the sky again, with its switch, keeping the open view", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 723, height: 800 });
+  await fakeBoard(page);
+  await page.goto("/c/general");
+  const content = page.getByRole("region", { name: "Board content" });
+  const draft = content.getByRole("textbox");
+  await draft.fill("a draft that stays");
+  expect((await boxOf(content)).x).toBe(16 + 256);
+  await page.setViewportSize({ width: 724, height: 800 });
+  // Around the sky: the navigator at the left, the content 420 px at the right, 16 px between.
+  await expect(
+    page.getByRole("button", { name: "Put the board beside the sky", exact: true }),
+  ).toBeVisible();
+  const navigator = await boxOf(page.getByRole("region", { name: "Board navigator" }));
+  const island = await boxOf(content);
+  expect(navigator).toMatchObject({ x: 16, width: 256 });
+  expect(island).toMatchObject({ x: 724 - 16 - 420, width: 420 });
+  await expect(draft).toHaveValue("a draft that stays");
+  await page.setViewportSize({ width: 723, height: 800 });
+  await expect(page.getByRole("button", { name: /^Put the board / })).toHaveCount(0);
+  await expect(draft).toHaveValue("a draft that stays");
+});
+
+for (const [width, hint, camera] of [
+  [724, false, false],
+  [757, false, false],
+  [791, false, false],
+  [792, false, true],
+  [900, false, true],
+  [1019, false, true],
+  [1020, true, true],
+  [1280, true, true],
+] as const) {
+  test(`around the sky in a ${width} px window, the hint ${hint ? "shows" : "is left out"} and the camera's buttons ${camera ? "show" : "hide"}, clear of both islands`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await fakeBoard(page);
+    await page.goto("/c/general");
+    const content = page.getByRole("region", { name: "Board content" });
+    await expect(content.getByRole("button", { name: "Send" })).toBeVisible();
+    const islands = [
+      await boxOf(page.getByRole("region", { name: "Board navigator" })),
+      await boxOf(content),
+    ];
+    expect(overlap(islands[0]!, islands[1]!)).toBe(false);
+    const hintButton = page.getByRole("button", { name: /to ask$/ });
+    if (hint) {
+      const text = await hintText(page);
+      for (const island of islands) {
+        expect(overlap(text, island)).toBe(false);
+      }
+      // Whole: its words run no further than its box.
+      const box = await boxOf(hintButton);
+      expect(text.x + text.width).toBeLessThanOrEqual(box.x + box.width + 0.5);
+    } else {
+      await expect(hintButton).toHaveCount(0);
+    }
+    const group = page.getByRole("group", { name: "Camera" });
+    if (camera) {
+      const buttons = await boxOf(group);
+      for (const island of islands) {
+        expect(overlap(buttons, island)).toBe(false);
+      }
+      const fit = await boxOf(page.getByRole("button", { name: "Fit the whole sky" }));
+      const reached = await page.evaluate(
+        ({ x, y }) =>
+          document.elementFromPoint(x, y)?.closest("button")?.getAttribute("aria-label"),
+        { x: fit.x + fit.width / 2, y: fit.y + fit.height / 2 },
+      );
+      expect(reached).toBe("Fit the whole sky");
+    } else {
+      await expect(group).toBeHidden();
+    }
   });
 }
 
@@ -911,11 +1021,9 @@ test("Tab past the rail's open channels closes them, so the focus never goes to 
   for (let step = 0; step < 60 && (await inList()); step += 1) {
     await page.keyboard.press("Tab");
   }
-  // Past its last link, the focus is on the rail's next button, and the list is closed.
+  // Past its last link, the focus is on the rail's next control, and the list is closed.
   await expect(navigator).toHaveCount(0);
-  await expect(
-    page.getByRole("button", { name: "Put the board around the sky", exact: true }),
-  ).toBeFocused();
+  await expect(page.getByRole("link", { name: "Close the board" })).toBeFocused();
   await expect(channels).toHaveAttribute("aria-expanded", "false");
 });
 

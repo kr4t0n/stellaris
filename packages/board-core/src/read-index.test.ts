@@ -196,6 +196,16 @@ describe("the read index", () => {
     await same("a post asking the user");
     await board.postMessage(USER, { channel: "lab/general", body: "Answered." });
     await same("the user's answer");
+    // Turns read their digests, so each conversation's next digest starts at a cursor.
+    for (const actor of [ENG, REV]) {
+      await board.readDigest({ ...actor, scope: "lab" }, { advance: true });
+      await board.readDigest({ ...actor, scope: "lab", thread: task }, { advance: true });
+      await board.readDigest({ ...actor, scope: "lab", channel: "dev" }, { advance: true });
+    }
+    await board.postMessage(USER, { thread_id: task, body: "@eng-1 @rev-1 after your turns" });
+    await board.postMessage(USER, { channel: "lab/dev", body: "@eng-1 and here" });
+    await board.postMessage(REV, { channel: "lab/general", body: "@eng-1 and at home" });
+    await same("turns read their digests, and more posts came");
     const topic = await board.openThread(REV, { channel: "lab/general", title: "Late" });
     ids.threads.push(topic.id);
     await same("a thread opened");

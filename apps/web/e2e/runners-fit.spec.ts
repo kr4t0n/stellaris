@@ -106,6 +106,11 @@ for (const root of [16, 20, 24]) {
                 })
                 .map(([label]) => label),
               reached: reached.length,
+              // The states cut short: only one of several parts may be.
+              cut: cells
+                .map((row) => row[6])
+                .filter((cell) => cell !== undefined && cell.scrollWidth > cell.clientWidth)
+                .map((cell) => cell!.textContent),
               // Whether the OS sits on the line of the runner's state, or a line of its own.
               oneLine: cells.map((row) => {
                 const [os, said] = [row[2], row[6]].map((cell) => {
@@ -124,6 +129,10 @@ for (const root of [16, 20, 24]) {
           // Three names and states, four CLIs' marks, and each row's pause, pencil, and bin, or
           // on pod's row the red Remove in their place.
           expect(fit.reached).toBe(state === "marks" ? 6 + 4 + 9 : 6 + 4 + 6 + 1);
+          // studio's `connected` and laptop's `away` stay whole; pod's long state alone is cut.
+          expect(fit.cut, at).toEqual(
+            fit.cut.filter((said) => said === "codex paused · claude held · syncing"),
+          );
           expect(fit.oneLine, at).toEqual(fit.oneLine.map(() => island >= ONE_LINE[root]!));
         }
       }

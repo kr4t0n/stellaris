@@ -554,7 +554,8 @@ export function RunnersView() {
           <p className="px-2 py-2 text-meta">No runners yet.</p>
         ) : null}
         {/* Rows are subgrids of one grid, so each column is as wide as its widest cell. The
-            capabilities, the projects, and the state give way to the rest, cut at their ends.
+            capabilities and the projects give way to the rest, cut at their ends, and then a
+            state of several parts.
             Under 25 root ems, which a 420 px island holds at a 16 px root font but not at a larger
             one, a row takes two lines: the marks, the name, the state, and the controls, and under
             the name one cell of the OS, the version, the capabilities, and the projects, cut at
@@ -565,7 +566,7 @@ export function RunnersView() {
           ref={control("list")}
           tabIndex={-1}
           aria-label="Registered"
-          className="focus-visible:outline-none grid grid-cols-[auto_auto_auto_auto_minmax(0,max-content)_minmax(0,1fr)_minmax(0,max-content)_auto] gap-x-[12px] @max-[25rem]:grid-cols-[auto_auto_minmax(0,1fr)_auto]"
+          className="focus-visible:outline-none grid grid-cols-[auto_auto_auto_auto_minmax(0,max-content)_minmax(0,1fr)_auto_auto] gap-x-[12px] @max-[25rem]:grid-cols-[auto_minmax(min-content,1fr)_auto_auto]"
         >
           {registered.map((runner) => {
             const clis = runner.clis.length === 0 ? "no CLI" : runner.clis.join(", ");
@@ -634,9 +635,11 @@ export function RunnersView() {
                     {lives}
                   </span>
                 </span>
-                {/* Cut where the row runs out of room, with the whole of it as its title. */}
+                {/* A state of several parts is cut where the row runs out of room, with the whole of
+                    it as its title; one word stays whole, so capabilities and projects give way
+                    before it. */}
                 <span
-                  className={`truncate text-right text-xs @max-[25rem]:col-start-3 @max-[25rem]:row-start-1 ${state.tone}`}
+                  className={`text-right text-xs ${state.label.includes(" · ") ? "truncate" : "whitespace-nowrap"} @max-[25rem]:col-start-3 @max-[25rem]:row-start-1 ${state.tone}`}
                   title={state.detail}
                 >
                   {state.label}

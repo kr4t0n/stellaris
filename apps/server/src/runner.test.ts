@@ -48,7 +48,12 @@ import {
 import { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
-import { startTestSociety, TURN_START_WAIT, type TestSociety } from "./testing/harness.js";
+import {
+  RECONNECT_WAIT,
+  startTestSociety,
+  TURN_START_WAIT,
+  type TestSociety,
+} from "./testing/harness.js";
 import { PIXEL, pngOfSize } from "./testing/images.js";
 
 const USER = { name: "user", role: "user" } as const;
@@ -4016,7 +4021,7 @@ describe("turns on a runner over the runner protocol", () => {
 
     // Back, the runner takes the next turn, which starts afresh, since the last ran elsewhere.
     network.up();
-    await vi.waitFor(() => expect(hub.connected).toEqual(["a", "b"]), { timeout: 10_000 });
+    await vi.waitFor(() => expect(hub.connected).toEqual(["a", "b"]), RECONNECT_WAIT);
     expect((await run(turn)).runner).toBe("b");
     expect(fresh["b"]).toEqual([true, true]);
     expect((await board.readAgent("stew")).homeRunner).toBe("b");
@@ -4064,7 +4069,7 @@ describe("turns on a runner over the runner protocol", () => {
 
     // Back within the grace period, it takes the turn.
     network.up();
-    await vi.waitFor(() => expect(hub.connected).toEqual(["a", "b"]), { timeout: 10_000 });
+    await vi.waitFor(() => expect(hub.connected).toEqual(["a", "b"]), RECONNECT_WAIT);
     expect((await run(turn)).runner).toBe("b");
     expect(ran).toEqual(["b"]);
     expect((await board.readAgent("stew")).homeRunner).toBe("b");
@@ -4765,8 +4770,8 @@ describe("turns on a runner over the runner protocol", () => {
     network.down();
     await new Promise((resolve) => setTimeout(resolve, 300));
     network.up();
-    await vi.waitFor(() => expect(hellos).toBeGreaterThan(said), { timeout: 5_000 });
-    await vi.waitFor(() => expect(hub.connected).toEqual(["pod"]));
+    await vi.waitFor(() => expect(hellos).toBeGreaterThan(said), RECONNECT_WAIT);
+    await vi.waitFor(() => expect(hub.connected).toEqual(["pod"]), RECONNECT_WAIT);
     expect(runner.turns).toHaveLength(1);
     await new Promise((resolve) => setTimeout(resolve, 3_000));
     expect(backend.log).toEqual(["start 1"]);

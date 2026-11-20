@@ -5,7 +5,12 @@ import { Board, BoardError } from "@stellaris/board-core";
 import { ZERO_USAGE, type AgentBackend, type TurnResult } from "@stellaris/runner-core";
 import { TurnDispatchSchema, type ModelOption } from "@stellaris/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { startTestSociety, TURN_START_WAIT, type TestSociety } from "./testing/harness.js";
+import {
+  RECONNECT_WAIT,
+  startTestSociety,
+  TURN_START_WAIT,
+  type TestSociety,
+} from "./testing/harness.js";
 import { addWorkRoles, USER } from "./testing/scripted-backend.js";
 
 /** A turn that ends at once, done. */
@@ -146,9 +151,11 @@ describe("renaming a runner", () => {
       agents: [],
       sessions: 1,
     });
-    await expect.poll(() => runner.name).toBe("gpu-1");
-    await expect.poll(() => society?.hub.connected).toEqual(["gpu-1"]);
-    await expect.poll(async () => (await board.readRunner("gpu-1")).status).toBe("connected");
+    await expect.poll(() => runner.name, RECONNECT_WAIT).toBe("gpu-1");
+    await expect.poll(() => society?.hub.connected, RECONNECT_WAIT).toEqual(["gpu-1"]);
+    await expect
+      .poll(async () => (await board.readRunner("gpu-1")).status, RECONNECT_WAIT)
+      .toBe("connected");
     await expect(board.readRunner("pod")).rejects.toMatchObject({ code: "NOT_FOUND" });
 
     // The next turn runs on it under the new name and resumes the session begun as pod.
@@ -217,7 +224,7 @@ describe("renaming a runner", () => {
     });
     expect(await renamed.json()).toMatchObject({ agents: ["concierge-1"], sessions: 1 });
     expect((await board.readAgent("concierge-1")).homeRunner).toBe("gpu-1");
-    await expect.poll(() => society?.hub.connected).toEqual(["gpu-1"]);
+    await expect.poll(() => society?.hub.connected, RECONNECT_WAIT).toEqual(["gpu-1"]);
     // The warm session's token goes at once, rather than when its idle time runs out.
     expect(board.resolveToken(tokens[0] ?? "")).toBeNull();
 
@@ -290,7 +297,7 @@ describe("renaming a runner", () => {
     expect(await during).toBeNull();
 
     // Once the runner is back under its new name, the turn goes there and resumes the session.
-    await expect.poll(() => hub.connected).toEqual(["far", "gpu-1"]);
+    await expect.poll(() => hub.connected, RECONNECT_WAIT).toEqual(["far", "gpu-1"]);
     await society.run(dispatch);
     expect(ran.at(-1)).toEqual({ runner: "gpu-1", session: "session-0", newSession: false });
     expect(await board.readSessions("eng-1", "society")).toEqual({

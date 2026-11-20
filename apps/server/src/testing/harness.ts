@@ -25,6 +25,15 @@ import { USER } from "./scripted-backend.js";
 
 export type TestApp = ReturnType<typeof createApp>;
 
+/**
+ * How long a test waits for a turn on a test society's runner to reach its CLI, as `vi.waitFor`'s
+ * or `expect.poll`'s options. Before the CLI starts, the runner pulls the board's copy, clones or
+ * fetches the citizen's home from this process's server, and prepares the project's repository and
+ * worktree, all git processes that a loaded machine slows past Vitest's 1 s default (testing.md,
+ * "A wait for a turn to start takes `TURN_START_WAIT`").
+ */
+export const TURN_START_WAIT = { timeout: 10_000 } as const;
+
 export interface TestSocietyOptions {
   readonly board: Board;
   /** The runner's adapters, built once the app exists, since scripted ones call its verbs. */

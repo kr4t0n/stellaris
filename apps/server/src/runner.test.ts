@@ -48,7 +48,7 @@ import {
 import { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
-import { startTestSociety, type TestSociety } from "./testing/harness.js";
+import { startTestSociety, TURN_START_WAIT, type TestSociety } from "./testing/harness.js";
 import { PIXEL, pngOfSize } from "./testing/images.js";
 
 const USER = { name: "user", role: "user" } as const;
@@ -1818,7 +1818,7 @@ describe("turns on a runner over the runner protocol", () => {
     const { run, hub } = await start(board, backend);
     const inThread = { ...deskPost, thread: { id: thread.id, task: false } };
     const running = run(inThread);
-    await vi.waitFor(() => expect(asked).toBe(1));
+    await vi.waitFor(() => expect(asked).toBe(1), TURN_START_WAIT);
     const turnId = hub.liveTurns()[0]?.turnId ?? "";
     expect(await hub.stop(turnId, "user")).toBe(true);
     chosen.resolve();
@@ -4554,7 +4554,7 @@ describe("turns on a runner over the runner protocol", () => {
     });
     const { run, hub, runner } = society;
     const first = run(manual("eng-1", "demo"));
-    await vi.waitFor(() => expect(backend.log).toEqual(["start 1"]));
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1"]), TURN_START_WAIT);
     await vi.waitFor(() => expect(hub.unacknowledged("pod")).toEqual([]));
 
     // The runner's network fails for longer than the grace period: the board ends the turn and
@@ -4582,7 +4582,10 @@ describe("turns on a runner over the runner protocol", () => {
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(backend.log).toEqual(["start 1", "stop 1"]);
     backend.end(1);
-    await vi.waitFor(() => expect(backend.log).toEqual(["start 1", "stop 1", "end 1", "start 2"]));
+    await vi.waitFor(
+      () => expect(backend.log).toEqual(["start 1", "stop 1", "end 1", "start 2"]),
+      TURN_START_WAIT,
+    );
     backend.end(2);
     expect(await next).toMatchObject({ exitReason: "completed" });
     await vi.waitFor(() => expect(runner.turns).toEqual([]));
@@ -4619,21 +4622,21 @@ describe("turns on a runner over the runner protocol", () => {
     expect(running()).toEqual([]);
 
     const completedTurn = run(manual("eng-1", "demo"));
-    await vi.waitFor(() => expect(backend.log).toEqual(["start 1"]));
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1"]), TURN_START_WAIT);
     expect(running()).toEqual([["demo", "eng-1", 1]]);
     backend.end(1);
     expect(await completedTurn).toMatchObject({ exitReason: "completed" });
     expect(running()).toEqual([["demo", "eng-1", 0]]);
 
     const failedTurn = run(manual("eng-1", "demo"));
-    await vi.waitFor(() => expect(backend.log).toContain("start 2"));
+    await vi.waitFor(() => expect(backend.log).toContain("start 2"), TURN_START_WAIT);
     expect(running()).toEqual([["demo", "eng-1", 1]]);
     backend.end(2, { ...completed("broke"), status: null, exitReason: "error", error: "broke" });
     expect(await failedTurn).toMatchObject({ exitReason: "error" });
     expect(running()).toEqual([["demo", "eng-1", 0]]);
 
     const stoppedTurn = run(manual("eng-1", "demo"));
-    await vi.waitFor(() => expect(backend.log).toContain("start 3"));
+    await vi.waitFor(() => expect(backend.log).toContain("start 3"), TURN_START_WAIT);
     expect(running()).toEqual([["demo", "eng-1", 1]]);
     expect(await hub.stop(hub.liveTurns()[0]?.turnId ?? "", "user")).toBe(true);
     await vi.waitFor(() => expect(backend.log).toContain("stop 3"));
@@ -4645,7 +4648,7 @@ describe("turns on a runner over the runner protocol", () => {
     // though no end is logged: the host lets the turn go before it records the end.
     const finish = vi.spyOn(board, "finishTurn").mockRejectedValueOnce(new Error("disk full"));
     const unrecordedTurn = run(manual("eng-1", "demo"));
-    await vi.waitFor(() => expect(backend.log).toContain("start 4"));
+    await vi.waitFor(() => expect(backend.log).toContain("start 4"), TURN_START_WAIT);
     expect(running()).toEqual([["demo", "eng-1", 1]]);
     backend.end(4);
     await expect(unrecordedTurn).rejects.toThrow("disk full");
@@ -4655,7 +4658,7 @@ describe("turns on a runner over the runner protocol", () => {
     // A runner away past the grace period never reports its turn's end: the board ends the turn as
     // failed, which takes it off the gauge while its CLI, cut off, works on.
     const awayTurn = run(manual("eng-1", "demo"));
-    await vi.waitFor(() => expect(backend.log).toContain("start 5"));
+    await vi.waitFor(() => expect(backend.log).toContain("start 5"), TURN_START_WAIT);
     await vi.waitFor(() => expect(hub.unacknowledged("pod")).toEqual([]));
     expect(running()).toEqual([["demo", "eng-1", 1]]);
     network.down();
@@ -4689,7 +4692,7 @@ describe("turns on a runner over the runner protocol", () => {
     society = await startTestSociety({ board, backends: () => ({ claude: backend }) });
     const { run, runner } = society;
     const first = run(manual("eng-1", "demo"));
-    await vi.waitFor(() => expect(backend.log).toEqual(["start 1"]));
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1"]), TURN_START_WAIT);
 
     // The server sends a conversation's next turn only once it has ended the last, so a second job
     // of the conversation means the board no longer holds the first, by whatever path it ended:
@@ -4702,13 +4705,18 @@ describe("turns on a runner over the runner protocol", () => {
 
     // Another citizen's turn, in a conversation of its own, does not wait.
     const other = run(manual("eng-2", "demo"));
-    await vi.waitFor(() => expect(backend.log).toEqual(["start 1", "stop 1", "start 2"]));
+    await vi.waitFor(
+      () => expect(backend.log).toEqual(["start 1", "stop 1", "start 2"]),
+      TURN_START_WAIT,
+    );
     backend.end(2);
     expect(await other).toMatchObject({ exitReason: "completed" });
 
     backend.end(1);
-    await vi.waitFor(() =>
-      expect(backend.log).toEqual(["start 1", "stop 1", "start 2", "end 2", "end 1", "start 3"]),
+    await vi.waitFor(
+      () =>
+        expect(backend.log).toEqual(["start 1", "stop 1", "start 2", "end 2", "end 1", "start 3"]),
+      TURN_START_WAIT,
     );
     backend.end(3);
     expect(await first).toMatchObject({ exitReason: "stopped" });
@@ -4747,7 +4755,7 @@ describe("turns on a runner over the runner protocol", () => {
     });
     const { run, hub, runner } = society;
     const first = run(manual("eng-1", "demo"));
-    await vi.waitFor(() => expect(backend.log).toEqual(["start 1"]));
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1"]), TURN_START_WAIT);
     await vi.waitFor(() => expect(hub.unacknowledged("pod")).toEqual([]));
     const said = hellos;
 
@@ -4785,7 +4793,7 @@ describe("turns on a runner over the runner protocol", () => {
     society = await startTestSociety({ board, backends: () => ({ claude: backend }) });
     const { run, hub, runner } = society;
     const first = run(manual("eng-1", "demo"));
-    await vi.waitFor(() => expect(backend.log).toEqual(["start 1"]));
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1"]), TURN_START_WAIT);
     const next = run(manual("eng-1", "demo"));
     await vi.waitFor(() => expect(runner.turns).toHaveLength(2));
     await vi.waitFor(() => expect(backend.log).toEqual(["start 1", "stop 1"]));
@@ -5007,7 +5015,8 @@ describe("turns on a runner over the runner protocol", () => {
     });
     gate.holding = false;
     gate.release?.();
-    await vi.waitFor(() => expect(runner.turns).toHaveLength(0));
+    // The runner may still be preparing the turn, so this waits for its CLI's start as well.
+    await vi.waitFor(() => expect(runner.turns).toHaveLength(0), TURN_START_WAIT);
     expect((await board.readProject("demo")).runner).toBe("pod");
 
     // With the project's runner gone, its turns wait rather than go anywhere else.

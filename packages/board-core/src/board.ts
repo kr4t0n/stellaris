@@ -537,6 +537,14 @@ function orNotFound(found: FoundThread | null, id: Ulid): FoundThread {
   return found;
 }
 
+/**
+ * The author of a message's file, `<id>-<author>.md`, read from its name. Compared whole, since a
+ * name may end another's: `rev-a`'s files end in `-a.md` too.
+ */
+function authorOfFile(file: string): Name {
+  return file.slice(27, -".md".length);
+}
+
 function byId(a: { message: Message }, b: { message: Message }): number {
   return a.message.id < b.message.id ? -1 : a.message.id > b.message.id ? 1 : 0;
 }
@@ -1614,7 +1622,7 @@ export class Board {
     return {
       count: files.length,
       last: last?.slice(0, 26) ?? null,
-      lastAuthor: last?.slice(27, -".md".length) ?? null,
+      lastAuthor: last === undefined ? null : authorOfFile(last),
     };
   }
 
@@ -2097,7 +2105,7 @@ export class Board {
   ): Promise<Message | null> {
     // A message's file is `<id>-<author>.md`, so the author's own are found by name.
     const own = (await listFiles(dir))
-      .filter((file) => file.slice(27, -".md".length) === author)
+      .filter((file) => authorOfFile(file) === author)
       .slice(-IDEMPOTENCY_LOOKBACK);
     // Read at once, and only a file whose text holds the key is parsed: under the write lock, the
     // look costs about what one read does.
@@ -7509,7 +7517,7 @@ export class Board {
       return this.reads.wroteIn(folder, actor.name);
     }
     const files = await listFiles(folder);
-    return files.some((file) => file.endsWith(`-${actor.name}.md`));
+    return files.some((file) => authorOfFile(file) === actor.name);
   }
 
   /**

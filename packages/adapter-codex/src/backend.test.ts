@@ -1649,8 +1649,10 @@ describe("steering and stopping a Codex turn", () => {
 });
 
 /**
- * The codes codex-cli 0.162.1 ends a turn with. The first five rows are what its app server sent
- * when a stub model service answered so; the rest are from its error enum.
+ * The codes codex-cli 0.162.1 and 0.170.0 end a turn with. The first five rows are what 0.162.1's
+ * app server sent when a stub model service answered so, and the sixth what 0.170.0's sent for a
+ * 503 or a failed stream with the code `policy_capacity_unavailable`; the rest are from their
+ * error enums.
  */
 describe("isTransient", () => {
   it.each([
@@ -1659,6 +1661,11 @@ describe("isTransient", () => {
     ["a 429 rate limit", { responseTooManyFailedAttempts: { httpStatusCode: 429 } }, true],
     ["the plan's usage limit", "usageLimitExceeded", false],
     ["a rate limit Codex gave up on", "rateLimitExceeded", true],
+    [
+      "a 503 or a failed stream saying policy-restricted capacity is unavailable",
+      "policyCapacityUnavailable",
+      true,
+    ],
     ["flex capacity", "flexUnavailable", true],
     ["no connection", { httpConnectionFailed: { httpStatusCode: null } }, true],
     ["a 502 on the stream", { responseStreamConnectionFailed: { httpStatusCode: 502 } }, true],
@@ -1667,6 +1674,7 @@ describe("isTransient", () => {
     ["a 400", { responseTooManyFailedAttempts: { httpStatusCode: 400 } }, false],
     ["the context window", "contextWindowExceeded", false],
     ["a policy", "cyberPolicy", false],
+    ["the workspace's inference hook refusing the request", "inferenceHookDenied", false],
     ["a sign-in", "unauthorized", false],
     ["a bad request", "badRequest", false],
     ["anything else", "other", false],

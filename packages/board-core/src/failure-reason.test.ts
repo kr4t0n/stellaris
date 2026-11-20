@@ -193,9 +193,17 @@ const SHAPES: readonly (readonly ["claude" | "codex", FailedTurnEnd, string])[] 
     "service",
   ],
   // A mark the words leave is the adapters', the model service's: Claude Code's words for a
-  // connection that failed or timed out, against a stub.
+  // connection that failed or timed out, against a stub, and Codex 0.170.0's for
+  // `policyCapacityUnavailable`, through the adapter, for a stub answering a 503 with the code.
   ["claude", failed("Request timed out", { transient: true }), "service"],
   ["claude", failed("API Error: Connection dropped (ECONNRESET).", { transient: true }), "service"],
+  [
+    "codex",
+    failed("Policy-restricted capacity is unavailable. Please try again later.", {
+      transient: true,
+    }),
+    "service",
+  ],
   ["claude", failed("runner runner-1 went away during the turn"), "runner_dropped"],
   ["claude", failed("runner runner-1 restarted during the turn"), "runner_dropped"],
   ["codex", failed("runner runner-1 restarted during the turn"), "runner_dropped"],

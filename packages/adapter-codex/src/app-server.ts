@@ -124,12 +124,15 @@ function resumeFailureOf(error: string): ResumeFailure {
 }
 
 /**
- * The `codexErrorInfo` codes 0.162.1 gives a failure on the model service's side, after its own
- * retries ran out. `serverOverloaded` is the one behind "Selected model is at capacity", and
- * `usageLimitExceeded`, the plan's limit, is not among them.
+ * The `codexErrorInfo` codes 0.162.1 and 0.170.0 give a failure on the model service's side, after
+ * their own retries ran out. `serverOverloaded` is the one behind "Selected model is at capacity",
+ * `policyCapacityUnavailable`, new in 0.170.0, the one behind "Policy-restricted capacity is
+ * unavailable", which Codex retries as it retries an overload, and `usageLimitExceeded`, the
+ * plan's limit, is not among them.
  */
 const TRANSIENT_ERRORS = new Set([
   "serverOverloaded",
+  "policyCapacityUnavailable",
   "internalServerError",
   "rateLimitExceeded",
   "flexUnavailable",

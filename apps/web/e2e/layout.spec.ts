@@ -929,8 +929,10 @@ test("the rail's channels open over the view, and close on Escape, on the button
   const over = await boxOf(navigator);
   expect(over).toMatchObject({ x: 16 + 44, width: 256 });
   expect(overlap(over, await boxOf(content))).toBe(true);
-  // Its header leaves the switch and Close to the rail.
+  // Its header leaves Close to the rail, and neither has a switch, since a window this narrow
+  // holds the board beside the sky alone.
   await expect(page.getByRole("link", { name: "Close the board" })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: /^Put the board / })).toHaveCount(0);
 
   // Escape closes the channels and leaves the board open, with the focus back on their button.
   await navigator.getByRole("link", { name: /^needs you/ }).focus();

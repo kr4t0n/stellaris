@@ -20,7 +20,7 @@ import {
   useSession,
 } from "../lib/session.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
-import { PlanQuota } from "./Quota.js";
+import { PlanQuota } from "./QuotaReadouts.js";
 import {
   heldClis,
   identityGap,

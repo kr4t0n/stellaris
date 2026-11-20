@@ -342,7 +342,8 @@ describe("syncBoard", () => {
     // The runner stops while the next try waits, a minute away. A try writes the copy's state on
     // disk before it asks for the stream and again as it fails, before the failure is reported,
     // and a loaded machine's disk can hold either past any fixed time, so the test stops the sync
-    // once the failure is reported.
+    // once the failure is reported, or once the sync has ended without one, so that the assertions
+    // below name what went wrong.
     const failed = Promise.withResolvers<void>();
     const run = syncBoard({
       copy: new TreeCopy(local, stateFile),
@@ -364,7 +365,7 @@ describe("syncBoard", () => {
       reportEndForMs: 1_000,
       signal: stopping.signal,
     });
-    await failed.promise;
+    await Promise.race([failed.promise, run]);
     stopping.abort();
     expect(await run).toBe(false);
     expect(reports.some((report) => report.phase === "done")).toBe(false);

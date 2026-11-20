@@ -6261,7 +6261,7 @@ describe("turns on a runner over the runner protocol", () => {
     await laptop.start();
     expect((await board.readRunner("laptop")).gitIdentityMissing).toEqual(["email"]);
     // Each hello checks again, and the log speaks of a gap once, not on every reconnect.
-    await vi.waitFor(() => expect(checks).toBeGreaterThanOrEqual(3));
+    await vi.waitFor(() => expect(checks).toBeGreaterThanOrEqual(3), RECONNECT_WAIT);
     expect(about(identity)).toEqual([
       {
         level: "warn",
@@ -6272,15 +6272,17 @@ describe("turns on a runner over the runner protocol", () => {
 
     // Set on the machine, the gap clears at the next hello.
     missing = [];
-    await vi.waitFor(async () =>
-      expect((await board.readRunner("laptop")).gitIdentityMissing).toEqual([]),
+    await vi.waitFor(
+      async () => expect((await board.readRunner("laptop")).gitIdentityMissing).toEqual([]),
+      RECONNECT_WAIT,
     );
     expect(about(identity).map((entry) => entry.level)).toEqual(["warn", "info"]);
 
     // A check that fails sends nothing, which the board takes as not knowing.
     missing = new Error("git: not found");
-    await vi.waitFor(async () =>
-      expect((await board.readRunner("laptop")).gitIdentityMissing).toBeUndefined(),
+    await vi.waitFor(
+      async () => expect((await board.readRunner("laptop")).gitIdentityMissing).toBeUndefined(),
+      RECONNECT_WAIT,
     );
     expect(about(/could not check the git identity/)[0]?.context).toEqual({
       error: "Error: git: not found",

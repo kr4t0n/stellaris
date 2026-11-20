@@ -35,12 +35,12 @@ export type TestApp = ReturnType<typeof createApp>;
 export const TURN_START_WAIT = { timeout: 10_000 } as const;
 
 /**
- * How long a test waits for a test society's runner to connect again, once a rename has ended its
- * stream or its network is back, as `vi.waitFor`'s or `expect.poll`'s options. The runner waits
- * out its retry delay, which doubles with each try that fails while its network is down, and its
- * hello and stream then write the runner's record on the board, which a loaded machine's disk slows
- * past Vitest's 1 s default (testing.md, "A wait for a runner to connect again takes
- * `RECONNECT_WAIT`").
+ * How long a test waits for a runner of a test board's server to connect again, whatever ended
+ * its stream (a rename, its network's return, its own check of a stream gone quiet), as
+ * `vi.waitFor`'s or `expect.poll`'s options. The runner waits out its retry delay, which doubles
+ * with each try that fails while its network is down, and its hello and stream then write the
+ * runner's record on the board, which a loaded machine's disk slows past Vitest's 1 s default
+ * (testing.md, "A wait for a runner to connect again takes `RECONNECT_WAIT`").
  */
 export const RECONNECT_WAIT = { timeout: 10_000 } as const;
 

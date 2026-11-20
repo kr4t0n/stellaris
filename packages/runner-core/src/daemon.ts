@@ -9,6 +9,7 @@ import {
   type CliKind,
   type HeldWorkspace,
   type Name,
+  type RunnerHelloInput,
   type RunnerMessage,
   type TranscriptEntry,
   type TurnAck,
@@ -229,11 +230,12 @@ export class RunnerDaemon {
 
   /**
    * Connects, and keeps connecting after the stream ends. Resolves once the first stream is open,
-   * and rejects with the server's 401 if it refuses the token before then.
+   * or once a stop before then has ended the loop, and rejects with the server's 401 if it refuses
+   * the token before then.
    */
   async start(): Promise<void> {
     const { promise: first, resolve: opened, reject: refused } = Promise.withResolvers<void>();
-    this.loop = this.connectLoop(opened, refused);
+    this.loop = this.connectLoop(opened, refused).finally(() => opened());
     await first;
   }
 
@@ -290,7 +292,7 @@ export class RunnerDaemon {
       try {
         const { all, resident, steerable, stoppable } = this.executor.clis;
         const gitIdentityMissing = await this.identity.check();
-        const welcome = await this.client.hello({
+        const hello: RunnerHelloInput = {
           protocol: RUNNER_PROTOCOL,
           version: this.version,
           os: runnerOs(),
@@ -309,9 +311,15 @@ export class RunnerDaemon {
           ...(gitIdentityMissing === null ? {} : { gitIdentityMissing }),
           slots: this.slots,
           turns: this.turns,
-        });
+        };
+        // A stop gives up the hello and the warm report rather than wait for the server's answer,
+        // and once stopped the runner opens no stream: `halt` aborts only the stream before this.
+        const welcome = await this.client.hello(hello, this.stopping.signal);
         this.assigned = welcome.name;
-        await this.client.warm(this.executor.warmKeys);
+        await this.client.warm(this.executor.warmKeys, this.stopping.signal);
+        if (this.stopped) {
+          break;
+        }
         this.abort = new AbortController();
         this.log.info({ runner: welcome.name, server: welcome.version }, "runner connected");
         await this.client.stream(this.abort.signal, {

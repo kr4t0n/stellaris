@@ -76,8 +76,9 @@ export class RunnerClient {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
   }
 
-  async hello(hello: RunnerHelloInput): Promise<RunnerWelcome> {
-    return RunnerWelcomeSchema.parse(await this.call("POST", "/runner/hello", hello));
+  /** Registers, giving up once `signal` aborts, as a stop does. */
+  async hello(hello: RunnerHelloInput, signal?: AbortSignal): Promise<RunnerWelcome> {
+    return RunnerWelcomeSchema.parse(await this.call("POST", "/runner/hello", hello, signal));
   }
 
   /**
@@ -197,8 +198,8 @@ export class RunnerClient {
     await this.call("POST", `/runner/requests/${request}`, answer);
   }
 
-  async warm(keys: readonly string[]): Promise<void> {
-    await this.call("POST", "/runner/warm", { warm: keys });
+  async warm(keys: readonly string[], signal?: AbortSignal): Promise<void> {
+    await this.call("POST", "/runner/warm", { warm: keys }, signal);
   }
 
   /** The conversations' workspaces this runner holds, so those that ended while it was away go. */
@@ -282,7 +283,12 @@ export class RunnerClient {
   }
 
   /** One request; the parsed JSON answer, or null for an empty one. */
-  private async call(method: "GET" | "POST", path: string, body?: unknown): Promise<unknown> {
+  private async call(
+    method: "GET" | "POST",
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
     const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
       method,
       headers: {
@@ -290,6 +296,7 @@ export class RunnerClient {
         ...(body === undefined ? {} : { "content-type": "application/json" }),
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      ...(signal === undefined ? {} : { signal }),
     });
     const text = await response.text();
     if (!response.ok) {

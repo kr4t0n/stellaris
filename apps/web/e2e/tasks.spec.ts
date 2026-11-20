@@ -304,10 +304,36 @@ test("a stage that names the user but isn't a gate is finished with Advance", as
   });
 });
 
+test("a task's thread shows without waiting for the list of every thread", async ({ page }) => {
+  await fakeBoard(page);
+  const { promise: listed, resolve: list } = Promise.withResolvers<void>();
+  let asked = false;
+  // Registered after the fake board, so it answers first and holds the list back.
+  await page.route("**/api/threads", async (route) => {
+    asked = true;
+    await listed;
+    await route.fallback();
+  });
+  await page.goto(`/task/${STAGE_TASK}`);
+
+  const view = viewOf(page);
+  await expect(view.getByRole("region", { name: "Thread" })).toContainText(
+    "Survey done: twelve methods",
+  );
+  await expect(view.getByRole("textbox", { name: "Write in the task's thread" })).toBeVisible();
+  // The navigator asked for the list, which is still on its way.
+  await expect.poll(() => asked).toBe(true);
+  list();
+});
+
 test("a task with no thread to write in still gets Approve, alone", async ({ page }) => {
   const board = await fakeBoard(page);
-  await page.route("**/api/threads", (route) =>
-    route.fulfill({ contentType: "application/json", body: "[]" }),
+  await page.route(`**/api/threads/${STAGE_TASK}`, (route) =>
+    route.fulfill({
+      status: 404,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "NOT_FOUND", message: `thread ${STAGE_TASK} not found` }),
+    }),
   );
   await page.goto(`/task/${STAGE_TASK}`);
 

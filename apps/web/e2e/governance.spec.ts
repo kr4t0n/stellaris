@@ -19,6 +19,24 @@ test("a message named by its id reads as who posted it where, and opens there, m
   await expect(marked).toContainText("Survey done: twelve methods");
 });
 
+test("a proposal's thread shows without waiting for the list of every thread", async ({ page }) => {
+  await fakeBoard(page);
+  const { promise: listed, resolve: list } = Promise.withResolvers<void>();
+  let asked = false;
+  // Registered after the fake board, so it answers first and holds the list back.
+  await page.route("**/api/threads", async (route) => {
+    asked = true;
+    await listed;
+    await route.fallback();
+  });
+  await page.goto(`/proposal/${SKILL_PROPOSAL}`);
+
+  await expect(page.getByRole("region", { name: "Thread" })).toContainText("refereed-research");
+  // The navigator asked for the list, which is still on its way.
+  await expect.poll(() => asked).toBe(true);
+  list();
+});
+
 test("a skill proposed as a folder shows its SKILL.md and opens each file beside it", async ({
   page,
 }) => {

@@ -2,7 +2,7 @@ import { runnerSyncing, type Task } from "@stellaris/shared";
 import { keepPreviousData, useQueries, useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { createContext, useContext, useEffect, useState } from "react";
 import type { MetricsWindow } from "@stellaris/shared";
-import { ApiError, type Api } from "./api.js";
+import { ApiError, namesNothing, type Api } from "./api.js";
 import type { FileSource } from "./files.js";
 
 export interface Session {
@@ -154,6 +154,8 @@ export function useThread(id: string | null) {
     queryKey: ["thread", id],
     queryFn: () => api.thread(id ?? ""),
     enabled: id !== null,
+    // A thread the board does not have is an answer, which a task or a proposal without one gets.
+    retry: (failures, error) => failures < 1 && !namesNothing(error),
   });
 }
 

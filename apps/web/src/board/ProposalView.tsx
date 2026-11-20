@@ -5,15 +5,7 @@ import { BackLink } from "../components/BackLink.js";
 import { Markdown } from "../components/Markdown.js";
 import { namesNothing } from "../lib/api.js";
 import { ago } from "../lib/format.js";
-import {
-  useMembers,
-  useNow,
-  useProposal,
-  useRoles,
-  useSkills,
-  useThread,
-  useThreads,
-} from "../lib/session.js";
+import { useMembers, useNow, useProposal, useRoles, useSkills, useThread } from "../lib/session.js";
 import { useDisplayName } from "./Avatar.js";
 import { DecisionBar } from "./DecisionBar.js";
 import { consequenceOf, decidersOf, proposalTitle, waitingOnYou } from "./governance.js";
@@ -111,13 +103,11 @@ export function ProposalView() {
   const members = useMembers();
   const roles = useRoles();
   const skills = useSkills();
-  const threads = useThreads();
   const now = useNow(30_000);
   const displayName = useDisplayName();
-  // A proposal's thread takes the proposal's id.
-  const messages = useThread(
-    threads.data?.some((candidate) => candidate.id === proposalId) === true ? proposalId : null,
-  );
+  // A proposal's thread takes the proposal's id, so it is read at once; "not found" means it has none.
+  const messages = useThread(proposalId);
+  const threadless = namesNothing(messages.error);
 
   if (proposal.data === undefined) {
     return (
@@ -131,7 +121,7 @@ export function ProposalView() {
   const current = proposal.data;
   const open = current.status === "proposed";
   const proposerRole = members.data?.find((member) => member.name === current.proposedBy)?.role;
-  const thread = threads.data?.find((candidate) => candidate.id === current.id);
+  const thread = messages.data?.thread;
   const verdict = current.status === "rejected" ? "Rejected" : "Approved";
   const consequence = consequenceOf(current, {
     members: members.data ?? [],
@@ -185,7 +175,7 @@ export function ProposalView() {
           </div>
         )}
         {/* The pitch opens the proposal's thread; a proposal older than that keeps its rationale here. */}
-        {current.body.trim() === "" || thread !== undefined ? null : (
+        {current.body.trim() === "" || !threadless ? null : (
           <section className="mt-5">
             <h3 className="text-section">Why</h3>
             <div className="mt-2">
@@ -205,12 +195,10 @@ export function ProposalView() {
         </section>
         <section aria-label="Thread" className="mt-5 border-t border-line pt-4">
           <h3 className="text-section">Thread</h3>
-          {thread === undefined ? (
-            <p className="mt-2 text-meta">
-              {threads.data === undefined ? "Reading the thread…" : "No thread on this proposal."}
-            </p>
+          {threadless ? (
+            <p className="mt-2 text-meta">No thread on this proposal.</p>
           ) : (
-            <SubjectThread thread={thread} now={now} empty="Nothing said yet." />
+            <SubjectThread id={current.id} now={now} empty="Nothing said yet." />
           )}
         </section>
       </StickyList>

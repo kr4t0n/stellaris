@@ -1,7 +1,6 @@
 import type { Task } from "@stellaris/shared";
 import { useEffect } from "react";
 import { Markdown } from "../components/Markdown.js";
-import type { ThreadSummary } from "../lib/api.js";
 import { ago } from "../lib/format.js";
 import { markSeen } from "../lib/seen.js";
 import { useMembers, useThread } from "../lib/session.js";
@@ -12,13 +11,14 @@ import { MessageItem } from "./MessageItem.js";
  * oldest first, with each step's post marked, and how it closed.
  */
 export function SubjectThread({
-  thread,
+  id,
   now,
   task,
   target,
   empty,
 }: {
-  thread: ThreadSummary;
+  /** The thread's id, its subject's. */
+  id: string;
   now: number;
   /** The task whose thread it is, to name the stages its steps mention. */
   task?: Task | undefined;
@@ -28,10 +28,10 @@ export function SubjectThread({
   empty: string;
 }) {
   const members = useMembers();
-  const detail = useThread(thread.id);
+  const detail = useThread(id);
   const messages = detail.data?.messages ?? [];
   const newest = messages.at(-1)?.id ?? null;
-  useEffect(() => markSeen(thread.id, newest), [thread.id, newest]);
+  useEffect(() => markSeen(id, newest), [id, newest]);
   if (detail.data === undefined) {
     return <p className="mt-2 text-meta">Reading the thread…</p>;
   }
@@ -52,7 +52,7 @@ export function SubjectThread({
           />
         ))
       )}
-      {thread.state === "closed" ? (
+      {record.state === "closed" ? (
         <div className="mx-4 mt-2">
           <p className="text-meta">
             Closed{record.closedAt === undefined ? "" : ` ${ago(record.closedAt, now)}`}

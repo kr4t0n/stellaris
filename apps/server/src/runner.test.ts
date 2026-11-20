@@ -4576,9 +4576,7 @@ describe("turns on a runner over the runner protocol", () => {
 
     // Back, the runner lists the turn in its hello, and the server has it stop the CLI.
     network.up();
-    await vi.waitFor(() => expect(backend.log).toEqual(["start 1", "stop 1"]), {
-      timeout: 10_000,
-    });
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1", "stop 1"]), RECONNECT_WAIT);
 
     // The conversation's next turn arrives while the stopped CLI winds down, and starts in the
     // workspace only once that CLI has ended.
@@ -4677,7 +4675,7 @@ describe("turns on a runner over the runner protocol", () => {
       { agent: "eng-1", outcome: "failed", trigger: "manual", turns: 2 },
     ]);
     network.up();
-    await vi.waitFor(() => expect(backend.log).toContain("stop 5"), { timeout: 10_000 });
+    await vi.waitFor(() => expect(backend.log).toContain("stop 5"), RECONNECT_WAIT);
     backend.end(5);
   });
 

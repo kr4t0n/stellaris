@@ -8,6 +8,9 @@ import { Board, type Actor } from "./index.js";
 const USER: Actor = { name: "user", role: "user" };
 const ENG: Actor = { name: "eng-1", role: "engineer" };
 const REV: Actor = { name: "rev-1", role: "reviewer" };
+// A message file is `<id>-<author>.md`, so `rev-a`'s files end in `-a.md` too.
+const A: Actor = { name: "a", role: "engineer" };
+const REV_A: Actor = { name: "rev-a", role: "reviewer" };
 const MISSING = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 
 /** Every message file under a folder, at any depth. */
@@ -75,7 +78,7 @@ async function reads(board: Board, ids: { threads: Ulid[]; tasks: Ulid[] }) {
     }
   }
   const digests: Record<string, unknown> = {};
-  for (const actor of [ENG, REV]) {
+  for (const actor of [ENG, REV, A, REV_A]) {
     const conversations: Actor[] = [
       actor,
       { ...actor, scope: "lab" },
@@ -133,9 +136,10 @@ describe("the read index", () => {
   });
 
   /**
-   * A society with a project of two channels, two members, posts by each of them and the user in
-   * the society's and the project's channels, mentions of the user and of a member, a topic, and a
-   * task with its thread; the ids of its threads and tasks, which the steps add to.
+   * A society with a project of two channels, four members, two named so that one's ends the
+   * other's, posts by members and the user in the society's and the project's channels, mentions of
+   * the user and of a member, a topic, and a task with its thread; the ids of its threads and tasks,
+   * which the steps add to.
    */
   async function society() {
     const { board } = await Board.init(dir, { name: "test society" }, { now, leaseMs: 60_000 });
@@ -148,7 +152,7 @@ describe("the read index", () => {
         wakeTriggers: ["heartbeat"],
       });
     }
-    for (const actor of [ENG, REV]) {
+    for (const actor of [ENG, REV, A, REV_A]) {
       await board.addAgent(USER, {
         name: actor.name,
         role: actor.role,
@@ -164,6 +168,8 @@ describe("the read index", () => {
     const topic = await board.openThread(ENG, { channel: "lab/dev", title: "Which runner?" });
     await board.postMessage(ENG, { thread_id: topic.id, body: "@user pick one" });
     await board.postMessage(REV, { thread_id: topic.id, body: "@eng-1 the second" });
+    await board.postMessage(REV_A, { thread_id: topic.id, body: "Or the third." });
+    await board.postMessage(ENG, { thread_id: topic.id, body: "The second it is." });
     tick();
     const task = await board.createTask(USER, {
       project: "lab",
@@ -252,6 +258,31 @@ describe("the read index", () => {
     const again = await Board.open(dir, { now });
     await again.indexReads();
     expect(await reads(again, ids)).toEqual(await reads(board, ids));
+  });
+
+  it("counts a citizen in a thread by its own name, never by one that ends in it", async () => {
+    const { board, topic } = await society();
+    // rev-a posted in the topic and `a` never did, so only rev-a is in it.
+    const inTopic = async (actor: Actor) =>
+      (await board.unreadByConversation(actor)).some((each) => each.thread === topic);
+    const close = (actor: Actor) =>
+      settled(board.closeThread(actor, { thread_id: topic, summary: "Settled." }));
+    // From the files, as before the seed and in the admin CLI, and then from the index.
+    for (const step of ["files", "index"]) {
+      expect({ step, a: await inTopic(A), revA: await inTopic(REV_A) }).toEqual({
+        step,
+        a: false,
+        revA: true,
+      });
+      expect({ step, closed: await close(A) }).toEqual({
+        step,
+        closed: {
+          refused:
+            "only the thread's participants, the user, the steward, or the concierge may close it",
+        },
+      });
+      await board.indexReads();
+    }
   });
 
   it("takes the writes made while it is seeded, each once", async () => {

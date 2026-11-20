@@ -48,7 +48,12 @@ import {
 import { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
-import { startTestSociety, TURN_START_WAIT, type TestSociety } from "./testing/harness.js";
+import {
+  RECONNECT_WAIT,
+  startTestSociety,
+  TURN_START_WAIT,
+  type TestSociety,
+} from "./testing/harness.js";
 import { PIXEL, pngOfSize } from "./testing/images.js";
 
 const USER = { name: "user", role: "user" } as const;
@@ -4016,7 +4021,7 @@ describe("turns on a runner over the runner protocol", () => {
 
     // Back, the runner takes the next turn, which starts afresh, since the last ran elsewhere.
     network.up();
-    await vi.waitFor(() => expect(hub.connected).toEqual(["a", "b"]), { timeout: 10_000 });
+    await vi.waitFor(() => expect(hub.connected).toEqual(["a", "b"]), RECONNECT_WAIT);
     expect((await run(turn)).runner).toBe("b");
     expect(fresh["b"]).toEqual([true, true]);
     expect((await board.readAgent("stew")).homeRunner).toBe("b");
@@ -4064,7 +4069,7 @@ describe("turns on a runner over the runner protocol", () => {
 
     // Back within the grace period, it takes the turn.
     network.up();
-    await vi.waitFor(() => expect(hub.connected).toEqual(["a", "b"]), { timeout: 10_000 });
+    await vi.waitFor(() => expect(hub.connected).toEqual(["a", "b"]), RECONNECT_WAIT);
     expect((await run(turn)).runner).toBe("b");
     expect(ran).toEqual(["b"]);
     expect((await board.readAgent("stew")).homeRunner).toBe("b");
@@ -4571,9 +4576,7 @@ describe("turns on a runner over the runner protocol", () => {
 
     // Back, the runner lists the turn in its hello, and the server has it stop the CLI.
     network.up();
-    await vi.waitFor(() => expect(backend.log).toEqual(["start 1", "stop 1"]), {
-      timeout: 10_000,
-    });
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1", "stop 1"]), RECONNECT_WAIT);
 
     // The conversation's next turn arrives while the stopped CLI winds down, and starts in the
     // workspace only once that CLI has ended.
@@ -4672,7 +4675,7 @@ describe("turns on a runner over the runner protocol", () => {
       { agent: "eng-1", outcome: "failed", trigger: "manual", turns: 2 },
     ]);
     network.up();
-    await vi.waitFor(() => expect(backend.log).toContain("stop 5"), { timeout: 10_000 });
+    await vi.waitFor(() => expect(backend.log).toContain("stop 5"), RECONNECT_WAIT);
     backend.end(5);
   });
 
@@ -4765,8 +4768,8 @@ describe("turns on a runner over the runner protocol", () => {
     network.down();
     await new Promise((resolve) => setTimeout(resolve, 300));
     network.up();
-    await vi.waitFor(() => expect(hellos).toBeGreaterThan(said), { timeout: 5_000 });
-    await vi.waitFor(() => expect(hub.connected).toEqual(["pod"]));
+    await vi.waitFor(() => expect(hellos).toBeGreaterThan(said), RECONNECT_WAIT);
+    await vi.waitFor(() => expect(hub.connected).toEqual(["pod"]), RECONNECT_WAIT);
     expect(runner.turns).toHaveLength(1);
     await new Promise((resolve) => setTimeout(resolve, 3_000));
     expect(backend.log).toEqual(["start 1"]);
@@ -6256,7 +6259,7 @@ describe("turns on a runner over the runner protocol", () => {
     await laptop.start();
     expect((await board.readRunner("laptop")).gitIdentityMissing).toEqual(["email"]);
     // Each hello checks again, and the log speaks of a gap once, not on every reconnect.
-    await vi.waitFor(() => expect(checks).toBeGreaterThanOrEqual(3));
+    await vi.waitFor(() => expect(checks).toBeGreaterThanOrEqual(3), RECONNECT_WAIT);
     expect(about(identity)).toEqual([
       {
         level: "warn",
@@ -6267,15 +6270,17 @@ describe("turns on a runner over the runner protocol", () => {
 
     // Set on the machine, the gap clears at the next hello.
     missing = [];
-    await vi.waitFor(async () =>
-      expect((await board.readRunner("laptop")).gitIdentityMissing).toEqual([]),
+    await vi.waitFor(
+      async () => expect((await board.readRunner("laptop")).gitIdentityMissing).toEqual([]),
+      RECONNECT_WAIT,
     );
     expect(about(identity).map((entry) => entry.level)).toEqual(["warn", "info"]);
 
     // A check that fails sends nothing, which the board takes as not knowing.
     missing = new Error("git: not found");
-    await vi.waitFor(async () =>
-      expect((await board.readRunner("laptop")).gitIdentityMissing).toBeUndefined(),
+    await vi.waitFor(
+      async () => expect((await board.readRunner("laptop")).gitIdentityMissing).toBeUndefined(),
+      RECONNECT_WAIT,
     );
     expect(about(/could not check the git identity/)[0]?.context).toEqual({
       error: "Error: git: not found",

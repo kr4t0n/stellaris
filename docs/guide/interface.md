@@ -86,7 +86,7 @@ STELLARIS_BOARD_URL=http://127.0.0.1:4799 pnpm web:dev   # when the board server
 pnpm web:serve                # the bundle on 5173 through vite preview, with the same /api proxy
 ```
 
-The board server serves the built interface at its own address, beside the API and on the same origin; every path the API does not answer loads the page, so each view's address opens that view. It reads the bundle from disk on every request, so `pnpm build:web` updates it without a restart; reload any open tab afterwards, since a rebuild removes the chunks an old tab would still ask for. The bundle is served compressed, about 0.4 MB to draw the sky, so over a slow link such as `kubectl port-forward` use the board server's address or `web:serve` rather than `web:dev`, which sends each source file as its own module and React's development build uncompressed, about 8 to 10 MB in 51 requests.
+The board server serves the built interface at its own address, beside the API and on the same origin; every path the API does not answer loads the page, so each view's address opens that view. It reads the bundle from disk on every request, so `pnpm build:web` updates it without a restart; reload any open tab afterwards, since a rebuild removes the chunks an old tab would still ask for. The bundle is served compressed, about 0.4 MB to draw the sky, so over a slow link such as `kubectl port-forward` use the board server's address or `web:serve` rather than `web:dev`, which sends each source file as its own module and React's development build uncompressed, about 8 to 10 MB in 51 requests. The API's JSON answers are compressed too, while its event streams and images go as they are.
 
 ## Signing in
 

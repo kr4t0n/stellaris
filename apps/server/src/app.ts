@@ -30,6 +30,7 @@ import { compress } from "hono/compress";
 import { streamSSE } from "hono/streaming";
 import { z, ZodError } from "zod";
 import { API_BODY_LIMIT_BYTES, IMAGE_BODY_LIMIT_BYTES, limitBody } from "./body-limit.js";
+import { compressJson } from "./compression.js";
 import type { EnrollmentDesk } from "./enrollment.js";
 import {
   appleAppSiteAssociation,
@@ -178,6 +179,8 @@ export function createApp(deps: AppDependencies): Hono<Env> {
 
   const api = new Hono<Env>();
   api.use("*", authenticate);
+  // After the token check, so a request without a valid one costs no compression.
+  api.use("*", compressJson);
   // An image the user posts from a composer: the body is its bytes, whatever its content type says,
   // and `name` the file's name, which describes it in the markdown answered. It answers before the
   // cap every other write takes, below, so it is held to its own, the image limit. A citizen's
@@ -737,7 +740,8 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   });
 
   // Compressed, since the bundle is a megabyte raw and often crosses a slow forwarded link. The
-  // API and its event streams answer before this route, so compression never buffers a stream.
+  // API answers before this route and compresses only its JSON (`compressJson`), so no compressor
+  // ever holds back one of its event streams.
   if (deps.webDir !== undefined) {
     app.get("*", compress(), spaHandler(deps.webDir));
   }

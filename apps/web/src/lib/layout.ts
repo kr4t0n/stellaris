@@ -5,7 +5,7 @@
  */
 export const ISLAND_MARGIN = 16;
 export const NAVIGATOR_WIDTH = 256;
-/** Beside the sky, the navigator folded to a column of its three buttons, in a window too narrow for it. */
+/** Beside the sky, the navigator folded to a column of its two buttons, in a window too narrow for it. */
 export const RAIL_WIDTH = 44;
 /** The narrowest the content island goes, which still holds a plan, a composer, and a header. */
 export const CONTENT_MIN = 420;

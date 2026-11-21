@@ -1649,8 +1649,10 @@ describe("steering and stopping a Codex turn", () => {
 });
 
 /**
- * The codes codex-cli 0.162.1 ends a turn with. The first five rows are what its app server sent
- * when a stub model service answered so; the rest are from its error enum.
+ * The codes codex-cli 0.162.1 and 0.170.0 end a turn with. The first five rows are what 0.162.1's
+ * app server sent when a stub model service answered so, and the sixth what 0.170.0's sent for a
+ * 503 or a failed stream with the code `policy_capacity_unavailable`; the rest are from their
+ * error enums.
  */
 describe("isTransient", () => {
   it.each([
@@ -1659,19 +1661,48 @@ describe("isTransient", () => {
     ["a 429 rate limit", { responseTooManyFailedAttempts: { httpStatusCode: 429 } }, true],
     ["the plan's usage limit", "usageLimitExceeded", false],
     ["a rate limit Codex gave up on", "rateLimitExceeded", true],
+    [
+      "a 503 or a failed stream saying policy-restricted capacity is unavailable",
+      "policyCapacityUnavailable",
+      true,
+    ],
     ["flex capacity", "flexUnavailable", true],
-    ["no connection", { httpConnectionFailed: { httpStatusCode: null } }, true],
     ["a 502 on the stream", { responseStreamConnectionFailed: { httpStatusCode: 502 } }, true],
     ["a dropped stream", { responseStreamDisconnected: {} }, true],
     ["a 401", { httpConnectionFailed: { httpStatusCode: 401 } }, false],
     ["a 400", { responseTooManyFailedAttempts: { httpStatusCode: 400 } }, false],
     ["the context window", "contextWindowExceeded", false],
     ["a policy", "cyberPolicy", false],
+    ["the workspace's inference hook refusing the request", "inferenceHookDenied", false],
     ["a sign-in", "unauthorized", false],
     ["a bad request", "badRequest", false],
     ["anything else", "other", false],
     ["no code", undefined, false],
   ])("%s", (_case, codexErrorInfo, transient) => {
     expect(isTransient({ message: "failed", codexErrorInfo })).toBe(transient);
+  });
+
+  /**
+   * An `httpConnectionFailed` with no status, told apart by its words. The first and third are what
+   * 0.165.0 and 0.170.0 sent for a provider at a closed port, with unbounded connection retries
+   * off, and 0.170.0 for a failed stream with the code `access_program_not_enabled`; the second is
+   * a compaction's prefix, and the last Codex's words for a refusal with no message.
+   */
+  it.each([
+    ["a request with no answer", "Connection failed: error sending request", true],
+    [
+      "a compaction's request with no answer",
+      "Error running remote compact task: Connection failed: error sending request",
+      true,
+    ],
+    ["an access-program refusal in the stream", "stub access_program_not_enabled", false],
+    [
+      "an access-program refusal in Codex's words",
+      "The requested access program is not enabled.",
+      false,
+    ],
+  ])("no status: %s", (_case, message, transient) => {
+    const codexErrorInfo = { httpConnectionFailed: { httpStatusCode: null } };
+    expect(isTransient({ message, codexErrorInfo })).toBe(transient);
   });
 });

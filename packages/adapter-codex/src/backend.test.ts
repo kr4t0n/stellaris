@@ -1733,9 +1733,10 @@ describe("isTransient", () => {
 
   /**
    * An `other`, told apart by its words. All but the compaction's are what 0.170.0 sent, after its
-   * own retries, for a stub that failed every request so, and 0.165.0 the same; 0.165.0 sent the
-   * last true row for a failed stream with the code `content_policy_violation`, which it does not
-   * parse. The compaction's prefix is the one Codex puts on a compaction's failures.
+   * own retries, for a stub that failed every request so, and 0.165.0 the same; 0.165.0 alone sent
+   * the last two true rows, for failed streams with the codes `policy_capacity_unavailable` and
+   * `content_policy_violation`, which it does not parse. The compaction's prefix is the one Codex
+   * puts on a compaction's failures.
    */
   it.each([
     [
@@ -1766,6 +1767,11 @@ describe("isTransient", () => {
     [
       "a compaction's stream given up on",
       "Error running remote compact task: stream disconnected before completion: error sending request",
+      true,
+    ],
+    [
+      "a capacity failure in the stream that 0.165.0 does not parse",
+      "stream disconnected before completion: stub policy_capacity_unavailable",
       true,
     ],
     [

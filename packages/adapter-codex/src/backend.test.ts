@@ -1411,6 +1411,31 @@ describe("CodexBackend cold turns", () => {
     expect(failed.events.filter((e) => e.type === "error")).toHaveLength(1);
   });
 
+  it("says a turn whose stream Codex gave up on may pass, and not one the content filter refused", async () => {
+    // As 0.170.0 ended a turn against a stub that cut every body on the way, or answered with the
+    // content filter: five retries, each announced, then `other`.
+    const cut =
+      "stream disconnected before completion: Transport error: network error: error decoding response body";
+    const filtered =
+      "stream disconnected before completion: Incomplete response returned, reason: content_filter";
+    for (const [message, transient] of [
+      [cut, true],
+      [filtered, undefined],
+    ] as const) {
+      const fake = fakeAppServer({
+        turn: (turn) => {
+          for (let retry = 1; retry <= 5; retry += 1) {
+            turn.error(`Reconnecting... ${retry}/5`, true);
+          }
+          turn.refuse({ message, codexErrorInfo: "other", additionalDetails: null });
+        },
+      });
+      const ended = await new CodexBackend({ spawn: fake.spawn }).runTurn(request());
+      expect(ended).toMatchObject({ exitReason: "error", error: message });
+      expect(ended.transient).toBe(transient);
+    }
+  });
+
   it("ends the turn when the server dies mid-turn instead of waiting forever", async () => {
     const fake = fakeAppServer({ turn: (turn) => turn.exit("thread 'main' panicked") });
     const result = await new CodexBackend({ spawn: fake.spawn }).runTurn(
@@ -1704,5 +1729,62 @@ describe("isTransient", () => {
   ])("no status: %s", (_case, message, transient) => {
     const codexErrorInfo = { httpConnectionFailed: { httpStatusCode: null } };
     expect(isTransient({ message, codexErrorInfo })).toBe(transient);
+  });
+
+  /**
+   * An `other`, told apart by its words. All but the compaction's are what 0.170.0 sent, after its
+   * own retries, for a stub that failed every request so, and 0.165.0 the same; 0.165.0 sent the
+   * last true row for a failed stream with the code `content_policy_violation`, which it does not
+   * parse. The compaction's prefix is the one Codex puts on a compaction's failures.
+   */
+  it.each([
+    [
+      "a body cut on the way",
+      "stream disconnected before completion: Transport error: network error: error decoding response body",
+      true,
+    ],
+    [
+      "a socket closed with no answer",
+      "stream disconnected before completion: error sending request",
+      true,
+    ],
+    [
+      "a stream that ended with no completion",
+      "stream disconnected before completion: stream closed before response.completed",
+      true,
+    ],
+    [
+      "a stream gone silent",
+      "stream disconnected before completion: idle timeout waiting for SSE",
+      true,
+    ],
+    [
+      "a failed stream with a code Codex does not know",
+      "stream disconnected before completion: stub server_error",
+      true,
+    ],
+    [
+      "a compaction's stream given up on",
+      "Error running remote compact task: stream disconnected before completion: error sending request",
+      true,
+    ],
+    [
+      "a refusal in the stream that 0.165.0 does not parse",
+      "stream disconnected before completion: stub content_policy_violation",
+      true,
+    ],
+    [
+      "the content filter",
+      "stream disconnected before completion: Incomplete response returned, reason: content_filter",
+      false,
+    ],
+    ["a content-policy refusal in the stream", "stub content_policy_violation", false],
+    [
+      "a 400",
+      '{"error":{"code":"invalid_request_error","message":"stub invalid_request_error","type":"stub"}}',
+      false,
+    ],
+  ])("other: %s", (_case, message, transient) => {
+    expect(isTransient({ message, codexErrorInfo: "other" })).toBe(transient);
   });
 });

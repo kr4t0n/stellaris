@@ -204,6 +204,29 @@ const SHAPES: readonly (readonly ["claude" | "codex", FailedTurnEnd, string])[] 
     }),
     "service",
   ],
+  // Codex 0.170.0's for a stream it gave up on, through the adapter, for a stub cutting every body
+  // on the way and one closing every socket with no answer, and a compaction's, which stays one.
+  [
+    "codex",
+    failed(
+      "stream disconnected before completion: Transport error: network error: error decoding response body",
+      { transient: true },
+    ),
+    "service",
+  ],
+  [
+    "codex",
+    failed("stream disconnected before completion: error sending request", { transient: true }),
+    "service",
+  ],
+  [
+    "codex",
+    failed(
+      "Error running remote compact task: stream disconnected before completion: error sending request",
+      { transient: true },
+    ),
+    "compaction",
+  ],
   ["claude", failed("runner runner-1 went away during the turn"), "runner_dropped"],
   ["claude", failed("runner runner-1 restarted during the turn"), "runner_dropped"],
   ["codex", failed("runner runner-1 restarted during the turn"), "runner_dropped"],

@@ -155,16 +155,32 @@ const HTTP_FAILURES = [
 const CONNECTION_FAILED = "Connection failed: ";
 
 /**
+ * Codex's words for a stream it gave up on (`Stream`), which it retries itself as a dropped stream
+ * and ends as `other` once its retries ran out, behind any prefix such as a compaction's: a body
+ * cut on the way, a request sent to a socket that closed, a stream that ended or went silent
+ * before its completion, and a failed stream with a code Codex does not know, such as
+ * `server_error`, in the provider's words. In 0.162.1 to 0.170.0 the content filter's refusal
+ * ends in them too, after the same retries, and is no failure of the service's.
+ */
+const STREAM_DISCONNECTED = "stream disconnected before completion: ";
+const CONTENT_FILTER = "Incomplete response returned, reason: content_filter";
+
+/**
  * Whether an app-server error says the model service turned the turn away for now: one of the
- * codes above, or a request that failed with no answer, a 429, or a 5xx. Any other 4xx, a policy,
- * the context window, or a sign-in is not worth sending again. A status-less
- * `httpConnectionFailed` is a request with no answer only in Codex's words for one.
+ * codes above, a request that failed with no answer, a 429, or a 5xx, or a stream Codex gave up
+ * on. Any other 4xx, a policy, the content filter, the context window, or a sign-in is not worth
+ * sending again. A status-less `httpConnectionFailed` is a request with no answer only in Codex's
+ * words for one, and an `other` a stream given up on only in Codex's words for that.
  */
 export function isTransient(error: unknown): boolean {
   if (!isDict(error)) {
     return false;
   }
   const info = error["codexErrorInfo"];
+  if (info === "other") {
+    const message = str(error["message"]) ?? "";
+    return message.includes(STREAM_DISCONNECTED) && !message.includes(CONTENT_FILTER);
+  }
   if (typeof info === "string") {
     return TRANSIENT_ERRORS.has(info);
   }

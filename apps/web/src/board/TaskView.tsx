@@ -398,6 +398,7 @@ function useApprove(task: Task | undefined): ComposerAction | undefined {
     label,
     title: `${label} ${stage.name}, with what the box holds as its note`,
     blocked: unlinked ? "No pull request linked yet." : null,
+    failure: "The stage was not finished.",
     run: async (text) => {
       await api.advanceTask({ task_id: task.id, ...(text === "" ? {} : { note: text }) });
       await client.invalidateQueries({ queryKey: ["task", task.id] });
@@ -495,7 +496,7 @@ export function TaskView() {
         <Composer
           target={{ threadId: current.id }}
           placeholder="Write in the task's thread"
-          action={approve}
+          actions={approve === undefined ? undefined : [approve]}
         />
       ) : approve === undefined ? null : (
         <ApproveAlone action={approve} />

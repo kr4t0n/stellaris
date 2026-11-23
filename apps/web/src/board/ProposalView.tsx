@@ -1,20 +1,30 @@
 import type { Proposal } from "@stellaris/shared";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
+import { useRef, useState } from "react";
 import { z } from "zod";
 import { BackLink } from "../components/BackLink.js";
 import { Markdown } from "../components/Markdown.js";
 import { namesNothing } from "../lib/api.js";
 import { ago } from "../lib/format.js";
-import { useMembers, useNow, useProposal, useRoles, useSkills, useThread } from "../lib/session.js";
+import {
+  useMembers,
+  useNow,
+  useProposal,
+  useRoles,
+  useSession,
+  useSkills,
+  useThread,
+} from "../lib/session.js";
 import { useDisplayName } from "./Avatar.js";
-import { DecisionBar } from "./DecisionBar.js";
 import { consequenceOf, decidersOf, proposalTitle, waitingOnYou } from "./governance.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
 import { ProposalCharter } from "./ProposalCharter.js";
 import { StatusChip } from "./ProposalsView.js";
-import { Composer } from "./Composer.js";
+import { ActionButton, blockedWith, Composer, type ComposerAction } from "./Composer.js";
 import { StickyList } from "./StickyList.js";
 import { SubjectThread } from "./SubjectThread.js";
+import { Failure } from "./ThreadForms.js";
 
 const ProvisionSchema = z.object({
   agent: z.string().optional(),
@@ -94,6 +104,99 @@ function Provisioned({ proposal }: { proposal: Proposal }) {
 }
 
 /**
+ * Deciding a proposal that waits on the user from its box, the box's text as the reason, through
+ * the verbs the steward uses: Approve, a check, then Reject, a cross, which waits while the box is
+ * empty, since a rejection needs a reason. A press decides.
+ */
+function useDecisions(proposal: Proposal | undefined): readonly ComposerAction[] | undefined {
+  const { api } = useSession();
+  const client = useQueryClient();
+  if (proposal === undefined || !waitingOnYou(proposal)) {
+    return undefined;
+  }
+  // Approval can create a citizen, a channel, a role, or a skill; the events refresh those too.
+  const settle = () =>
+    Promise.all(
+      [["proposals"], ["proposal", proposal.id], ["threads"], ["thread", proposal.id]].map(
+        (queryKey) => client.invalidateQueries({ queryKey }),
+      ),
+    );
+  return [
+    {
+      label: "Approve",
+      title: "Approve the proposal, with what the box holds as the reason",
+      blocked: null,
+      failure: "The proposal was not decided.",
+      run: async (text) => {
+        await api.approve({ proposal_id: proposal.id, ...(text === "" ? {} : { reason: text }) });
+        await settle();
+      },
+    },
+    {
+      label: "Reject",
+      title: "Reject the proposal, with what the box holds as the reason",
+      blocked: null,
+      needsText: "Write why in the box to reject",
+      mark: "cross",
+      failure: "The proposal was not decided.",
+      run: async (text) => {
+        await api.reject({ proposal_id: proposal.id, reason: text });
+        await settle();
+      },
+    },
+  ];
+}
+
+/**
+ * Deciding a proposal with no open thread to write in, as one from before proposals had threads: a
+ * box for the reason alone, then the buttons, as in the thread's box.
+ */
+function DecideAlone({ actions }: { actions: readonly ComposerAction[] }) {
+  const [text, setText] = useState("");
+  const box = useRef<HTMLTextAreaElement>(null);
+  const run = useMutation({
+    mutationFn: (index: number) => actions[index]?.run(text.trim()) ?? Promise.resolve(),
+  });
+  return (
+    <div className="border-t border-line p-3">
+      <div className="flex items-end gap-2">
+        <div className="flex min-w-0 flex-1 rounded-[20px] bg-surface-2/50 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] focus-within:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.16)]">
+          <textarea
+            ref={box}
+            rows={1}
+            value={text}
+            placeholder="Reason"
+            aria-label="Reason"
+            onChange={(event) => setText(event.target.value)}
+            className="block max-h-48 w-full resize-none bg-transparent px-3 py-2.5 text-sm text-fg-primary outline-none placeholder:text-fg-muted"
+          />
+        </div>
+        {actions.map((action, index) => {
+          const pending = run.isPending && run.variables === index;
+          const blocked = blockedWith(action, text);
+          return (
+            <ActionButton
+              key={action.label}
+              action={{ ...action, blocked }}
+              pending={pending}
+              disabled={(blocked !== null || run.isPending) && !pending}
+              onClick={() => {
+                // As in the thread's box: the keyboard goes back to the box, never to the board's keys.
+                box.current?.focus();
+                run.mutate(index);
+              }}
+            />
+          );
+        })}
+      </div>
+      <div className="mt-2">
+        <Failure error={run.error} />
+      </div>
+    </div>
+  );
+}
+
+/**
  * One proposal: what approving it does, its charter drawn for its kind, and its thread, which opens
  * with the pitch and closes with the decision, with a composer while it waits.
  */
@@ -108,6 +211,7 @@ export function ProposalView() {
   // A proposal's thread takes the proposal's id, so it is read at once; "not found" means it has none.
   const messages = useThread(proposalId);
   const threadless = namesNothing(messages.error);
+  const decisions = useDecisions(proposal.data);
 
   if (proposal.data === undefined) {
     return (
@@ -202,10 +306,19 @@ export function ProposalView() {
           )}
         </section>
       </StickyList>
+      {/* Keyed too, so a reason typed for one proposal never decides the next one opened. A
+          proposal's thread closes with its decision, so one waiting has an open thread or none;
+          while the thread is on its way, the foot waits. */}
       {thread?.state === "open" ? (
-        <Composer target={{ threadId: current.id }} placeholder="Write in the proposal's thread" />
+        <Composer
+          key={`box:${current.id}`}
+          target={{ threadId: current.id }}
+          placeholder="Write in the thread"
+          actions={decisions}
+        />
+      ) : threadless && decisions !== undefined ? (
+        <DecideAlone key={`box:${current.id}`} actions={decisions} />
       ) : null}
-      {waitingOnYou(current) ? <DecisionBar proposal={current} /> : null}
     </>
   );
 }

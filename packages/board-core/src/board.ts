@@ -6261,6 +6261,9 @@ export class Board {
       if (refusal !== null) {
         throw new BoardError("INVALID_STATE", `${name} cannot switch to ${cli}: ${refusal}`);
       }
+      // The sessions go first, so a switch a failed write cut short leaves the CLI as it was, and
+      // the switch can be made again; one cut short after it starts its sessions afresh, no more.
+      const sessions = await this.clearSessionIds(await this.sessionFiles(name), () => true);
       const { model: previousModel, effort: previousEffort, ...rest } = current;
       const next = await this.updateAgent(name, () => ({
         ...rest,
@@ -6268,7 +6271,6 @@ export class Board {
         ...(chosenModel === null ? {} : { model: chosenModel }),
         ...(chosenEffort === null ? {} : { effort: chosenEffort }),
       }));
-      const sessions = await this.clearSessionIds(await this.sessionFiles(name), () => true);
       await this.refreshMember(name);
       await this.events.append("agent.configured", actor.name, {
         agent: name,

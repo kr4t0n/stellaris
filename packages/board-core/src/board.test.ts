@@ -1901,6 +1901,15 @@ describe("Board", () => {
       "rev-1 cannot switch to codex: demo lives on runner mini, which offers only claude",
     );
     await board.markRunner("mini", { clis: ["claude", "codex"] });
+    // A sessions.json it cannot read stops the switch before the record changes, so it can go again.
+    const unreadable = path.join(dir, "agents", "rev-1", "projects", "demo", "sessions.json");
+    const kept = await readFile(unreadable, "utf8");
+    await writeFile(unreadable, '{"claude": 5}');
+    await expect(
+      board.setAgentCli(USER, "rev-1", { cli: "codex", model: "gpt-5.5" }),
+    ).rejects.toThrow(/expected string, received number/);
+    expect((await board.readAgent("rev-1")).cli).toBe("claude");
+    await writeFile(unreadable, kept);
     expect(await board.setAgentCli(USER, "rev-1", back)).toMatchObject(back);
     const events = (await board.readEvents(null)).filter(
       (e) => e.type === "agent.configured" && "cli" in e.payload,

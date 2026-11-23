@@ -41,6 +41,14 @@ function usage(input: number, output: number, cacheRead = 0, cacheWrite = 0) {
   };
 }
 
+/** Each citizen and CLI a count's token series and failed turns are labelled with. */
+function cliLabels(counts: TurnCounts): string[] {
+  return [
+    ...new Set(counts.tokens.map((series) => `${series.agent}/${series.cli}`)),
+    ...counts.failed.map((series) => `failed ${series.agent}/${series.cli}`),
+  ];
+}
+
 /** Each citizen's turns and token sums as the counters hold them, in `tokenUse`'s shape. */
 function perCitizen(counts: TurnCounts): Map<string, { turns: number; usage: number[] }> {
   const rows = new Map<string, { turns: number; usage: number[] }>();
@@ -662,13 +670,9 @@ describe("Board.countTurns", () => {
     });
     expect(stripped).not.toEqual(lines);
     await writeFile(log, `${stripped.join("\n")}\n`);
-    const labels = (counts: TurnCounts) => [
-      ...new Set(counts.tokens.map((series) => `${series.agent}/${series.cli}`)),
-      ...counts.failed.map((series) => `failed ${series.agent}/${series.cli}`),
-    ];
 
     const board = await Board.open(dir, { now: () => clock });
-    expect(labels((await board.countTurns()).read())).toEqual([
+    expect(cliLabels((await board.countTurns()).read())).toEqual([
       "eng-1/claude",
       "failed eng-1/claude",
     ]);
@@ -680,7 +684,7 @@ describe("Board.countTurns", () => {
     await board.setAgentCli(USER, "eng-1", { cli: "claude" });
     await board.setAgentCli(USER, "eng-1", { cli: "codex" });
     const after = await Board.open(dir, { now: () => clock });
-    expect(labels((await after.countTurns()).read())).toEqual([
+    expect(cliLabels((await after.countTurns()).read())).toEqual([
       "eng-1/claude",
       "eng-1/codex",
       "failed eng-1/claude",

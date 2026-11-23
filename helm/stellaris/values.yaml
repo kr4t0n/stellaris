@@ -22,7 +22,8 @@ imagePullSecrets: []
 society:
   name: stellaris
   # Only the seed roles, `concierge` and `steward`, exist at this point; work roles come later, by
-  # charter. `cli` is `claude` or `codex`; `model` is optional and the CLI's default otherwise.
+  # charter. `cli` is `claude`, `codex`, or `antigravity`; `model` is optional and the CLI's default
+  # otherwise.
   citizens:
     - name: desk
       role: concierge

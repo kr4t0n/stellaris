@@ -81,7 +81,7 @@ export function wakeScope(
   return project !== null && member.memberships.includes(project) ? project : SOCIETY_SCOPE;
 }
 
-export const CliKindSchema = z.enum(["claude", "codex"]);
+export const CliKindSchema = z.enum(["claude", "codex", "antigravity"]);
 export type CliKind = z.infer<typeof CliKindSchema>;
 
 /** A channel whose workstream is done: its history stays readable, and nothing more is posted there. */

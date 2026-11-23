@@ -5667,10 +5667,13 @@ export class Board {
       const batch = await Promise.all(
         files.slice(at, at + SESSION_BATCH).map(async (file) => {
           const record = await readJson(file, SessionsFileSchema);
-          if (!which(record) || (record.claude === undefined && record.codex === undefined)) {
+          if (!which(record) || CliKindSchema.options.every((cli) => record[cli] === undefined)) {
             return false;
           }
-          const { claude: _claude, codex: _codex, ...kept } = record;
+          const kept = { ...record };
+          for (const cli of CliKindSchema.options) {
+            delete kept[cli];
+          }
           await writeJson(file, kept);
           return true;
         }),

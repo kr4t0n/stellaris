@@ -283,7 +283,7 @@ agent
   .command("add <name>")
   .description("Add an agent and print its board token once")
   .requiredOption("--role <role>", "role charter name")
-  .option("--cli <cli>", "claude or codex")
+  .option("--cli <cli>", "claude, codex, or antigravity")
   .option("--model <model>", "model to run the CLI with; the CLI's own default otherwise")
   .option("--runner <name>", "runner preferred for its turns; any with its CLI otherwise")
   .option("-p, --project <slug...>", "project memberships")

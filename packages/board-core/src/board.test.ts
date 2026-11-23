@@ -873,6 +873,13 @@ describe("Board", () => {
       claude: "task-session",
       runner: "pod",
     });
+    // Each CLI's session is kept beside the others', Antigravity's included.
+    await board.writeSession("eng-1", "demo", "antigravity", "agy-session", "pod", task.id);
+    expect(await board.readSessions("eng-1", "demo", task.id)).toEqual({
+      claude: "task-session",
+      antigravity: "agy-session",
+      runner: "pod",
+    });
     // Two turns in one scope at once: each pairs its start with its own end.
     clock = new Date("2026-09-28T10:01:00.000Z");
     const home = await board.beginTurn(turnIn(undefined, clock.toISOString()));
@@ -2245,6 +2252,8 @@ describe("Board", () => {
       await board.writeSession("eng-1", scope, "claude", `session-${part ?? scope}`, "pod", part);
     }
     await board.writeSession("rev-1", "demo", "codex", "far-session", "far");
+    // A record holding an Antigravity session alone.
+    await board.writeSession("eng-1", "society", "antigravity", "agy-session", "pod");
     // A session ended there, whose record names the runner and holds no id.
     await board.writeSession("rev-1", "society", "codex", "ended", "pod");
     await board.dropSession("rev-1", "society", "codex", "ended");
@@ -2278,7 +2287,7 @@ describe("Board", () => {
       name: "pod",
       projects: ["lab", "yard"],
       agents: ["eng-1"],
-      sessions: 4,
+      sessions: 5,
     });
     await expect(board.readRunner("pod")).rejects.toMatchObject({ code: "NOT_FOUND" });
     expect((await board.listRunners()).map((runner) => runner.name)).toEqual(["far"]);
@@ -2294,6 +2303,7 @@ describe("Board", () => {
     for (const [scope, part] of records) {
       expect(await board.readSessions("eng-1", scope, part)).toEqual({ runner: "pod" });
     }
+    expect(await board.readSessions("eng-1", "society")).toEqual({ runner: "pod" });
     expect(await board.readSessions("rev-1", "society")).toEqual({ runner: "pod" });
     expect(await board.readSessions("rev-1", "demo")).toEqual({
       codex: "far-session",
@@ -2312,7 +2322,7 @@ describe("Board", () => {
     expect(events.filter((event) => event.type === "runner.removed")).toMatchObject([
       {
         actor: "user",
-        payload: { name: "pod", projects: ["lab", "yard"], agents: ["eng-1"], sessions: 4 },
+        payload: { name: "pod", projects: ["lab", "yard"], agents: ["eng-1"], sessions: 5 },
       },
     ]);
     expect(events.find((event) => event.type === "runner.added")?.payload).toEqual({

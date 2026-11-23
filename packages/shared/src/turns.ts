@@ -258,6 +258,7 @@ export type RunningTurn = z.infer<typeof RunningTurnSchema>;
 export const SessionsFileSchema = z.object({
   claude: z.string().optional(),
   codex: z.string().optional(),
+  antigravity: z.string().optional(),
   runner: NameSchema.optional(),
 });
 export type SessionsFile = z.infer<typeof SessionsFileSchema>;

@@ -16,7 +16,11 @@ import {
   type QuotaRow,
 } from "./quota.js";
 
-const FILL: Record<CliKind, string> = { claude: "bg-claude", codex: "bg-codex" };
+const FILL: Record<CliKind, string> = {
+  claude: "bg-claude",
+  codex: "bg-codex",
+  antigravity: "bg-antigravity",
+};
 
 /** Codex's credits, or Claude's extra usage in its currency's minor units, when the plan has them. */
 function balance(quota: CliQuota): string | null {

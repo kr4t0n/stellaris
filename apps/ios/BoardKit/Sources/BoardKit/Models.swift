@@ -122,7 +122,7 @@ public struct Project: Sendable, Hashable, Codable {
 
 /// The CLIs a citizen's turns run in.
 public enum CliKind: String, Sendable, Hashable {
-  case claude, codex
+  case claude, codex, antigravity
 }
 
 /// A citizen on the board's roster, with what the sky and its cards read of it.

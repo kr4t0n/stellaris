@@ -1877,6 +1877,7 @@ describe("Board", () => {
     await board.writeSession("rev-1", "demo", "codex", "c-1", "mini");
     await board.writeSession("rev-1", "demo", "claude", "a-1", "mini", task.id);
     await board.writeSession("rev-1", "demo", "codex", "c-2", "mini", task.id);
+    await board.writeSession("rev-1", "demo", "antigravity", "g-1", "mini", task.id);
     await board.endSession("rev-1", "demo", "codex", "mini", "#dev");
     await board.writeSession("rev-1", "society", "codex", "c-3", "pod");
     await board.writeSession("eng-1", "demo", "claude", "a-2", "mini");

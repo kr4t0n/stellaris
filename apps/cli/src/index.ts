@@ -387,7 +387,7 @@ agent
 agent
   .command("cli <name> <cli>")
   .description(
-    "Switch the CLI a member's turns run on, claude or codex, from its next turn, where every conversation starts a new session; the model and effort it had go back to the new CLI's defaults unless given",
+    "Switch the CLI a member's turns run on, claude, codex, or antigravity, from its next turn, where every conversation starts a new session; the model and effort it had go back to the new CLI's defaults unless given",
   )
   .option("--model <model>", "the model to run on the new CLI")
   .option("--effort <effort>", "the reasoning effort to run with, such as high")

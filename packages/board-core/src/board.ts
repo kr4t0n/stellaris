@@ -5621,11 +5621,14 @@ export class Board {
             const record = await readJson(file, SessionsFileSchema);
             if (
               record.runner !== parsed ||
-              (record.claude === undefined && record.codex === undefined)
+              CliKindSchema.options.every((cli) => record[cli] === undefined)
             ) {
               return false;
             }
-            const { claude: _claude, codex: _codex, ...kept } = record;
+            const kept = { ...record };
+            for (const cli of CliKindSchema.options) {
+              delete kept[cli];
+            }
             await writeJson(file, kept);
             return true;
           }),

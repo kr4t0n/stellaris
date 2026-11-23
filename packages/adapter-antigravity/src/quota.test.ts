@@ -79,15 +79,61 @@ describe("agy's quota from print mode", () => {
     });
   });
 
-  it("warns when one group is spent, and is limited until the last reset when all are", () => {
+  it("warns when one group is spent, and is limited until the first reset when all are", () => {
     expect(quotaFromUsage(usageOf({ a: 0, b: 0.5 }), null, AT)).toMatchObject({
       status: "warning",
       limitedUntil: null,
     });
+    // The groups meter disjoint models, so the first reset lets its group's models run again.
     expect(quotaFromUsage(usageOf({ a: 0, b: 0 }), null, AT)).toMatchObject({
       status: "limited",
-      limitedBy: "b",
-      limitedUntil: "2026-11-30T00:00:00.000Z",
+      limitedBy: "a",
+      limitedUntil: "2026-11-29T00:00:00.000Z",
+    });
+  });
+
+  /**
+   * The bucket shapes agy 1.5.15 can print beside the recorded one: its print-mode bucket holds an
+   * optional `remaining_fraction` or `remaining_amount` and a `disabled` flag, each left out when
+   * unset. Built from the recorded answer with those fields, since no account has printed them yet.
+   */
+  it("reads a bucket by its amount, leaves a disabled one out, and keeps an unmeasured one", async () => {
+    const quota = quotaFromUsage(await fixture("print-usage-bucket-shapes.json"), null, AT);
+    expect(quota.windows.map((window) => [window.key, window.usedPercent, window.minutes])).toEqual(
+      [
+        ["amount-spent", 100, 10_080],
+        ["amount-left", null, 1_440],
+        ["unmeasured", null, 10_080],
+      ],
+    );
+    // One group spent by its amount, the others not, stops only that group's models.
+    expect(quota).toMatchObject({ status: "warning", limitedUntil: null, limitedBy: null });
+  });
+
+  it("is limited when every bucket is spent by its amount, a disabled one aside", () => {
+    const usage = {
+      status: "SUCCESS",
+      command: {
+        name: "usage",
+        data: {
+          groups: [
+            {
+              name: "A",
+              buckets: [{ id: "a", remaining_amount: 0, reset_time: "2026-11-25T00:00:00Z" }],
+            },
+            {
+              name: "B",
+              buckets: [{ id: "b", remaining_fraction: 0, reset_time: "2026-11-26T00:00:00Z" }],
+            },
+            { name: "C", buckets: [{ id: "c", disabled: true, remaining_fraction: 1 }] },
+          ],
+        },
+      },
+    };
+    expect(quotaFromUsage(usage, null, AT)).toMatchObject({
+      status: "limited",
+      limitedBy: "a",
+      limitedUntil: "2026-11-25T00:00:00.000Z",
     });
   });
 
@@ -161,6 +207,7 @@ describe("the telemetry guard", () => {
     try {
       expect(await connect(guard.url, "play.googleapis.com:443")).toMatch(/^HTTP\/1\.1 403 /);
       expect(await connect(guard.url, "PLAY.googleapis.com:443")).toMatch(/^HTTP\/1\.1 403 /);
+      expect(await connect(guard.url, "play.googleapis.com.:443")).toMatch(/^HTTP\/1\.1 403 /);
       const tunnelled = await connect(guard.url, `127.0.0.1:${echoPort}`, "ping");
       expect(tunnelled).toMatch(/^HTTP\/1\.1 200 Connection Established\r\n\r\n/);
       expect(tunnelled).toContain("echo:ping");

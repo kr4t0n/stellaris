@@ -2,9 +2,9 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { ResumeError, type TurnRequest } from "@stellaris/runner-core";
+import { ResumeError, TurnControl, type TurnRequest } from "@stellaris/runner-core";
 import { turnStatusJsonSchema, type AgentEvent } from "@stellaris/shared";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AntigravityBackend } from "./backend.js";
 import type { SpawnAgy } from "./rpc.js";
 import { modelsOf } from "./session.js";
@@ -15,21 +15,29 @@ async function fixtureLines(fixture: string): Promise<string[]> {
   return (await readFile(path.join(fixtures, fixture), "utf8")).trim().split("\n");
 }
 
-/** Whether a line agy wrote is its reply to one of the client's requests. */
-function isReply(line: string): boolean {
+/** The id of a line agy wrote when it is its reply to one of the client's requests. */
+function replyId(line: string): unknown {
   const message: unknown = JSON.parse(line);
-  return (
-    typeof message === "object" && message !== null && "id" in message && !("method" in message)
-  );
+  return typeof message === "object" &&
+    message !== null &&
+    "id" in message &&
+    !("method" in message)
+    ? message.id
+    : undefined;
 }
 
+/** What a recorded reply waits for besides its own request, by the reply's id. */
+type Holds = Readonly<Record<number, (sent: readonly Record<string, unknown>[]) => boolean>>;
+
 /**
- * Replays what a real `agy acp` wrote: each request is answered by the recorded reply after the
- * last one written, with the notifications recorded before it. The client numbers its requests
- * the same way on every run, so the ids line up.
+ * Replays what a real `agy acp` wrote: each recorded reply goes out, with the notifications recorded
+ * before it, once the client has sent its request and whatever `holds` names for it, as agy ended a
+ * steered prompt only once the steer's prompt came and a stopped one once `session/cancel` came.
+ * The client numbers its requests the same way on every run, so the ids line up.
  */
 async function replay(
   fixture: string,
+  holds: Holds = {},
 ): Promise<{ spawn: SpawnAgy; sent: Record<string, unknown>[] }> {
   const lines = await fixtureLines(fixture);
   const sent: Record<string, unknown>[] = [];
@@ -38,17 +46,25 @@ async function replay(
     const stdout = new PassThrough();
     const { promise: exited, resolve: exit } = Promise.withResolvers<number | null>();
     let at = 0;
+    const flush = (): void => {
+      for (;;) {
+        const reply = lines.findIndex((each, index) => index >= at && replyId(each) !== undefined);
+        if (reply === -1) return;
+        const id = replyId(lines[reply] ?? "");
+        const asked = sent.some((message) => "method" in message && message["id"] === id);
+        const held = typeof id === "number" ? holds[id] : undefined;
+        if (!asked || (held !== undefined && !held(sent))) return;
+        stdout.write(`${lines.slice(at, reply + 1).join("\n")}\n`);
+        at = reply + 1;
+      }
+    };
     stdin.on("data", (chunk: Buffer) => {
       for (const line of chunk.toString("utf8").trim().split("\n")) {
         const message: unknown = JSON.parse(line);
         if (typeof message !== "object" || message === null) continue;
         sent.push(Object.fromEntries(Object.entries(message)));
-        if (!("method" in message) || !("id" in message)) continue;
-        let end = lines.findIndex((each, index) => index >= at && isReply(each)) + 1;
-        if (end === 0) end = lines.length;
-        stdout.write(`${lines.slice(at, end).join("\n")}\n`);
-        at = end;
       }
+      flush();
     });
     return { stdin, stdout, stderr: new PassThrough(), exited, kill: () => exit(null) };
   };
@@ -284,6 +300,59 @@ describe("recorded agy acp turns", () => {
         defaultEffort: "low",
       }),
     ]);
+  });
+
+  /**
+   * A turn whose model request the stub held for 15 s, steered 3 s in: agy ended the first prompt
+   * with no usage as soon as the steer's prompt came, and the steer's reply carried both requests'.
+   */
+  it("replays a steered turn: the first prompt ends when the steer's comes", async () => {
+    const { spawn, sent } = await replay("acp-steer-recorded.jsonl", {
+      3: (messages) => messages.some((message) => message["id"] === 4),
+    });
+    const control = new TurnControl();
+    const running = new AntigravityBackend({ spawn }).runTurn(request({}), undefined, control);
+    await vi.waitFor(() => expect(methodsOf(sent)).toContain("session/prompt"));
+    expect(await control.steer({ id: "steer-1", text: "MARK_TEXT the steer" })).toBe(true);
+    const result = await running;
+    expect(methodsOf(sent)).toEqual([
+      "initialize",
+      "session/new",
+      "session/prompt",
+      "session/prompt",
+    ]);
+    expect(result.events.filter((event) => event.type === "steered")).toEqual([
+      { type: "steered", steer: "steer-1" },
+    ]);
+    expect(result.exitReason).toBe("completed");
+    expect(result.status?.summary).toBe("stub turn");
+    expect(result.usage).toEqual({
+      inputTokens: 1_217,
+      outputTokens: 120,
+      cacheReadTokens: 800,
+      cacheWriteTokens: 0,
+    });
+    expect(result.contextTokens).toBe(1_069);
+  });
+
+  it("replays a stopped turn: agy answers session/cancel by ending the prompt as cancelled", async () => {
+    const { spawn, sent } = await replay("acp-stop-recorded.jsonl", {
+      3: (messages) => messages.some((message) => message["method"] === "session/cancel"),
+    });
+    const control = new TurnControl();
+    const running = new AntigravityBackend({ spawn }).runTurn(request({}), undefined, control);
+    await vi.waitFor(() => expect(methodsOf(sent)).toContain("session/prompt"));
+    control.stop();
+    const result = await running;
+    expect(methodsOf(sent)).toEqual([
+      "initialize",
+      "session/new",
+      "session/prompt",
+      "session/cancel",
+    ]);
+    expect(result.exitReason).toBe("stopped");
+    expect(result.error).toBeUndefined();
+    expect(result.events.map((event) => event.type)).toEqual(["turn_started", "turn_completed"]);
   });
 
   it("refuses a resume agy has no session for as lost, by the session list", async () => {

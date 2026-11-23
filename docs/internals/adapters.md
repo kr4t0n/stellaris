@@ -153,6 +153,9 @@ Claude Code has no call that waits on a sub-agent, whose end it reports by itsel
 - **The client is written by hand**, against the ACP types in `@agentclientprotocol/sdk` 2.9.1, which is no dependency: the stable v1 schema, plus the unstable `PromptResponse.usage`.
 - **What agy asks of the client.** A `session/request_permission` is answered `allow_once`, never `allow_always`, which would save a rule into the account's settings. `--dangerously-skip-permissions` should leave none to answer. Every other request is refused, since the client offers no file system or terminal.
 - **One session per process** (`--process-per-session`) keeps each session's MCP servers its own. The board's server goes in `session/new`'s and `session/resume`'s `mcpServers`, as `http` with an `Authorization` header holding the turn's token. So the token reaches agy over stdin, never on a command line. The process also gets it as `STELLARIS_AGENT_TOKEN`, as the other CLIs do.
+- **The header holds the token itself, which agy keeps.** agy expands no variable in a header: given `Bearer ${STELLARIS_AGENT_TOKEN}` or `Bearer $STELLARIS_AGENT_TOKEN`, with the variable set, 1.5.15 sent both to the MCP server as written, and the server refused them. So Claude's and Codex's way, a header that names the variable, is closed here.
+  - agy stores the literal token with the session, in `antigravity-cli/conversations/<session>.db` (mode 0600) under its gemini dir, and in no log.
+  - The token is revoked when its turn ends, and every turn on a runner can already read the others' environments (a runner is one trust domain), so the copy adds no reader. It is still the one place a turn's token is written to disk.
 - **No telemetry.** With `--disable-telemetry`, agy sent nothing to any host but 127.0.0.1. Without it, agy called `play.googleapis.com`. `agy models` and `agy -p` take no such flag, and both called `play.googleapis.com` too. So the adapter never runs `agy models`, and runs `agy -p` only for the quota, behind a proxy that refuses that host ([the quota](#the-plan-quota-comes-from-print-modes-usage-behind-a-proxy-that-refuses-telemetry)).
 - **`--gemini-dir` with an absolute path moves all of `~/.gemini`:** settings, configuration, conversations, and logs. A turn run with it read its settings from that folder and wrote nothing under the temp `HOME`. `--app-data-dir` names the subfolder inside it, `antigravity-cli` by default.
 - **The agy process never updates itself.** It runs with `AGY_CLI_DISABLE_AUTO_UPDATE=true`, since otherwise it updates its own binary in the background.
@@ -232,10 +235,17 @@ ACP reads no quota: `session/new` names the plan's tier in `_meta.antigravity.ti
 - **The hosts it passed** were `oauth2.googleapis.com`, `www.googleapis.com`, `daily-cloudcode-pa.googleapis.com`, `aicode.googleapis.com` and `lh3.googleusercontent.com`.
 - **A runner's own proxy is bypassed.** The guard dials each host itself, so a runner that reaches Google only through a proxy of its own gets a failed read, and its quota stays unknown.
 
-`/usage` answers groups of models that share their buckets, such as "Gemini Models" and "Claude and GPT models". Each bucket has an `id`, a `window` (`weekly`), a `remaining_fraction` and a `reset_time`. `quotaFromUsage` makes each bucket a window keyed by its id, labelled with its group, and used by what its fraction leaves:
+`/usage` answers groups of models that share their buckets, such as "Gemini Models" and "Claude and GPT models". Each bucket has an `id`, a `window` (`weekly`) and a `reset_time`. agy 1.5.15's print-mode bucket also holds `remaining_fraction` or `remaining_amount`, one of the two upstream, and a `disabled` flag, each left out when unset. The recorded answers carry only `remaining_fraction`.
 
+`quotaFromUsage` makes each bucket a window keyed by its id and labelled with its group:
+
+- **Used percent.** A fraction gives it. An amount has no total to give a percent: an amount of 0 is spent (100%), and any more leaves the percent unknown, as a bucket with neither field does.
+- **A `disabled` bucket** meters nothing and is left out.
 - **One group's bucket spent** stops only that group's models, so the quota is a `warning`.
-- **Every bucket spent** is `limited`, until the last of them resets.
+- **Every bucket spent** is `limited`, until the first of them resets.
+  - The groups meter disjoint models, so that reset lets its group's models run again.
+  - The quota read after it shows the rest still spent, as a `warning`.
+  - Holding the CLI until the last reset could keep a citizen whose group had come back waiting for days.
 
 `/credits` gives `remaining_credits`, kept as the balance. A `/credits` that fails costs only the balance.
 

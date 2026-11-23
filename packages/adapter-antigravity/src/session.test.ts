@@ -513,4 +513,69 @@ describe("AntigravityBackend", () => {
     expect(result.exitReason).toBe("stopped");
     expect(result.error).toBeUndefined();
   });
+
+  it("cancels a turn at its time limit, and ends it as a timeout with no status asked", async () => {
+    const prompt = Promise.withResolvers<Answer>();
+    const fake = fakeAgy({
+      initialize: () => INITIALIZED,
+      "session/new": () => OPENED,
+      "session/prompt": () => prompt.promise,
+      "session/cancel": () => {
+        prompt.resolve({ result: { stopReason: "cancelled" } });
+        return { result: null };
+      },
+    });
+    const result = await new AntigravityBackend({ spawn: fake.spawn }).runTurn(
+      request({ limits: { timeoutMs: 50 } }),
+    );
+    expect(methodsOf(fake.sent)).toEqual([
+      "initialize",
+      "session/new",
+      "session/prompt",
+      "session/cancel",
+    ]);
+    expect(result.exitReason).toBe("timeout");
+    expect(result.error).toBe("turn exceeded 50 ms");
+    expect(result.status).toBeNull();
+  });
+
+  it("keeps a resident session's process and session across turns, each counting its own", async () => {
+    const first = Promise.withResolvers<Answer>();
+    let asked = 0;
+    const fake = fakeAgy({
+      initialize: () => INITIALIZED,
+      "session/new": () => OPENED,
+      "session/prompt": (_, agent) => {
+        asked += 1;
+        agent.update({
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: STATUS(`turn ${asked}`) },
+        });
+        return asked === 1 ? first.promise : ended({ ...USAGE, inputTokens: 700 });
+      },
+    });
+    const start = request();
+    const session = await new AntigravityBackend({ spawn: fake.spawn }).startResident(
+      start.spec,
+      start,
+    );
+    expect(session.session).toBe(SESSION);
+    const running = session.runTurn("first");
+    await vi.waitFor(() => expect(prompts(fake.sent)).toHaveLength(1));
+    // One turn at a time on a warm process.
+    await expect(session.runTurn("overlap")).rejects.toThrow(
+      "a turn is already running on this resident session",
+    );
+    first.resolve(ended(USAGE));
+    const one = await running;
+    const two = await session.runTurn("second");
+    expect([one.status?.summary, two.status?.summary]).toEqual(["turn 1", "turn 2"]);
+    expect([one.usage.inputTokens, two.usage.inputTokens]).toEqual([600, 700]);
+    expect([one.session, two.session]).toEqual([SESSION, SESSION]);
+    expect(fake.spawns).toBe(1);
+    expect(methodsOf(fake.sent).filter((method) => method === "session/new")).toHaveLength(1);
+    expect(prompts(fake.sent)).toEqual(["first", "second"]);
+    await session.close();
+    await expect(session.runTurn("after")).rejects.toThrow("the resident session has ended");
+  });
 });

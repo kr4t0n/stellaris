@@ -8,7 +8,7 @@ import {
   RUNNER_TOKEN_ENV,
   type CliQuota,
 } from "@stellaris/shared";
-import { isDict, num, str } from "./rpc.js";
+import { isDict, str } from "./rpc.js";
 
 /**
  * agy's plan quota, from print mode's `/usage` and `/credits`, which answer from the account's
@@ -39,7 +39,8 @@ export async function startTelemetryGuard(): Promise<{ url: string; close: () =>
         return;
       }
       const [, host = "", port = ""] = target;
-      if (TELEMETRY_HOST.test(host)) {
+      // A name with its root's dot is the same host.
+      if (TELEMETRY_HOST.test(host.replace(/\.$/, ""))) {
         client.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
         return;
       }
@@ -159,6 +160,24 @@ function isoOf(raw: unknown): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
+/**
+ * How much of a bucket is used, in percent. agy 1.5.15 prints a bucket with a `remaining_fraction`
+ * or a `remaining_amount`, one of the two upstream, each left out when unset. A fraction gives the
+ * percent. An amount has no total, so it says only whether the bucket is spent: none left is 100,
+ * and any left leaves the percent unknown, as does a bucket with neither.
+ */
+function usedPercentOf(bucket: Record<string, unknown>): number | null {
+  const fraction = bucket["remaining_fraction"];
+  if (typeof fraction === "number" && Number.isFinite(fraction)) {
+    return Math.round((1 - Math.min(1, Math.max(0, fraction))) * 10_000) / 100;
+  }
+  const amount = bucket["remaining_amount"];
+  if (typeof amount === "number" && Number.isFinite(amount)) {
+    return amount <= 0 ? 100 : null;
+  }
+  return null;
+}
+
 /** A print-mode result's `command.data`, or the read's failure in agy's words. */
 function commandData(raw: unknown, command: string): Record<string, unknown> | string {
   const result = isDict(raw) ? raw : {};
@@ -171,10 +190,12 @@ function commandData(raw: unknown, command: string): Record<string, unknown> | s
 
 /**
  * The quota `/usage` and `/credits` answer, from print mode's JSON results. Each group of models
- * shares its buckets, so a bucket is a window named by its id and labelled with its group, used by
- * what its `remaining_fraction` leaves. One bucket spent stops only its group's models, a warning;
- * every bucket spent stops the login until the last of them resets. An API key's login, which has
- * no plan quota, reads as `none`; any other failure fails the read in agy's words.
+ * shares its buckets, so a bucket is a window named by its id and labelled with its group, used as
+ * `usedPercentOf` reads it; a `disabled` bucket meters nothing and is left out. One bucket spent
+ * stops only its group's models, a warning; every bucket spent stops the login until the first of
+ * them resets, since the groups are disjoint and that group's models can run again then. An API
+ * key's login, which has no plan quota, reads as `none`; any other failure fails the read in agy's
+ * words.
  */
 export function quotaFromUsage(usage: unknown, credits: unknown, at: Date): CliQuota {
   const observedAt = at.toISOString();
@@ -190,29 +211,25 @@ export function quotaFromUsage(usage: unknown, credits: unknown, at: Date): CliQ
     const buckets = isDict(group) && Array.isArray(group["buckets"]) ? group["buckets"] : [];
     return buckets.flatMap((bucket) => {
       const key = isDict(bucket) ? str(bucket["id"]) : undefined;
-      if (
-        !isDict(bucket) ||
-        key === undefined ||
-        typeof bucket["remaining_fraction"] !== "number"
-      ) {
+      if (!isDict(bucket) || key === undefined || bucket["disabled"] === true) {
         return [];
       }
-      const remaining = Math.min(1, Math.max(0, num(bucket["remaining_fraction"])));
       return [
         {
           key,
           ...(label === undefined ? {} : { label: label.slice(0, 80) }),
           minutes: WINDOW_MINUTES[str(bucket["window"]) ?? ""] ?? null,
-          usedPercent: Math.round((1 - remaining) * 10_000) / 100,
+          usedPercent: usedPercentOf(bucket),
           resetsAt: isoOf(bucket["reset_time"]),
           observedAt,
         },
       ];
     });
   });
-  const spent = windows.filter((window) => window.usedPercent >= 100);
+  const spent = windows.filter((window) => (window.usedPercent ?? 0) >= 100);
   const limited = windows.length > 0 && spent.length === windows.length;
-  const binding = spent.toSorted((a, b) => (b.resetsAt ?? "").localeCompare(a.resetsAt ?? ""))[0];
+  // The first reset frees its group's models; one with no reset known comes last.
+  const binding = spent.toSorted((a, b) => (a.resetsAt ?? "~").localeCompare(b.resetsAt ?? "~"))[0];
   const balance = commandData(credits, "credits");
   const remaining =
     typeof balance === "string" || typeof balance["remaining_credits"] !== "number"

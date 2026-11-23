@@ -19,7 +19,7 @@ function cliChoicesOf(current: CliKind): Choice[] {
     value: cli,
     name: cli,
     id: null,
-    description: cli === current ? "Runs on it now." : "A new session in every conversation.",
+    description: cli === current ? "Runs on it now." : "",
   }));
 }
 
@@ -152,6 +152,7 @@ export function ModelForm({
         save.mutate();
       }}
     >
+      {/* The CLI on a row of its own, with where its list came from, leaves the model's row whole. */}
       <div className="flex items-center gap-2">
         <div className="flex w-24 shrink-0">
           <Picker
@@ -162,6 +163,13 @@ export function ModelForm({
             listClassName="left-0 w-64"
           />
         </div>
+        {models.data === undefined ? null : (
+          <p className="min-w-0 truncate text-meta">
+            Listed by {models.data.cli} on {models.data.runner}
+          </p>
+        )}
+      </div>
+      <div className="flex items-center gap-2">
         {models.isPending ? (
           <p className="min-w-0 flex-1 truncate text-meta">Asking {cli} for its models…</p>
         ) : models.error !== null ? (
@@ -201,11 +209,6 @@ export function ModelForm({
           {save.isPending ? "Saving…" : "Save"}
         </Button>
       </div>
-      {models.data === undefined ? null : (
-        <p className="text-meta">
-          Listed by {models.data.cli} on {models.data.runner}
-        </p>
-      )}
       <Failure error={save.error} />
     </form>
   );

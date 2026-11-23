@@ -456,7 +456,6 @@ test("a citizen's CLI is switched with a model and effort from that CLI's lists,
 
   // Codex's models are listed by its install on desk's runner, from its defaults.
   await cli.click();
-  await expect(form).toContainText("A new session in every conversation.");
   await form.getByRole("button", { name: /^codex/ }).click();
   await expect(cli).toHaveAccessibleName("CLI: codex");
   await expect(form).toContainText("Listed by codex on pod");
@@ -491,6 +490,87 @@ test("a citizen's CLI is switched with a model and effort from that CLI's lists,
   await expect(model).toHaveAccessibleName("Model: GPT-5.5 · gpt-5.5");
   await expect(effort).toHaveAccessibleName("Effort: xhigh");
   await expect(save).toBeDisabled();
+});
+
+test("back on its own CLI, the model form puts back the model and effort the citizen is set to", async ({
+  page,
+}) => {
+  // desk is set to opus with xhigh effort.
+  await fakeBoard(page, { crowded: true });
+  await page.goto("/citizen/desk");
+  const view = page.getByRole("region", { name: "Board content" });
+  await view.getByRole("button", { name: "Model…" }).click();
+  const form = page.getByRole("form", { name: "Model of desk" });
+  const cli = form.getByRole("button", { name: /^CLI: / });
+  const model = form.getByRole("button", { name: /^Model: / });
+  const effort = form.getByRole("button", { name: /^Effort: / });
+  const save = form.getByRole("button", { name: "Save" });
+  await expect(model).toHaveAccessibleName("Model: Opus 5.5 · opus");
+  await expect(effort).toHaveAccessibleName("Effort: xhigh");
+
+  await cli.click();
+  await form.getByRole("button", { name: /^codex/ }).click();
+  await expect(model).toHaveAccessibleName("Model: CLI default · GPT-5.5");
+  await expect(effort).toHaveAccessibleName("Effort: Default · medium");
+  await cli.click();
+  await form.getByRole("button", { name: /^claude/ }).click();
+  await expect(model).toHaveAccessibleName("Model: Opus 5.5 · opus");
+  await expect(effort).toHaveAccessibleName("Effort: xhigh");
+  await expect(save).toBeDisabled();
+});
+
+test("the CLI choice leaves the model's row whole, with the chosen model in full on the 420 px island", async ({
+  page,
+}) => {
+  await fakeBoard(page, { crowded: true });
+  /** The model form at a window of `width`: whether the chosen model's name is cut, and where Save ends against the form's content box. */
+  const measure = async (width: number) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/citizen/desk");
+    const view = page.getByRole("region", { name: "Board content" });
+    await view.getByRole("button", { name: "Model…" }).click();
+    const form = page.getByRole("form", { name: "Model of desk" });
+    await expect(form.getByRole("button", { name: /^Model: / })).toHaveAccessibleName(
+      "Model: Opus 5.5 · opus",
+    );
+    return form.evaluate((element) => {
+      const name = element.querySelector("button[aria-label^='Model: '] > span");
+      const save = [...element.querySelectorAll("button")].find(
+        (each) => each.textContent === "Save",
+      );
+      return {
+        cut: name === null ? null : name.scrollWidth > name.clientWidth,
+        overflow:
+          (save?.getBoundingClientRect().right ?? Infinity) -
+          (element.getBoundingClientRect().right -
+            parseFloat(getComputedStyle(element).paddingRight)),
+      };
+    });
+  };
+  // The island keeps the model's name whole, and a 375 px window, where the row fit before the
+  // CLI choice came, still fits it.
+  const island = await measure(900);
+  expect(island.cut).toBe(false);
+  expect(island.overflow).toBeLessThanOrEqual(0.5);
+  expect((await measure(375)).overflow).toBeLessThanOrEqual(0.5);
+});
+
+test("a switch the board refuses says why under the form, which stays open", async ({ page }) => {
+  const board = await fakeBoard(page, { refuseCli: true });
+  await page.goto("/citizen/desk");
+  const view = page.getByRole("region", { name: "Board content" });
+  await view.getByRole("button", { name: "Model…" }).click();
+  const form = page.getByRole("form", { name: "Model of desk" });
+  await form.getByRole("button", { name: /^CLI: / }).click();
+  await form.getByRole("button", { name: /^codex/ }).click();
+  await form.getByRole("button", { name: "Save" }).click();
+  await expect(form).toContainText(
+    "desk cannot switch to codex: its work outside projects runs on runner pod, which offers only claude",
+  );
+  await expect(form.getByRole("button", { name: /^CLI: / })).toHaveAccessibleName("CLI: codex");
+  expect(board.writes).toEqual([
+    { path: "/api/agents/desk/cli", body: { cli: "codex", model: null, effort: null } },
+  ]);
 });
 
 test("a citizen's work outside projects is moved to another runner, or left to be pinned again", async ({

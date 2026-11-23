@@ -1348,6 +1348,8 @@ export async function fakeBoard(
      * society's with none. Opens twelve topics in governance too, a count of two digits.
      */
     unread?: boolean;
+    /** Refuses a switch of desk's CLI, as the board does when a runner its turns need lacks it. */
+    refuseCli?: boolean;
   } = {},
 ): Promise<FakeBoard> {
   let inFlight = options.inFlight === true;
@@ -1746,6 +1748,17 @@ export async function fakeBoard(
         case "/api/verbs/reject":
           return decide(route, "rejected", body);
         case "/api/agents/desk/cli":
+          if (options.refuseCli === true) {
+            return json(
+              route,
+              {
+                error: "INVALID_STATE",
+                message:
+                  "desk cannot switch to codex: its work outside projects runs on runner pod, which offers only claude",
+              },
+              409,
+            );
+          }
           deskCli = typeof body["cli"] === "string" ? body["cli"] : deskCli;
           deskModel = typeof body["model"] === "string" ? body["model"] : null;
           deskEffort = typeof body["effort"] === "string" ? body["effort"] : null;

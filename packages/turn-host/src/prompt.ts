@@ -152,11 +152,13 @@ export interface Conversation {
 }
 
 /**
- * Why a home starts a new session after an earlier one began there: the last turn ended it, a
- * completed reflection or a resume its CLI could not make; the session began on another runner,
- * where it stays; or no earlier turn here left one, as when the last ended before its CLI started.
+ * Why a home starts a new session after an earlier one began there: the citizen's CLI was switched
+ * since its last turn here, and a session stays with its CLI; the last turn ended it, a completed
+ * reflection or a resume its CLI could not make; the session began on another runner, where it
+ * stays; or no earlier turn here left one, as when the last ended before its CLI started.
  */
 export type SessionAfresh =
+  | { readonly reason: "cli"; readonly was: CliKind; readonly runs: CliKind }
   | { readonly reason: "reflection" }
   | { readonly reason: "resume" }
   | { readonly reason: "runner"; readonly began: Name; readonly runs: Name }
@@ -179,6 +181,9 @@ export function sessionAfresh(
   ) {
     return null;
   }
+  if (lastTurn !== null && lastTurn.cli !== null && lastTurn.cli !== cli) {
+    return { reason: "cli", was: lastTurn.cli, runs: cli };
+  }
   if (lastTurn?.sessionDropped === true) {
     return lastTurn.trigger.kind === "reflection" && lastTurn.exitReason === "completed"
       ? { reason: "reflection" }
@@ -192,6 +197,9 @@ export function sessionAfresh(
 
 /** Why the session is new, as the start of the sentence that ends with what carries over. */
 function afreshReason(afresh: SessionAfresh): string {
+  if (afresh.reason === "cli") {
+    return `Your CLI was switched from ${afresh.was} to ${afresh.runs} since your last turn here, and a session stays with the CLI it began on`;
+  }
   if (afresh.reason === "runner") {
     return `This conversation's session began on runner ${afresh.began} and stays there, and this turn runs on ${afresh.runs}`;
   }

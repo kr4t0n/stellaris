@@ -1243,6 +1243,21 @@ describe("buildTurnPrompt", () => {
     expect(sessionAfresh({ runner: "pod" }, stoppedFirst, "claude", "pod")).toEqual({
       reason: "unkept",
     });
+    // A switch of the citizen's CLI since its last turn here, which dropped every session it kept,
+    // whatever ended the last turn; a session the old CLI's turn kept after it stays that CLI's.
+    for (const last of [done, reflected, stoppedFirst]) {
+      expect(sessionAfresh({ runner: "pod" }, last, "codex", "pod")).toEqual({
+        reason: "cli",
+        was: "claude",
+        runs: "codex",
+      });
+    }
+    expect(sessionAfresh(onPod, done, "codex", "pod")).toEqual({
+      reason: "cli",
+      was: "claude",
+      runs: "codex",
+    });
+    expect(sessionAfresh({ codex: "c-1", runner: "pod" }, done, "codex", "pod")).toBeNull();
 
     const dispatch = {
       agent: "eng-1",
@@ -1264,6 +1279,9 @@ describe("buildTurnPrompt", () => {
       "so this turn starts a new one: what you kept is in memory/core.md and the archive it points to, and what your earlier turns did is on the board, in your posts and the threads and tasks you worked in, which search and the board's files reach.";
     expect(prompt(done, { reason: "runner", began: "pod", runs: "far" })).toContain(
       `## Your session started afresh\n\nThis conversation's session began on runner pod and stays there, and this turn runs on far, ${kept}`,
+    );
+    expect(prompt(done, { reason: "cli", was: "claude", runs: "codex" })).toContain(
+      `## Your session started afresh\n\nYour CLI was switched from claude to codex since your last turn here, and a session stays with the CLI it began on, ${kept}`,
     );
     expect(prompt(stoppedFirst, { reason: "unkept" })).toContain(
       `## Your session started afresh\n\nNone of your earlier turns here left a session to resume, ${kept}`,

@@ -39,6 +39,7 @@ import {
   RunnerModelsSchema,
   TurnDispatchSchema,
   type AgentEvent,
+  type CliKind,
   type GitIdentityPart,
   type RunnerHello,
   type RunnerMessage,
@@ -109,7 +110,6 @@ function completed(summary: string, memoryUpdated = false): TurnResult {
 
 /** A backend that hosts resident sessions and counts what the runner does with them. */
 class ResidentBackend implements AgentBackend {
-  readonly kind = "claude" as const;
   readonly starts: string[] = [];
   readonly models: Array<string | undefined> = [];
   readonly efforts: Array<string | undefined> = [];
@@ -121,8 +121,14 @@ class ResidentBackend implements AgentBackend {
   memoryUpdatedNext = false;
   coldMemoryUpdatedNext = false;
 
+  /** A CLI's backend, whose new sessions take `sessionId` as their id. */
+  constructor(
+    readonly kind: CliKind = "claude",
+    private readonly sessionId = "session-1",
+  ) {}
+
   newSession(): Promise<string> {
-    return Promise.resolve("session-1");
+    return Promise.resolve(this.sessionId);
   }
 
   runTurn(request: object): Promise<TurnResult> {
@@ -404,6 +410,11 @@ const deskPost = {
   trigger: { kind: "user_post" as const, fromUser: true, reason: "posted" },
   priority: 2,
 };
+
+/** A turn's request, or a warm session's start, on a new session of the given id. */
+function onNewSession(session: string): unknown {
+  return expect.objectContaining({ session, newSession: true });
+}
 
 /** A signal reader's backend that keeps each prompt's signal lines, the runner's connection left out. */
 function signalReader(): { backend: AgentBackend; listed: string[][] } {
@@ -2876,6 +2887,65 @@ describe("turns on a runner over the runner protocol", () => {
     expect(backend.closes).toEqual(["desk:session-1", "desk:session-1"]);
     expect(backend.efforts).toEqual([undefined, undefined, "low"]);
     expect(backend.models.at(-1)).toBe("sonnet");
+  });
+
+  it("starts every conversation of a citizen switched to another CLI afresh there, warm or cold, and never resumes one from before the switch", async () => {
+    const { board } = await Board.init(dir, { name: "switch" });
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    const ask = await board.openThread(USER, { channel: "general", title: "a question" });
+    const claude = new ResidentBackend();
+    const codex = new ResidentBackend("codex", "thread-1");
+    society = await startTestSociety({
+      board,
+      backends: () => ({ claude, codex }),
+      residentIdleMs: 60_000,
+    });
+    const { run } = society;
+    // The home's turns are warm, the thread's cold.
+    const both = async (): Promise<void> => {
+      await run(deskPost);
+      await run({ ...deskPost, thread: { id: ask.id, task: false } });
+    };
+
+    await both();
+    expect(claude.starts).toEqual(["desk:session-1"]);
+    expect(claude.handed).toEqual([onNewSession("session-1"), onNewSession("session-1")]);
+    expect(await board.readSessions("desk", "society")).toEqual({
+      claude: "session-1",
+      runner: "pod",
+    });
+
+    await board.setAgentCli(USER, "desk", { cli: "codex" });
+    await both();
+    expect(claude.closes).toEqual(["desk:session-1"]);
+    expect(claude.handed).toHaveLength(2);
+    expect(codex.starts).toEqual(["desk:thread-1"]);
+    expect(codex.handed).toEqual([onNewSession("thread-1"), onNewSession("thread-1")]);
+    expect(codex.prompts[0]).toContain(
+      "## Your session started afresh\n\nYour CLI was switched from claude to codex since your last turn here",
+    );
+    expect(await board.readSessions("desk", "society")).toEqual({
+      codex: "thread-1",
+      runner: "pod",
+    });
+
+    // Back on claude, neither conversation resumes the session it had there before the switch.
+    await board.setAgentCli(USER, "desk", { cli: "claude" });
+    await both();
+    expect(codex.closes).toEqual(["desk:thread-1"]);
+    expect(claude.handed.slice(2)).toEqual([onNewSession("session-1"), onNewSession("session-1")]);
+    expect(claude.starts).toEqual(["desk:session-1", "desk:session-1"]);
+
+    // A warm session stays with its CLI even for a job that names its session.
+    await board.setAgentCli(USER, "desk", { cli: "codex" });
+    await board.writeSession("desk", "society", "codex", "session-1", "pod");
+    await run(deskPost);
+    expect(claude.closes).toEqual(["desk:session-1", "desk:session-1"]);
+    expect(claude.prompts).toHaveLength(2);
+    expect(codex.starts).toEqual(["desk:thread-1", "desk:session-1"]);
+    expect(codex.handed.at(-1)).toEqual(
+      expect.objectContaining({ session: "session-1", newSession: false }),
+    );
   });
 
   it("keeps a resident role's session warm across turns, recycles it when memory changed, and lets it idle out", async () => {

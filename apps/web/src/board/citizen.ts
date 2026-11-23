@@ -1,10 +1,13 @@
 import {
   addUsage,
+  CliKindSchema,
   SOCIETY_SCOPE,
   type CitizenTokens,
+  type CliKind,
   type HeartbeatCause,
   type Member,
   type MetricsWindow,
+  type Runner,
   type TurnHistoryEntry,
   type Usage,
 } from "@stellaris/shared";
@@ -230,4 +233,14 @@ export function runnersOf(
     label: runners.length === 0 ? "no runner yet" : `on ${runners.join(", ")}`,
     detail: detail === "" ? "pinned to a runner on its first turn" : detail,
   };
+}
+
+/**
+ * The CLIs a citizen may be switched to from its mark, in the board's order: those some runner
+ * offers, as its record last had them, and the one it runs on.
+ */
+export function offeredClis(current: CliKind, runners: readonly Runner[]): CliKind[] {
+  return CliKindSchema.options.filter(
+    (cli) => cli === current || runners.some((runner) => runner.clis.includes(cli)),
+  );
 }

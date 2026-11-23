@@ -14,14 +14,16 @@ function member(
   model: string | null = null,
   runner: string | null = "pod",
   effort: string | null = null,
+  cli = "claude",
 ) {
   return {
     name,
     role: charter,
-    cli: "claude",
+    cli,
     ...(model === null ? {} : { model }),
     ...(effort === null ? {} : { effort }),
-    lastModel: "claude-opus-5-5",
+    // The board reports the model a citizen's last turn ran only while it is on that turn's CLI.
+    ...(cli === "claude" ? { lastModel: "claude-opus-5-5" } : {}),
     ...(runner === null ? {} : { homeRunner: runner }),
     status: "active",
     resident: false,
@@ -1303,6 +1305,20 @@ const CLAUDE_MODELS = [
   },
 ];
 
+const CODEX_MODELS = [
+  {
+    id: "gpt-5.5",
+    name: "GPT-5.5",
+    description: "Frontier agentic coding.",
+    isDefault: true,
+    efforts: [
+      { id: "medium", description: "Balanced" },
+      { id: "xhigh", description: "Extra high reasoning" },
+    ],
+    defaultEffort: "medium",
+  },
+];
+
 /**
  * A society of the user, a concierge, and a steward, with one skill proposal waiting on the user.
  * Decisions and the pause switch change the fake's state the way the board would. With `archived`,
@@ -1361,6 +1377,8 @@ export async function fakeBoard(
      * society's with none. Opens twelve topics in governance too, a count of two digits.
      */
     unread?: boolean;
+    /** Refuses a switch of desk's CLI, as the board does when a runner its turns need lacks it. */
+    refuseCli?: boolean;
   } = {},
 ): Promise<FakeBoard> {
   let inFlight = options.inFlight === true;
@@ -1456,6 +1474,7 @@ export async function fakeBoard(
   let deskModel: string | null = crowded ? "opus" : null;
   let deskRunner: string | null = crowded ? "stellaris-runner-0" : "pod";
   let deskEffort: string | null = crowded ? "xhigh" : null;
+  let deskCli = "claude";
   // Removing a society topic or skill takes it off the list, as the board does.
   let societyTopics = [SOCIETY_TOPIC];
   let societySkills = [SOCIETY_SKILL];
@@ -1759,11 +1778,30 @@ export async function fakeBoard(
           return decide(route, "approved", body);
         case "/api/verbs/reject":
           return decide(route, "rejected", body);
+        case "/api/agents/desk/cli":
+          if (options.refuseCli === true) {
+            return json(
+              route,
+              {
+                error: "INVALID_STATE",
+                message:
+                  "desk cannot switch to codex: its work outside projects runs on runner pod, which offers only claude",
+              },
+              409,
+            );
+          }
+          deskCli = typeof body["cli"] === "string" ? body["cli"] : deskCli;
+          deskModel = typeof body["model"] === "string" ? body["model"] : null;
+          deskEffort = typeof body["effort"] === "string" ? body["effort"] : null;
+          return json(
+            route,
+            member("desk", "concierge", deskProjects, deskModel, deskRunner, deskEffort, deskCli),
+          );
         case "/api/agents/desk/model":
           deskModel = typeof body["model"] === "string" ? body["model"] : null;
           return json(
             route,
-            member("desk", "concierge", deskProjects, deskModel, deskRunner, deskEffort),
+            member("desk", "concierge", deskProjects, deskModel, deskRunner, deskEffort, deskCli),
           );
         case "/api/verbs/advance_task":
           task = {
@@ -1877,7 +1915,7 @@ export async function fakeBoard(
           deskEffort = typeof body["effort"] === "string" ? body["effort"] : null;
           return json(
             route,
-            member("desk", "concierge", deskProjects, deskModel, deskRunner, deskEffort),
+            member("desk", "concierge", deskProjects, deskModel, deskRunner, deskEffort, deskCli),
           );
         case "/api/projects/lab/runner": {
           // laptop, where lab lives, is away: nothing travels unless the user says to go without it.
@@ -1907,7 +1945,7 @@ export async function fakeBoard(
           deskRunner = typeof body["runner"] === "string" ? body["runner"] : null;
           return json(
             route,
-            member("desk", "concierge", deskProjects, deskModel, deskRunner, deskEffort),
+            member("desk", "concierge", deskProjects, deskModel, deskRunner, deskEffort, deskCli),
           );
         case "/api/wake":
           return json(route, {
@@ -2142,7 +2180,7 @@ export async function fakeBoard(
         return json(route, crons);
       case "/api/members":
         return json(route, [
-          member("desk", "concierge", deskProjects, deskModel, deskRunner, deskEffort),
+          member("desk", "concierge", deskProjects, deskModel, deskRunner, deskEffort, deskCli),
           member("stew", "steward", [], null, crowded ? "stellaris-runner-0" : null),
           ...(crowded ? [member("hal", "investigator", [], null, "stellaris-runner-1")] : []),
           ...(options.retired === true
@@ -2154,8 +2192,14 @@ export async function fakeBoard(
         return json(route, { version: "0.3.11" });
       case "/api/runners":
         return json(route, runnerRecords());
-      case "/api/agents/desk/models":
-        return json(route, { runner: "pod", cli: "claude", models: CLAUDE_MODELS });
+      case "/api/agents/desk/models": {
+        const cli = searchParams.get("cli") ?? deskCli;
+        return json(route, {
+          runner: "pod",
+          cli,
+          models: cli === "codex" ? CODEX_MODELS : CLAUDE_MODELS,
+        });
+      }
       case "/api/agents/desk/turns":
         return json(route, options.longReport === true ? [DESK_TURN, DESK_LONG_TURN] : [DESK_TURN]);
       case `/api/agents/desk/turns/${DESK_TURN_ID}`:

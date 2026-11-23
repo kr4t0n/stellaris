@@ -745,6 +745,80 @@ describe("board server routes", () => {
     ).toBe("reflection");
   });
 
+  it("switches a citizen's CLI with its model and effort, for the user alone, and lists the models of a CLI to switch it to", async () => {
+    const asked: Array<[string, string[]]> = [];
+    const app = createApp({
+      board,
+      version: "t",
+      models: {
+        list: (cli, prefer = []) => {
+          asked.push([cli, [...prefer]]);
+          return Promise.resolve({ runner: prefer[0] ?? "any", cli, models: [] });
+        },
+      },
+    });
+    await board.addRunner(USER, "laptop");
+    await board.markRunner("laptop", { status: "connected", clis: ["claude", "codex"] });
+    await board.setAgentRunner(USER, "eng-1", "laptop");
+    await board.setAgentModel(USER, "eng-1", "sonnet");
+    const models = (query: string) => app.request(`/api/agents/eng-1/models${query}`, { headers });
+    expect(await (await models("?cli=codex")).json()).toMatchObject({
+      runner: "laptop",
+      cli: "codex",
+    });
+    expect((await models("?cli=gemini")).status).toBe(400);
+    await models("");
+    expect(asked).toEqual([
+      ["codex", ["laptop"]],
+      ["claude", ["laptop"]],
+    ]);
+
+    const switchTo = (body: unknown, token = userToken) =>
+      app.request("/api/agents/eng-1/cli", {
+        method: "PUT",
+        headers: { ...headers, authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+      });
+    const switched = await switchTo({ cli: "codex", model: "gpt-5.5", effort: "xhigh" });
+    expect(switched.status).toBe(200);
+    const agent = z.record(z.string(), z.unknown()).parse(await switched.json());
+    expect(agent).toMatchObject({ cli: "codex", model: "gpt-5.5", effort: "xhigh" });
+    expect(agent["tokenHash"]).toBeUndefined();
+    await models("");
+    expect(asked.at(-1)).toEqual(["codex", ["laptop"]]);
+
+    const refused = async (body: unknown, status: number, answer: object) => {
+      const response = await switchTo(body);
+      expect([response.status, await response.json()]).toMatchObject([status, answer]);
+    };
+    const invalid = { error: "VALIDATION" };
+    await refused({ cli: "codex" }, 409, {
+      error: "INVALID_STATE",
+      message: "eng-1 runs on codex already",
+    });
+    await refused({ cli: "gemini" }, 400, invalid);
+    await refused({ cli: "claude", model: "two words" }, 400, invalid);
+    await refused({ cli: "claude", effort: "High" }, 400, invalid);
+    await refused({ model: "sonnet" }, 400, invalid);
+    const turn = board.issueTurnToken("eng-1", "engineer", 60_000, "demo");
+    expect((await switchTo({ cli: "claude" }, turn)).status).toBe(403);
+    expect((await board.readAgent("eng-1")).cli).toBe("codex");
+
+    // Neither given, both go back to the new CLI's defaults.
+    expect((await switchTo({ cli: "claude", model: null })).status).toBe(200);
+    const back = await board.readAgent("eng-1");
+    expect([back.cli, back.model, back.effort]).toEqual(["claude", undefined, undefined]);
+
+    // A runner where one of its projects lives lacks the CLI.
+    await board.addRunner(USER, "mini");
+    await board.markRunner("mini", { status: "connected", clis: ["claude"] });
+    await board.placeProject("demo", "mini");
+    await refused({ cli: "codex" }, 409, {
+      error: "INVALID_STATE",
+      message: "eng-1 cannot switch to codex: demo lives on runner mini, which offers only claude",
+    });
+  });
+
   it("lists each CLI's models and sets a citizen's model for its next turn", async () => {
     const app = createApp({
       board,

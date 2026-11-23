@@ -38,15 +38,29 @@ export type Target =
   | { readonly ask: true };
 
 /**
- * A second way to send what the box holds, beside Send, such as finishing a stage with the text as
- * its note: a round button with a check, named by `label`, its tooltip `title`. It may go with the
- * box empty; `blocked` says why it can't go at all, in its tooltip.
+ * Another way to send what the box holds, beside Send, such as finishing a stage with the text as
+ * its note: a round button with a check on green, or a cross on red (`mark`), named by `label`, its
+ * tooltip `title`. It may go with the box empty unless it `needsText`, which says why it waits
+ * while the box is; `blocked` says why it can't go at all. Either shows in its tooltip.
  */
 export interface ComposerAction {
   readonly label: string;
   readonly title: string;
   readonly blocked: string | null;
+  /** Why it waits while the box is empty, for an action the text is needed for, as a rejection's reason. */
+  readonly needsText?: string | undefined;
+  readonly mark?: "check" | "cross" | undefined;
+  /** What its refusal says when the board gave no words. */
+  readonly failure: string;
   readonly run: (text: string) => Promise<unknown>;
+}
+
+/** Why an action can't go with this text in the box, or null when it can. */
+export function blockedWith(action: ComposerAction, text: string): string | null {
+  if (action.blocked !== null) {
+    return action.blocked;
+  }
+  return action.needsText !== undefined && text.trim() === "" ? action.needsText : null;
 }
 
 const MAX_CANDIDATES = 6;
@@ -62,7 +76,7 @@ function filesDragged(event: DragEvent): boolean {
 /**
  * Posts as the user into a channel or a thread, in one row: a box that is a capsule at one line,
  * then Send, a round button with an arrow, as the iOS app draws it, lit while there is something to
- * send and turning while it posts. An `action`, such as Approve, is a round check after it, at the row's end.
+ * send and turning while it posts. Its `actions`, such as Approve, are round buttons after it, at the row's end.
  * Enter sends and Shift+Enter breaks the line; an `@` offers the citizens to mention. An image pasted, dropped,
  * or picked uploads to the board, holding its place in the text with a line of its own that says so
  * until the markdown that shows it, described by its file's name, takes that line's place; Send
@@ -76,7 +90,7 @@ export function Composer({
   focusOnOpen = false,
   onPosted,
   onEmptyEscape,
-  action,
+  actions = [],
 }: {
   target: Target;
   placeholder: string;
@@ -88,8 +102,8 @@ export function Composer({
   onPosted?: (message: Message) => void;
   /** Escape in an empty box, for a composer that closes. */
   onEmptyEscape?: () => void;
-  /** A second button beside Send; Enter still sends. */
-  action?: ComposerAction | undefined;
+  /** Buttons after Send, in order; Enter still sends. */
+  actions?: readonly ComposerAction[] | undefined;
 }) {
   const { api } = useSession();
   const client = useQueryClient();
@@ -178,13 +192,9 @@ export function Composer({
   });
 
   const act = useMutation({
-    mutationFn: (body: string) => {
-      if (action === undefined) {
-        return Promise.resolve();
-      }
-      return action.run(body);
-    },
-    onSuccess: (_, body) => {
+    mutationFn: ({ index, body }: { index: number; body: string }) =>
+      actions[index]?.run(body) ?? Promise.resolve(),
+    onSuccess: (_, { body }) => {
       // What was typed while the action went stays in the box, as after a send.
       setText((now) => (now.trim() === body ? initialText : now));
       setUploadFailure(null);
@@ -251,12 +261,8 @@ export function Composer({
     !send.isPending &&
     !act.isPending &&
     uploading === 0;
-  const actionable =
-    action !== undefined &&
-    action.blocked === null &&
-    !send.isPending &&
-    !act.isPending &&
-    uploading === 0;
+  const actionable = (each: ComposerAction): boolean =>
+    blockedWith(each, text) === null && !send.isPending && !act.isPending && uploading === 0;
   // A button pressed goes busy, or goes, while its request is out, and focus left on it, or on
   // the page once it has gone, would hand the next keys to the board's own: Space opens the ask
   // box and Escape closes the board with the draft. So a press puts the keyboard back in the box
@@ -267,14 +273,15 @@ export function Composer({
       send.mutate(text.trim());
     }
   };
-  const runAction = (): void => {
-    if (actionable) {
+  const runAction = (index: number): void => {
+    const chosen = actions[index];
+    if (chosen !== undefined && actionable(chosen)) {
       box.current?.focus();
-      act.mutate(text.trim());
+      act.mutate({ index, body: text.trim() });
     }
   };
   // A refusal of the action goes with the action, as when another's advance ended the stage.
-  const hasAction = action !== undefined;
+  const hasAction = actions.length > 0;
   const { reset: resetAction } = act;
   useEffect(() => {
     if (!hasAction) {
@@ -550,14 +557,18 @@ export function Composer({
         >
           {send.isPending ? <Spinner /> : <ArrowGlyph />}
         </button>
-        {action === undefined ? null : (
-          <ActionButton
-            action={action}
-            pending={act.isPending}
-            disabled={!actionable && !act.isPending}
-            onClick={runAction}
-          />
-        )}
+        {actions.map((each, index) => {
+          const running = act.isPending && act.variables.index === index;
+          return (
+            <ActionButton
+              key={each.label}
+              action={{ ...each, blocked: blockedWith(each, text) }}
+              pending={running}
+              disabled={!actionable(each) && !running}
+              onClick={() => runAction(index)}
+            />
+          );
+        })}
       </div>
       {send.error === null ? null : (
         <p role="alert" className="mt-2 text-xs text-red-400">
@@ -566,7 +577,9 @@ export function Composer({
       )}
       {act.error === null ? null : (
         <p role="alert" className="mt-2 text-xs text-red-400">
-          {act.error instanceof ApiError ? act.error.message : "The stage was not finished."}
+          {act.error instanceof ApiError
+            ? act.error.message
+            : actions[act.variables?.index ?? 0]?.failure}
         </p>
       )}
       {uploadFailure === null ? null : (
@@ -579,10 +592,11 @@ export function Composer({
 }
 
 /**
- * The round button an action takes after Send: a check on green, named by the action, and turning
- * while it goes. The task view's Approve also stands alone in it where its task has no open thread.
- * It is never `disabled`, which would drop it from the tab order and, with no pointer events, hide
- * the tooltip that says why it can't go: it is `aria-disabled`, dimmed, and its press does nothing.
+ * The round button an action takes after Send: its mark on its colour, a check on green or a cross
+ * on red, named by the action, and turning while it goes. The task view's Approve also stands alone
+ * in it where its task has no open thread. It is never `disabled`, which would drop it from the tab
+ * order and, with no pointer events, hide the tooltip that says why it can't go: it is
+ * `aria-disabled`, dimmed, and its press does nothing.
  */
 export function ActionButton({
   action,
@@ -595,6 +609,7 @@ export function ActionButton({
   disabled: boolean;
   onClick: () => void;
 }) {
+  const cross = action.mark === "cross";
   return (
     <button
       type="button"
@@ -607,16 +622,41 @@ export function ActionButton({
           onClick();
         }
       }}
-      className={`grid size-10 shrink-0 place-items-center rounded-full bg-emerald-400/15 text-emerald-200 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-300/40 focus-visible:outline-none ${
+      className={`grid size-10 shrink-0 place-items-center rounded-full transition-colors focus-visible:ring-2 focus-visible:outline-none ${
+        cross
+          ? "bg-red-400/15 text-red-200 focus-visible:ring-red-300/40"
+          : "bg-emerald-400/15 text-emerald-200 focus-visible:ring-emerald-300/40"
+      } ${
         disabled
           ? "cursor-not-allowed opacity-40"
           : pending
             ? "cursor-progress"
-            : "hover:bg-emerald-400/25"
+            : cross
+              ? "hover:bg-red-400/25"
+              : "hover:bg-emerald-400/25"
       }`}
     >
-      {pending ? <Spinner /> : <CheckGlyph />}
+      {pending ? <Spinner /> : cross ? <CrossGlyph /> : <CheckGlyph />}
     </button>
+  );
+}
+
+/** A cross, a rejection's mark, drawn as the check is. */
+function CrossGlyph() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width={18}
+      height={18}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M4 4l8 8M12 4l-8 8" />
+    </svg>
   );
 }
 

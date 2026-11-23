@@ -1,0 +1,86 @@
+import { randomUUID } from "node:crypto";
+import type {
+  AgentBackend,
+  AgentSpec,
+  ResidentSession,
+  ResidentStart,
+  SessionId,
+  TurnControl,
+  TurnRequest,
+  TurnResult,
+} from "@stellaris/runner-core";
+import type { AgentEvent, ModelOption } from "@stellaris/shared";
+import type { SpawnAgy } from "./rpc.js";
+import {
+  AntigravityAcpSession,
+  listAcpModels,
+  PENDING_SESSION_PREFIX,
+  type AcpSessionOptions,
+} from "./session.js";
+
+export interface AntigravityOptions {
+  readonly agyPath?: string | undefined;
+  /** Where agy keeps its settings, sign-in, and conversations, in place of `~/.gemini`. */
+  readonly geminiDir?: string | undefined;
+  readonly model?: string | undefined;
+  readonly env?: Readonly<Record<string, string | undefined>> | undefined;
+  readonly stderr?: ((line: string) => void) | undefined;
+  /** Directory to append agy's raw output to, one file per turn, for fixtures. */
+  readonly recordDir?: string | undefined;
+  /** Spawns `agy acp`; injectable for tests. */
+  readonly spawn?: SpawnAgy | undefined;
+}
+
+/**
+ * Google's Antigravity CLI through `agy acp`. A cold turn starts the server, opens or resumes the
+ * pair's session, runs one turn, and stops the server; a resident session keeps both between
+ * turns. The board's MCP endpoint and the turn's token travel in the session's `mcpServers`, the
+ * instructions as the system prompt's append, both over stdin.
+ */
+export class AntigravityBackend implements AgentBackend {
+  readonly kind = "antigravity" as const;
+  readonly steers = true;
+  readonly stops = true;
+
+  constructor(private readonly options: AntigravityOptions = {}) {}
+
+  /** agy picks session ids itself; the placeholder is replaced by the id `session/new` gives. */
+  newSession(): Promise<SessionId> {
+    return Promise.resolve(`${PENDING_SESSION_PREFIX}${randomUUID()}`);
+  }
+
+  startResident(spec: AgentSpec, start: ResidentStart): Promise<ResidentSession> {
+    return AntigravityAcpSession.start(this.sessionOptions(), spec, start);
+  }
+
+  /** The models agy offers, asked of a server started for the question. */
+  listModels(): Promise<ModelOption[]> {
+    return listAcpModels(this.sessionOptions());
+  }
+
+  async runTurn(
+    request: TurnRequest,
+    onEvent?: (event: AgentEvent) => void,
+    control?: TurnControl,
+  ): Promise<TurnResult> {
+    const session = await AntigravityAcpSession.start(this.sessionOptions(), request.spec, request);
+    try {
+      return await session.runTurn(request.prompt, onEvent, control);
+    } finally {
+      await session.close();
+    }
+  }
+
+  private sessionOptions(): AcpSessionOptions {
+    const { options } = this;
+    return {
+      ...(options.spawn === undefined ? {} : { spawn: options.spawn }),
+      ...(options.agyPath === undefined ? {} : { agyPath: options.agyPath }),
+      ...(options.geminiDir === undefined ? {} : { geminiDir: options.geminiDir }),
+      ...(options.model === undefined ? {} : { model: options.model }),
+      ...(options.env === undefined ? {} : { env: options.env }),
+      ...(options.stderr === undefined ? {} : { stderr: options.stderr }),
+      ...(options.recordDir === undefined ? {} : { recordDir: options.recordDir }),
+    };
+  }
+}

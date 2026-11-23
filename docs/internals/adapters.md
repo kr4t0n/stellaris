@@ -1,6 +1,6 @@
-# The Claude Code and Codex adapters
+# The adapters
 
-The two `AgentBackend`s, `packages/adapter-claude` (Claude Code through the Agent SDK) and `packages/adapter-codex` (Codex over `codex app-server`): how each runs, resumes, and steers a session, and how it reads what its CLI reports. [AGENTS.md](../../AGENTS.md) states the rules in short; this page has the detail and the incidents behind it. What the runner and the server do with a turn's outcome is on [runners.md](runners.md).
+The `AgentBackend`s, `packages/adapter-claude` (Claude Code through the Agent SDK), `packages/adapter-codex` (Codex over `codex app-server`), and `packages/adapter-antigravity` (Antigravity over `agy acp`): how each runs, resumes, and steers a session, and how it reads what its CLI reports. [AGENTS.md](../../AGENTS.md) states the rules in short; this page has the detail and the incidents behind it. What the runner and the server do with a turn's outcome is on [runners.md](runners.md).
 
 ## Permissions
 
@@ -141,6 +141,88 @@ Codex reports a call to its sub-agent tools in one of two shapes, by the tools t
 | `list_agents`                                 |               | nothing       | `ListAgents`   |                            |
 
 Claude Code has no call that waits on a sub-agent, whose end it reports by itself, or that reopens a closed one, which a message resumes, so those two keep the names Codex gives the model. The input names the sub-agents as the model did, a v1 call by thread and a v2 one by its path (`/root/<task name>`). A v2 item carries neither what a call said nor which of `followup_task` and `send_message` it was, so its `SendMessage` has no `message`. Each call is reported when its item completes, with the input its item started with, since a wait's completion names only the sub-agents that ended, and a timed-out one's none. Codex can start a v1 call and return without completing it: a spawn naming an agent type it doesn't know, which `prepare_agent_spawn_config` refuses once the spawn has started, and, by the source of `multi_agents/spawn.rs` and `wait.rs`, a spawn whose config or source it cannot build and a wait whose sub-agent's status stream fails. Such a call shows no step. Reported as it started, it had no result, and the next result of the same tool went to it, since the web matches a result to the oldest open call of its tool. So a wait shows in the live view once it has ended, not while it waits. A v1 call's result is where each sub-agent it named stood as the call ended, from its `agentsStates`: a line of the thread and its status, then the sub-agent's last message if it had one, as a wait's answer. A v2 item reports no state, so its step has no result text. A call fails when its item's `status` is `failed`, as a v1 call on a sub-agent Codex cannot find does, with the sub-agent `notFound`. A call Codex refuses before starting it goes back to the model as an error and sends the client no item, so it shows no step either: in v1 one whose arguments it cannot read, and in v2 any it refuses, one on a sub-agent it cannot find included. v2's `list_agents`, whose name is in Codex's `tool` values, sends no item at all. A v2 `subAgentActivity` of kind `completed` is a sub-agent's turn ending, under the parent's turn that started it, and no call, so it shows no step either. A sub-agent's own items, on its own thread, are never the parent turn's steps ([the next sections](#the-codex-app-server-sends-a-connection-every-thread-it-runs-a-sub-agents-too)). The recordings in `packages/adapter-codex/fixtures` hold one turn of each shape whose sub-agent ran a command, `app-server-subagents-v1-recorded.jsonl` and `-v2-`, and a v1 turn with a refused spawn and a timed-out wait, `-v1-refused-`.
+
+## Antigravity
+
+`packages/adapter-antigravity` drives Google's Antigravity CLI, `agy`, over the Agent Client Protocol. No runner runs it yet: wiring it into `apps/runner` comes next. Everything below was measured on agy 1.5.14 and 1.5.15, from the release tarballs checked against their published sha256, against a local stub of the Gemini API with a dummy key (`GOOGLE_GEMINI_BASE_URL`, `GEMINI_API_KEY`, and `{"modelProvider":"gemini"}` in agy's settings), a temp `HOME`, and a proxy that refused every host but 127.0.0.1.
+
+### agy speaks ACP over stdio, one session per process
+
+`agy acp` speaks ACP version 1: JSON-RPC 2.0 over stdio, one object per line. The adapter starts it as `agy acp --process-per-session --dangerously-skip-permissions --disable-telemetry`, adding `--gemini-dir <dir>` when given one. The order is `initialize`, then `session/new` or `session/resume`, then `session/set_config_option` for the model and the effort. Each prompt is a `session/prompt`, whose steps arrive as `session/update` notifications until its reply.
+
+- **The client is written by hand**, against the ACP types in `@agentclientprotocol/sdk` 2.9.1, which is no dependency: the stable v1 schema, plus the unstable `PromptResponse.usage`.
+- **What agy asks of the client.** A `session/request_permission` is answered `allow_once`, never `allow_always`, which would save a rule into the account's settings. `--dangerously-skip-permissions` should leave none to answer. Every other request is refused, since the client offers no file system or terminal.
+- **One session per process** (`--process-per-session`) keeps each session's MCP servers its own. The board's server goes in `session/new`'s and `session/resume`'s `mcpServers`, as `http` with an `Authorization` header holding the turn's token. So the token reaches agy over stdin, never on a command line. The process also gets it as `STELLARIS_AGENT_TOKEN`, as the other CLIs do.
+- **No telemetry.** With `--disable-telemetry`, agy sent nothing to any host but 127.0.0.1. Without it, agy called `play.googleapis.com`. `agy models` and `agy -p` take no such flag: `agy models` called `play.googleapis.com` too, so nothing here runs either.
+- **`--gemini-dir` with an absolute path moves all of `~/.gemini`:** settings, configuration, conversations, and logs. A turn run with it read its settings from that folder and wrote nothing under the temp `HOME`. `--app-data-dir` names the subfolder inside it, `antigravity-cli` by default.
+- **The agy process never updates itself.** It runs with `AGY_CLI_DISABLE_AUTO_UPDATE=true`, since otherwise it updates its own binary in the background.
+
+### The instructions ride in the system prompt's append, on every open and resume
+
+`initialize` advertises `agentCapabilities._meta.antigravity.systemPrompt.append`, and the adapter refuses an agy without it before opening a session. Every `session/new` and `session/resume` carries the rendered instructions as `_meta: {antigravity: {systemPrompt: {append}}}`.
+
+- **Behaviour (1.5.14).** The append is not saved with the session: a resume given another used the other, and one given none had none. A 59,033-byte append reached the model whole, so the rule files' 24,000-byte limit doesn't apply. The append was still in the system prompt after `/compact`.
+- **ACP v1's own `systemPrompt`** needs `sessionCapabilities.systemPrompt`, which agy 1.5.15 doesn't advertise.
+- **So a resumed agy session always runs the current instructions.** That differs from the other two CLIs, so the host's "Your instructions changed" block only repeats them for this CLI.
+
+ACP takes no output schema. So the append ends with a section asking for the status object as the turn's last message, with the schema (`systemAppend`). A turn whose last message holds no valid status is asked once more in the same session (`statusReask`), and both prompts count in the turn. A turn that failed, was stopped, or timed out is not asked.
+
+### A resume agy can't make is lost or tried again, as the session list says
+
+agy 1.5.14 and 1.5.15 both answer `session/resume` of an id they have no conversation for with `-32603`, "Failed to read session <id>; retry, or load it with session/load", before any model call. The words can't tell a missing session from an unreadable one. So the adapter reads `session/list`, every page of it:
+
+- an id the list doesn't name is `lost`;
+- one it names, or a list that fails, is `retry`;
+- so is a resume that never answers or a process that ends during it.
+
+The adapter never calls `session/load`: for an id agy doesn't know, it succeeds and opens an empty session, whose next prompt fails with "trajectory not found" (1.5.14).
+
+### A step shows under the name Claude gives the same tool, without agy's `toolSummary`
+
+- **Names.** A tool call arrives as `tool_call`, then `tool_call_update`s, under agy's own `name`. A board verb, `mcp_board_<verb>` to the model, becomes `mcp__board__<verb>`. A call of `kind` `execute` becomes `Bash`, with agy's `CommandLine` as its `command`. Any other tool keeps agy's name.
+- **`toolSummary`.** agy adds a required `toolSummary` string to every tool's schema the model sees, MCP tools included: the model's summary of the call. agy drops it before calling the tool: the stub MCP server got only the tool's own arguments. A step's input leaves it out too. If one ever reached the board, the MCP SDK parses the arguments with the verb's schema, which strips a key it doesn't name, so the verb never sees it (`tool-summary.test.ts` in `board-mcp`).
+- **Results.** agy 1.5.15 reports no MCP tool's output, only that the call completed.
+- **Text.** A message's chunks become one text step.
+
+### A prompt's reply counts the turn's own tokens, but not the title request
+
+A `session/prompt` reply carries `usage`, from ACP's unstable schema, for that prompt's requests alone, never the session's running total. The adapter reads it as follows:
+
+- `inputTokens` is the input outside the cache, as `Usage` counts it;
+- `cachedReadTokens` and `cachedWriteTokens` are the cache reads and writes;
+- `outputTokens` already counts the thinking that `thoughtTokens` gives apart.
+
+A turn sums its prompts' replies: the first, a steer's, and the status's. A new session's first prompt also sends a title request to `gemini-3.1-flash-lite-preview` (11 of the spike's 32 requests), which no reply counts, so that spend is in no turn. Cost is 0, as for Codex: no price is reported. `contextTokens` is the latest `usage_update`'s `used` in the turn, which the stub showed to be the latest request's whole count, its output included.
+
+The board's model for agy is a model family. `session/new`'s `configOptions` list them under `model` (`gemini-4-neon`, …, `gemini-3.1-pro`), and `thought_level` gives the current family's levels. `models.availableModels` lists every family at every level as one id (`gemini-4-neon-high`), from which `modelsOf` reads each family's efforts. A turn sets both with `session/set_config_option`, and the stub saw its requests go to that family. `listModels` opens a session in the temp folder with no prompt and closes it: that makes no model call, and `session/list` never lists it, though agy keeps a conversation file for it.
+
+### A steer is a second prompt, and a stop is `session/cancel`
+
+**Steer.** A second `session/prompt` during a turn makes agy reply to the first at once, with `end_turn` and no `usage`. The adapter reports `steered` then. agy adds the steer's text once the model's request in flight is answered, and the steer's reply ends the turn with every request's usage since.
+
+**Stop.** `session/cancel` makes the prompt reply `cancelled`, and the turn is `stopped`. A turn that reaches its time limit is cancelled the same way.
+
+### A turn the model service failed comes as agy's warning, not an error
+
+agy fails no prompt for the model service's refusal. Once its own retries run out, it sends a message chunk of its own, a warning on one line between newlines (`\n⚠ …\n`), and replies `end_turn` with no `usage`. The adapter reads that chunk as the turn's failure, in agy's words (`warningOf`). Two exceptions:
+
+- if the model says more after the warning, the warning didn't end the turn;
+- a prompt agy itself refuses, such as `-32000` "Authentication required" with no sign-in, fails the turn with its words, never as transient.
+
+The table is agy 1.5.15 against the stub, one new session and one prompt each, with requests counted from the stub's log and timed first to last (`isTransient`):
+
+| The stub's answer                                   | Requests | First to last | agy's words                                                                                         | Transient |
+| --------------------------------------------------- | -------- | ------------- | --------------------------------------------------------------------------------------------------- | --------- |
+| 429 `RESOURCE_EXHAUSTED`                            | 9        | 150.6 s       | `agent executor error: generating and executing: Error 429, Message: …, Status: RESOURCE_EXHAUSTED` | yes       |
+| 503 `UNAVAILABLE`                                   | 9        | 135.0 s       | `… Error 503, …`                                                                                    | yes       |
+| 500 `INTERNAL`                                      | 1        |               | `… Error 500, …`                                                                                    | yes       |
+| a stream cut after its headers and part of an event | 1        |               | `… iterateResponseStream: error unmarshalling data … unexpected end of JSON input`                  | yes       |
+| a socket closed with no answer                      | 9        | 145.7 s       | `There was a network issue connecting to the server, please try again.`                             | yes       |
+| a closed port                                       | none     |               | the same, 144.7 s after the prompt                                                                  | yes       |
+| 400 `API_KEY_INVALID`                               | 1        |               | `… Error 400, Message: API key not valid. Please pass a valid API key., …`                          | no        |
+| 400, 401, 403                                       | 1 each   |               | `… Error 400, …`, `… Error 401, …`, `… Error 403, …`                                                | no        |
+
+A plan's usage limit on a signed-in account has not been seen yet, so its words are unknown. Until they are, a 429 reads as transient whatever it says.
 
 ## Usage, cost, and models
 

@@ -76,6 +76,7 @@ packages/
   runner-core/     the runner side: executor, worktrees, sync, protocol client
   adapter-claude/  Claude Code through the Claude Agent SDK
   adapter-codex/   Codex through `codex app-server`
+  adapter-antigravity/  Antigravity through `agy acp`
 helm/stellaris/    the Helm chart
 scripts/           npm packaging, image smoke tests, chart and iOS layout checks
 docs/              guides, the code's internals by area, and the design record

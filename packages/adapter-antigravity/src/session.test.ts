@@ -1,0 +1,516 @@
+import { PassThrough } from "node:stream";
+import { ResumeError, TurnControl, type TurnRequest } from "@stellaris/runner-core";
+import { turnStatusJsonSchema, type AgentEvent } from "@stellaris/shared";
+import { describe, expect, it, vi } from "vitest";
+import { AntigravityBackend } from "./backend.js";
+import type { SpawnAgy } from "./rpc.js";
+import { isTransient, warningOf } from "./session.js";
+
+const SESSION = "6b98cecf-cf82-4a72-a2bc-28d4b3331028";
+
+const STATUS = (summary: string): string =>
+  "```json\n" +
+  JSON.stringify({
+    summary,
+    claimsHeld: [],
+    blockedOn: [],
+    needsUserDecision: false,
+    memoryUpdated: false,
+  }) +
+  "\n```";
+
+type Params = Record<string, unknown>;
+
+function isParams(value: unknown): value is Params {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** A message's object, or an empty one. */
+function paramsOf(value: unknown): Params {
+  return isParams(value) ? value : {};
+}
+
+/** The text of a `session/prompt`'s first block. */
+function promptTextOf(params: Params): unknown {
+  const prompt = params["prompt"];
+  return Array.isArray(prompt) ? paramsOf(prompt[0])["text"] : undefined;
+}
+
+/** agy's warning as 1.5.15 sends it, a line between newlines after the warning sign. */
+const said = (words: string): string | undefined => warningOf(`\n\u26a0 ${words}\n`);
+
+interface Fake {
+  /** Sends a `session/update` for the session. */
+  update(update: Params): void;
+  /** Writes a raw line, as the agent's own request. */
+  write(message: Params): void;
+  exit(code: number | null): void;
+}
+
+/** What the fake answers a request with: a result, an error, or a promise of either. */
+type Answer = { result: unknown } | { error: { code: number; message: string } };
+type Script = Record<string, (params: Params, fake: Fake) => Answer | Promise<Answer>>;
+
+const INITIALIZED: Answer = {
+  result: {
+    protocolVersion: 1,
+    agentCapabilities: { _meta: { antigravity: { systemPrompt: { append: true } } } },
+  },
+};
+
+const OPENED: Answer = {
+  result: {
+    sessionId: SESSION,
+    configOptions: [
+      {
+        id: "model",
+        type: "select",
+        currentValue: "gemini-3.1-pro",
+        options: [{ value: "gemini-3.1-pro", name: "Gemini 3.1 Pro" }],
+      },
+    ],
+  },
+};
+
+const ended = (usage?: Params): Answer => ({
+  result: { stopReason: "end_turn", ...(usage === undefined ? {} : { usage }) },
+});
+
+const USAGE = { inputTokens: 600, outputTokens: 60, cachedReadTokens: 400, thoughtTokens: 10 };
+
+/**
+ * A scripted `agy acp`: each request goes to the script's handler for its method, which answers
+ * now or later and may send updates first; every message the client sent is kept.
+ */
+function fakeAgy(script: Script): { spawn: SpawnAgy; sent: Params[]; spawns: number } {
+  const sent: Params[] = [];
+  const state = { spawns: 0 };
+  const spawn: SpawnAgy = () => {
+    state.spawns += 1;
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const { promise: exited, resolve: exit } = Promise.withResolvers<number | null>();
+    const fake: Fake = {
+      update: (update) =>
+        stdout.write(
+          `${JSON.stringify({ jsonrpc: "2.0", method: "session/update", params: { sessionId: SESSION, update } })}\n`,
+        ),
+      write: (message) => stdout.write(`${JSON.stringify(message)}\n`),
+      exit: (code) => exit(code),
+    };
+    let buffer = "";
+    stdin.on("data", (chunk: Buffer) => {
+      buffer += chunk.toString("utf8");
+      let newline: number;
+      while ((newline = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, newline);
+        buffer = buffer.slice(newline + 1);
+        const message = paramsOf(JSON.parse(line));
+        sent.push(message);
+        const method = message["method"];
+        const id = message["id"];
+        if (typeof method !== "string") continue;
+        const handler = script[method];
+        if (id === undefined) {
+          // A notification, such as `session/cancel`, gets no reply.
+          void handler?.(paramsOf(message["params"]), fake);
+          continue;
+        }
+        void Promise.resolve(
+          handler === undefined
+            ? { error: { code: -32601, message: `no ${method}` } }
+            : handler(paramsOf(message["params"]), fake),
+        ).then((answer) => stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id, ...answer })}\n`));
+      }
+    });
+    return { stdin, stdout, stderr: new PassThrough(), exited, kill: () => exit(null) };
+  };
+  return {
+    spawn,
+    sent,
+    get spawns() {
+      return state.spawns;
+    },
+  };
+}
+
+function request(overrides: Partial<TurnRequest> = {}): TurnRequest {
+  return {
+    spec: {
+      agent: "eng-1",
+      project: "demo",
+      cli: "antigravity",
+      runner: "server",
+      cwd: "/tmp/wt",
+      repoDir: "/tmp/repo",
+      configHome: "/tmp/home",
+      boardDir: "/tmp/board",
+    },
+    session: "pending-1",
+    newSession: true,
+    prompt: "Do the thing.",
+    instructions: "# eng-1\nYou are an engineer.",
+    mcp: { url: "http://127.0.0.1:4700/mcp", token: "stl_turn" },
+    limits: { timeoutMs: 5_000 },
+    statusSchema: turnStatusJsonSchema(),
+    ...overrides,
+  };
+}
+
+const methodsOf = (sent: readonly Params[]): unknown[] =>
+  sent.flatMap((message) => (typeof message["method"] === "string" ? [message["method"]] : []));
+
+const prompts = (sent: readonly Params[]): unknown[] =>
+  sent.flatMap((message) =>
+    message["method"] === "session/prompt" ? [promptTextOf(paramsOf(message["params"]))] : [],
+  );
+
+describe("AntigravityBackend", () => {
+  it("starts agy acp with a session per process, no permission prompts, and no telemetry", async () => {
+    const args: string[][] = [];
+    const envs: Record<string, string | undefined>[] = [];
+    const fake = fakeAgy({
+      initialize: () => INITIALIZED,
+      "session/new": () => OPENED,
+      "session/prompt": (_, agent) => {
+        agent.update({
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: STATUS("done") },
+        });
+        return ended(USAGE);
+      },
+    });
+    const spawn: SpawnAgy = (given, options) => {
+      args.push([...given]);
+      envs.push(options.env);
+      return fake.spawn(given, options);
+    };
+    const result = await new AntigravityBackend({ spawn, geminiDir: "/srv/agy" }).runTurn(
+      request(),
+    );
+    expect(result.exitReason).toBe("completed");
+    expect(args).toEqual([
+      [
+        "acp",
+        "--process-per-session",
+        "--dangerously-skip-permissions",
+        "--disable-telemetry",
+        "--gemini-dir",
+        "/srv/agy",
+      ],
+    ]);
+    // The token is no argument; it travels in the session's MCP header and the agent's variable.
+    expect(args.flat().join(" ")).not.toContain("stl_turn");
+    expect(envs[0]).toMatchObject({
+      STELLARIS_AGENT_TOKEN: "stl_turn",
+      HUSKY: "0",
+      AGY_CLI_DISABLE_AUTO_UPDATE: "true",
+    });
+    expect(envs[0]).not.toHaveProperty("STELLARIS_RUNNER_TOKEN");
+  });
+
+  it("refuses an agy that offers no system prompt append, before opening a session", async () => {
+    const fake = fakeAgy({
+      initialize: () => ({ result: { protocolVersion: 1, agentCapabilities: {} } }),
+    });
+    await expect(new AntigravityBackend({ spawn: fake.spawn }).runTurn(request())).rejects.toThrow(
+      "agy acp offers no system prompt append for the instructions",
+    );
+    expect(methodsOf(fake.sent)).toEqual(["initialize"]);
+  });
+
+  describe("resume", () => {
+    const failing: Answer = {
+      error: {
+        code: -32603,
+        message: `Failed to read session ${SESSION}; retry, or load it with session/load`,
+      },
+    };
+
+    it("fails as lost when the session list doesn't name the session, and never loads one", async () => {
+      const fake = fakeAgy({
+        initialize: () => INITIALIZED,
+        "session/resume": () => failing,
+        "session/list": () => ({
+          result: { sessions: [{ sessionId: "another", cwd: "/tmp/wt" }] },
+        }),
+      });
+      const failure = await new AntigravityBackend({ spawn: fake.spawn })
+        .runTurn(request({ session: SESSION, newSession: false }))
+        .catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(ResumeError);
+      expect(failure).toMatchObject({
+        failure: "lost",
+        message: expect.stringContaining("Failed to read session"),
+      });
+      expect(methodsOf(fake.sent)).toEqual(["initialize", "session/resume", "session/list"]);
+    });
+
+    it("reads every page of the list before calling a session lost", async () => {
+      const fake = fakeAgy({
+        initialize: () => INITIALIZED,
+        "session/resume": () => failing,
+        "session/list": (params) =>
+          params["cursor"] === undefined
+            ? { result: { sessions: [{ sessionId: "another", cwd: "/tmp/wt" }], nextCursor: "2" } }
+            : { result: { sessions: [{ sessionId: SESSION, cwd: "/tmp/wt" }] } },
+      });
+      const failure = await new AntigravityBackend({ spawn: fake.spawn })
+        .runTurn(request({ session: SESSION, newSession: false }))
+        .catch((error: unknown) => error);
+      expect(failure).toMatchObject({ failure: "retry" });
+      expect(methodsOf(fake.sent)).toEqual([
+        "initialize",
+        "session/resume",
+        "session/list",
+        "session/list",
+      ]);
+    });
+
+    it("fails as retry when the list names the session, or the list fails", async () => {
+      for (const list of [
+        (): Answer => ({ result: { sessions: [{ sessionId: SESSION, cwd: "/tmp/wt" }] } }),
+        (): Answer => ({ error: { code: -32603, message: "store busy" } }),
+      ]) {
+        const fake = fakeAgy({
+          initialize: () => INITIALIZED,
+          "session/resume": () => failing,
+          "session/list": list,
+        });
+        const failure = await new AntigravityBackend({ spawn: fake.spawn })
+          .runTurn(request({ session: SESSION, newSession: false }))
+          .catch((error: unknown) => error);
+        expect(failure).toBeInstanceOf(ResumeError);
+        expect(failure).toMatchObject({ failure: "retry" });
+        expect(methodsOf(fake.sent)).not.toContain("session/load");
+        expect(methodsOf(fake.sent)).not.toContain("session/new");
+      }
+    });
+
+    it("fails as retry when agy ends during the resume", async () => {
+      const fake = fakeAgy({
+        initialize: () => INITIALIZED,
+        "session/resume": (_, agent) => {
+          agent.exit(1);
+          return new Promise(() => undefined);
+        },
+      });
+      const failure = await new AntigravityBackend({ spawn: fake.spawn })
+        .runTurn(request({ session: SESSION, newSession: false }))
+        .catch((error: unknown) => error);
+      expect(failure).toMatchObject({ failure: "retry" });
+    });
+  });
+
+  it("asks for the status once more, and fails a turn whose answer still lacks it", async () => {
+    let asked = 0;
+    const fake = fakeAgy({
+      initialize: () => INITIALIZED,
+      "session/new": () => OPENED,
+      "session/prompt": (_, agent) => {
+        asked += 1;
+        agent.update({
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: `no status ${asked}` },
+        });
+        return ended(USAGE);
+      },
+    });
+    const result = await new AntigravityBackend({ spawn: fake.spawn }).runTurn(request());
+    expect(prompts(fake.sent)).toEqual([
+      "Do the thing.",
+      expect.stringContaining("Reply with only the status object"),
+    ]);
+    expect(result.exitReason).toBe("completed");
+    expect(result.status).toBeNull();
+    expect(result.error).toBe("the turn ended without a parsable status object");
+    expect(result.usage).toEqual({
+      inputTokens: 1_200,
+      outputTokens: 120,
+      cacheReadTokens: 800,
+      cacheWriteTokens: 0,
+    });
+  });
+
+  it("reads a warning the model's later text followed as no failure", async () => {
+    const fake = fakeAgy({
+      initialize: () => INITIALIZED,
+      "session/new": () => OPENED,
+      "session/prompt": (_, agent) => {
+        agent.update({
+          sessionUpdate: "agent_message_chunk",
+          content: {
+            type: "text",
+            text: "\n⚠ There was a network issue connecting to the server, please try again.\n",
+          },
+        });
+        agent.update({
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: STATUS("recovered") },
+        });
+        return ended(USAGE);
+      },
+    });
+    const result = await new AntigravityBackend({ spawn: fake.spawn }).runTurn(request());
+    expect(result.exitReason).toBe("completed");
+    expect(result.status?.summary).toBe("recovered");
+    expect(prompts(fake.sent)).toHaveLength(1);
+  });
+
+  it("reads agy's words for each failure the matrix measured", () => {
+    const transient = [
+      "agent executor error: generating and executing: Error 429, Message: x, Status: RESOURCE_EXHAUSTED, Details: []",
+      "agent executor error: generating and executing: Error 503, Message: x, Status: UNAVAILABLE, Details: []",
+      "agent executor error: generating and executing: Error 500, Message: x, Status: INTERNAL, Details: []",
+      'agent executor error: generating and executing: iterateResponseStream: error unmarshalling data data: {"candidates":[{"content":{"role":"model. error: unexpected end of JSON input',
+      "There was a network issue connecting to the server, please try again.",
+    ];
+    const lasting = [
+      "agent executor error: generating and executing: Error 400, Message: API key not valid. Please pass a valid API key., Status: INVALID_ARGUMENT, Details: []",
+      "agent executor error: generating and executing: Error 401, Message: x, Status: UNAUTHENTICATED, Details: []",
+      "agent executor error: generating and executing: Error 403, Message: x, Status: PERMISSION_DENIED, Details: []",
+    ];
+    expect(transient.map((words) => isTransient(said(words) ?? ""))).toEqual(
+      transient.map(() => true),
+    );
+    expect(lasting.map((words) => isTransient(said(words) ?? ""))).toEqual(
+      lasting.map(() => false),
+    );
+    // The model's own text, a warning sign within it included, is no warning of agy's.
+    expect(warningOf("⚠ check the build\n")).toBeUndefined();
+    expect(warningOf("Done.\n⚠ one note\n")).toBeUndefined();
+  });
+
+  it("fails a prompt agy refuses, as a sign-in it lacks, never as transient", async () => {
+    const fake = fakeAgy({
+      initialize: () => INITIALIZED,
+      "session/new": () => OPENED,
+      "session/prompt": () => ({ error: { code: -32000, message: "Authentication required" } }),
+    });
+    const result = await new AntigravityBackend({ spawn: fake.spawn }).runTurn(request());
+    expect(result.exitReason).toBe("error");
+    expect(result.error).toBe("Authentication required");
+    expect(result.transient).toBeUndefined();
+    expect(prompts(fake.sent)).toHaveLength(1);
+  });
+
+  it("ends a turn whose agy exits mid-prompt with its last words", async () => {
+    const fake = fakeAgy({
+      initialize: () => INITIALIZED,
+      "session/new": () => OPENED,
+      "session/prompt": (_, agent) => {
+        agent.exit(2);
+        return new Promise(() => undefined);
+      },
+    });
+    const result = await new AntigravityBackend({ spawn: fake.spawn }).runTurn(request());
+    expect(result.exitReason).toBe("error");
+    expect(result.error).toContain("agy acp exited");
+  });
+
+  it("allows a permission agy asks for once, never always", async () => {
+    const fake = fakeAgy({
+      initialize: () => INITIALIZED,
+      "session/new": () => OPENED,
+      "session/prompt": async (_, agent) => {
+        agent.write({
+          jsonrpc: "2.0",
+          id: 90,
+          method: "session/request_permission",
+          params: {
+            sessionId: SESSION,
+            toolCall: { toolCallId: "t1" },
+            options: [
+              { optionId: "always", name: "Always", kind: "allow_always" },
+              { optionId: "once", name: "Once", kind: "allow_once" },
+            ],
+          },
+        });
+        await vi.waitFor(() =>
+          expect(fake.sent.some((message) => message["id"] === 90)).toBe(true),
+        );
+        agent.update({
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: STATUS("ok") },
+        });
+        return ended(USAGE);
+      },
+    });
+    await new AntigravityBackend({ spawn: fake.spawn }).runTurn(request());
+    expect(fake.sent.find((message) => message["id"] === 90)).toEqual({
+      jsonrpc: "2.0",
+      id: 90,
+      result: { outcome: { outcome: "selected", optionId: "once" } },
+    });
+  });
+
+  it("steers with a second prompt, which agy takes by ending the first", async () => {
+    const first = Promise.withResolvers<Answer>();
+    const fake = fakeAgy({
+      initialize: () => INITIALIZED,
+      "session/new": () => OPENED,
+      "session/prompt": (params, agent) => {
+        const text = promptTextOf(params);
+        if (text === "Do the thing.") {
+          return first.promise;
+        }
+        // As 1.5.15 does: the first prompt ends with no usage, and this one carries both requests'.
+        first.resolve(ended());
+        agent.update({
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: STATUS("steered") },
+        });
+        return ended({ ...USAGE, inputTokens: 1_200 });
+      },
+    });
+    const control = new TurnControl();
+    const events: AgentEvent[] = [];
+    const running = new AntigravityBackend({ spawn: fake.spawn }).runTurn(
+      request(),
+      (event) => events.push(event),
+      control,
+    );
+    await vi.waitFor(() => expect(prompts(fake.sent)).toHaveLength(1));
+    expect(await control.steer({ id: "steer-1", text: "end your post with PINEAPPLE" })).toBe(true);
+    const result = await running;
+    expect(prompts(fake.sent)).toEqual(["Do the thing.", "end your post with PINEAPPLE"]);
+    expect(events.filter((event) => event.type === "steered")).toEqual([
+      { type: "steered", steer: "steer-1" },
+    ]);
+    expect(result.exitReason).toBe("completed");
+    expect(result.status?.summary).toBe("steered");
+    expect(result.usage.inputTokens).toBe(1_200);
+    // Once the turn has ended, a steer waits for the next.
+    expect(await control.steer({ id: "steer-2", text: "late" })).toBe(false);
+  });
+
+  it("stops with session/cancel, which agy answers as cancelled", async () => {
+    const prompt = Promise.withResolvers<Answer>();
+    const fake = fakeAgy({
+      initialize: () => INITIALIZED,
+      "session/new": () => OPENED,
+      "session/prompt": () => prompt.promise,
+      "session/cancel": () => {
+        prompt.resolve({ result: { stopReason: "cancelled" } });
+        return { result: null };
+      },
+    });
+    const control = new TurnControl();
+    const running = new AntigravityBackend({ spawn: fake.spawn }).runTurn(
+      request(),
+      undefined,
+      control,
+    );
+    await vi.waitFor(() => expect(prompts(fake.sent)).toHaveLength(1));
+    control.stop();
+    const result = await running;
+    expect(methodsOf(fake.sent)).toEqual([
+      "initialize",
+      "session/new",
+      "session/prompt",
+      "session/cancel",
+    ]);
+    expect(result.exitReason).toBe("stopped");
+    expect(result.error).toBeUndefined();
+  });
+});

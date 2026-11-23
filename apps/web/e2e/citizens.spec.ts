@@ -442,13 +442,13 @@ test("a citizen's CLI is switched from its mark, with a model and effort from th
   const board = await fakeBoard(page);
   await page.goto("/citizen/desk");
   const view = page.getByRole("region", { name: "Board content" });
-  const mark = view.getByRole("button", { name: /^CLI: / });
+  const mark = view.getByRole("button", { name: /^Switch CLI/ });
   const choose = (cli: string) => view.getByRole("button", { name: cli, exact: true });
   const form = page.getByRole("form", { name: "Model of desk" });
   const model = form.getByRole("button", { name: /^Model: / });
   const effort = form.getByRole("button", { name: /^Effort: / });
   const save = form.getByRole("button", { name: "Save" });
-  await expect(mark).toHaveAccessibleName("CLI: claude");
+  await expect(mark).toHaveAccessibleName("Switch CLI (claude)");
 
   // The mark lists the CLIs a runner offers, desk's own checked; Escape closes it, not the board.
   await mark.click();
@@ -462,7 +462,7 @@ test("a citizen's CLI is switched from its mark, with a model and effort from th
   // Another CLI opens the model form on it, from its defaults, and the mark shows it.
   await mark.click();
   await choose("codex").click();
-  await expect(mark).toHaveAccessibleName("CLI: codex");
+  await expect(mark).toHaveAccessibleName("Switch CLI (codex)");
   await expect(model).toHaveAccessibleName("Model: CLI default · GPT-5.5");
   await expect(effort).toHaveAccessibleName("Effort: Default · medium");
   await expect(save).toBeEnabled();
@@ -471,7 +471,7 @@ test("a citizen's CLI is switched from its mark, with a model and effort from th
   // Back on claude, the choices are what desk is set to, so nothing is left to save.
   await mark.click();
   await choose("claude").click();
-  await expect(mark).toHaveAccessibleName("CLI: claude");
+  await expect(mark).toHaveAccessibleName("Switch CLI (claude)");
   await expect(model).toHaveAccessibleName("Model: CLI default · Opus 5.5");
   await expect(save).toBeDisabled();
   // Cancel leaves desk on claude.
@@ -479,7 +479,7 @@ test("a citizen's CLI is switched from its mark, with a model and effort from th
   await choose("codex").click();
   await form.getByRole("button", { name: "Cancel" }).click();
   await expect(form).toHaveCount(0);
-  await expect(mark).toHaveAccessibleName("CLI: claude");
+  await expect(mark).toHaveAccessibleName("Switch CLI (claude)");
 
   await mark.click();
   await choose("codex").click();
@@ -491,7 +491,7 @@ test("a citizen's CLI is switched from its mark, with a model and effort from th
   await expect(form).toHaveCount(0);
   // No turn has run on codex, so what it is set to is the model shown.
   await expect(view).toContainText("concierge · gpt-5.5 · xhigh effort · on pod");
-  await expect(mark).toHaveAccessibleName("CLI: codex");
+  await expect(mark).toHaveAccessibleName("Switch CLI (codex)");
   // One write carries all three.
   expect(board.writes).toEqual([
     { path: "/api/agents/desk/cli", body: { cli: "codex", model: "gpt-5.5", effort: "xhigh" } },
@@ -503,6 +503,32 @@ test("a citizen's CLI is switched from its mark, with a model and effort from th
   await expect(save).toBeDisabled();
 });
 
+test("a citizen's CLI is switched from its mark by keyboard alone", async ({ page }) => {
+  const board = await fakeBoard(page);
+  await page.goto("/citizen/desk");
+  const view = page.getByRole("region", { name: "Board content" });
+  const mark = view.getByRole("button", { name: /^Switch CLI/ });
+  await mark.focus();
+  await page.keyboard.press("Enter");
+  // The list opens on the CLI desk runs on; the arrow moves to the next.
+  await expect(view.getByRole("button", { name: "claude", exact: true })).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(view.getByRole("button", { name: "codex", exact: true })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(mark).toHaveAccessibleName("Switch CLI (codex)");
+  await expect(mark).toBeFocused();
+  const form = page.getByRole("form", { name: "Model of desk" });
+  await expect(form.getByRole("button", { name: /^Model: / })).toHaveAccessibleName(
+    "Model: CLI default · GPT-5.5",
+  );
+  await form.getByRole("button", { name: "Save" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(form).toHaveCount(0);
+  expect(board.writes).toEqual([
+    { path: "/api/agents/desk/cli", body: { cli: "codex", model: null, effort: null } },
+  ]);
+});
+
 test("back on its own CLI, the model form puts back the model and effort the citizen is set to", async ({
   page,
 }) => {
@@ -510,7 +536,7 @@ test("back on its own CLI, the model form puts back the model and effort the cit
   await fakeBoard(page, { crowded: true });
   await page.goto("/citizen/desk");
   const view = page.getByRole("region", { name: "Board content" });
-  const mark = view.getByRole("button", { name: /^CLI: / });
+  const mark = view.getByRole("button", { name: /^Switch CLI/ });
   const form = page.getByRole("form", { name: "Model of desk" });
   const model = form.getByRole("button", { name: /^Model: / });
   const effort = form.getByRole("button", { name: /^Effort: / });
@@ -568,7 +594,7 @@ test("a switch the board refuses says why under the form, which stays open", asy
   const board = await fakeBoard(page, { refuseCli: true });
   await page.goto("/citizen/desk");
   const view = page.getByRole("region", { name: "Board content" });
-  const mark = view.getByRole("button", { name: /^CLI: / });
+  const mark = view.getByRole("button", { name: /^Switch CLI/ });
   await mark.click();
   await view.getByRole("button", { name: "codex", exact: true }).click();
   const form = page.getByRole("form", { name: "Model of desk" });
@@ -576,7 +602,7 @@ test("a switch the board refuses says why under the form, which stays open", asy
   await expect(form).toContainText(
     "desk cannot switch to codex: its work outside projects runs on runner pod, which offers only claude",
   );
-  await expect(mark).toHaveAccessibleName("CLI: codex");
+  await expect(mark).toHaveAccessibleName("Switch CLI (codex)");
   expect(board.writes).toEqual([
     { path: "/api/agents/desk/cli", body: { cli: "codex", model: null, effort: null } },
   ]);

@@ -58,7 +58,7 @@ export function CliMenu({
       <button
         ref={trigger}
         type="button"
-        aria-label={`CLI: ${shown}`}
+        aria-label={`Switch CLI (${shown})`}
         aria-expanded={open}
         onClick={() => setOpen(!open)}
         onKeyDown={open ? move : undefined}

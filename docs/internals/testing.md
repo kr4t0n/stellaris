@@ -137,7 +137,7 @@ The WHATWG URL parser resolves `.` and `..` segments, `%2E%2E` included, before 
 - `page.waitForLoadState("networkidle")` never settles, because the interface polls and streams. Wait for the DOM.
 - `test.use({ launchOptions })` forces a new worker, which Playwright refuses inside a `describe`; put it at the top of the spec file, as `e2e/layout.spec.ts` does.
 - The interface's `QueryClient` sets `refetchOnWindowFocus: false`, so focus events refetch nothing, and it polls `/api/scheduler` every 3 s, so a change in the fake board's working state shows within about 3 s.
-- The router keeps a route's view mounted when only its params change. `ThreadView` and `ChannelView` key their whole stream by id, while `TaskView` and `ProposalView` key only their message list, so state a hook keeps in the view's own body carries from one task or proposal to the next, as when a blocker's link leads from one cached task to another.
+- The router keeps a route's view mounted when only its params change. `ThreadView` and `ChannelView` key their whole stream by id, while `TaskView` and `ProposalView` key only their message list and a few parts by the subject's id (the task's top, the proposal's box), so state a hook keeps in the view's own body carries from one task or proposal to the next, as when a blocker's link leads from one cached task to another. A part keyed beside the list takes a prefix (`top:<id>`, `box:<id>`): with the list's own key on a sibling, React kept the old list beside the new one, two lists with two jump buttons, which `scroll.spec.ts`'s walk from one proposal to another caught.
 
 ### The fake board
 

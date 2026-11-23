@@ -1830,24 +1830,24 @@ describe("Board", () => {
     await board.addRunner(USER, "laptop");
     await board.setAgentRunner(USER, "eng-1", "laptop");
     await refused("its work outside projects runs on runner laptop, which has reported no CLI");
-    await board.addRunner(USER, "se");
-    await board.markRunner("se", { status: "connected", clis: ["claude"] });
-    await board.setAgentRunner(USER, "eng-1", "se");
-    await board.placeProject("demo", "se");
+    await board.addRunner(USER, "mini");
+    await board.markRunner("mini", { status: "connected", clis: ["claude"] });
+    await board.setAgentRunner(USER, "eng-1", "mini");
+    await board.placeProject("demo", "mini");
     await refused(
-      "its work outside projects runs on runner se, which offers only claude; demo lives on runner se, which offers only claude",
+      "its work outside projects runs on runner mini, which offers only claude; demo lives on runner mini, which offers only claude",
     );
     await board.addRunner(USER, "pod");
     await board.markRunner("pod", { status: "disconnected", clis: ["claude", "codex"] });
     await board.setAgentRunner(USER, "eng-1", "pod");
-    await refused("demo lives on runner se, which offers only claude");
+    await refused("demo lives on runner mini, which offers only claude");
     expect((await board.readAgent("eng-1")).cli).toBe("claude");
 
-    // rev-1 is on codex in demo, on se, which offers claude.
+    // rev-1 is on codex in demo, on mini, which offers claude.
     const ran = await board.beginTurn({
       agent: "rev-1",
       project: "demo",
-      runner: "se",
+      runner: "mini",
       cli: "codex",
       session: "c-0",
       trigger: { kind: "mention", from: "user", fromUser: true, reason: "asked" },
@@ -1867,12 +1867,12 @@ describe("Board", () => {
     await board.setAgentEffort(USER, "rev-1", "xhigh");
     const task = await board.createTask(USER, { project: "demo", title: "t" });
     const held = await board.claimTask(REV, { task_id: task.id });
-    await board.writeSession("rev-1", "demo", "codex", "c-1", "se");
-    await board.writeSession("rev-1", "demo", "claude", "a-1", "se", task.id);
-    await board.writeSession("rev-1", "demo", "codex", "c-2", "se", task.id);
-    await board.endSession("rev-1", "demo", "codex", "se", "#dev");
+    await board.writeSession("rev-1", "demo", "codex", "c-1", "mini");
+    await board.writeSession("rev-1", "demo", "claude", "a-1", "mini", task.id);
+    await board.writeSession("rev-1", "demo", "codex", "c-2", "mini", task.id);
+    await board.endSession("rev-1", "demo", "codex", "mini", "#dev");
     await board.writeSession("rev-1", "society", "codex", "c-3", "pod");
-    await board.writeSession("eng-1", "demo", "claude", "a-2", "se");
+    await board.writeSession("eng-1", "demo", "claude", "a-2", "mini");
 
     // Not given, the model and the effort go back to the new CLI's defaults.
     const switched = await board.setAgentCli(USER, "rev-1", { cli: "claude" });
@@ -1884,23 +1884,23 @@ describe("Board", () => {
     expect(member).toMatchObject({ cli: "claude" });
     expect(member?.lastModel).toBeUndefined();
     // No conversation keeps a session to resume, and each still names the runner it began on.
-    expect(await board.readSessions("rev-1", "demo")).toEqual({ runner: "se" });
-    expect(await board.readSessions("rev-1", "demo", task.id)).toEqual({ runner: "se" });
-    expect(await board.readSessions("rev-1", "demo", "#dev")).toEqual({ runner: "se" });
+    expect(await board.readSessions("rev-1", "demo")).toEqual({ runner: "mini" });
+    expect(await board.readSessions("rev-1", "demo", task.id)).toEqual({ runner: "mini" });
+    expect(await board.readSessions("rev-1", "demo", "#dev")).toEqual({ runner: "mini" });
     expect(await board.readSessions("rev-1", "society")).toEqual({ runner: "pod" });
-    expect(await board.readSessions("eng-1", "demo")).toEqual({ claude: "a-2", runner: "se" });
+    expect(await board.readSessions("eng-1", "demo")).toEqual({ claude: "a-2", runner: "mini" });
     // The stage it holds keeps its lease.
     expect(await board.getTask(USER, { task_id: task.id })).toMatchObject({
       claimedBy: "rev-1",
       leaseExpiresAt: held.leaseExpiresAt,
     });
 
-    // Back to codex once se reports it.
+    // Back to codex once mini reports it.
     const back = { cli: "codex", model: "gpt-5.5", effort: "high" } as const;
     await expect(board.setAgentCli(USER, "rev-1", back)).rejects.toThrow(
-      "rev-1 cannot switch to codex: demo lives on runner se, which offers only claude",
+      "rev-1 cannot switch to codex: demo lives on runner mini, which offers only claude",
     );
-    await board.markRunner("se", { clis: ["claude", "codex"] });
+    await board.markRunner("mini", { clis: ["claude", "codex"] });
     expect(await board.setAgentCli(USER, "rev-1", back)).toMatchObject(back);
     const events = (await board.readEvents(null)).filter(
       (e) => e.type === "agent.configured" && "cli" in e.payload,

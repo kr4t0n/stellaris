@@ -810,12 +810,12 @@ describe("board server routes", () => {
     expect([back.cli, back.model, back.effort]).toEqual(["claude", undefined, undefined]);
 
     // A runner where one of its projects lives lacks the CLI.
-    await board.addRunner(USER, "se");
-    await board.markRunner("se", { status: "connected", clis: ["claude"] });
-    await board.placeProject("demo", "se");
+    await board.addRunner(USER, "mini");
+    await board.markRunner("mini", { status: "connected", clis: ["claude"] });
+    await board.placeProject("demo", "mini");
     await refused({ cli: "codex" }, 409, {
       error: "INVALID_STATE",
-      message: "eng-1 cannot switch to codex: demo lives on runner se, which offers only claude",
+      message: "eng-1 cannot switch to codex: demo lives on runner mini, which offers only claude",
     });
   });
 

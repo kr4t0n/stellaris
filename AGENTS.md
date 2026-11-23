@@ -220,7 +220,7 @@ One long-running process, the board server, hosts the only writer of the data di
 - `applyLive` takes its step cap as an options object, since `reduce` passes the index as a third argument. Event payloads name their subject differently: `threadId`, `taskId`, and a message's `channel` and `thread`.
 - EventSource cannot send an authorization header, so the event streams are read over `fetch`; never put a token in a query string.
 - A `line-clamp-*` beside `block` clamps nothing. Chromium drops the `::-webkit-scrollbar` styles on any element that sets `scrollbar-width` or `scrollbar-color`, which is why `styles.css` sets those for Firefox alone.
-- The web dev and preview servers bind 127.0.0.1. `@lobehub/icons` stays out: the two CLI marks are path data in `marks.ts`.
+- The web dev and preview servers bind 127.0.0.1. `@lobehub/icons` stays out: the CLI marks are path data in `marks.ts`.
 - The core's first seat is at the center of the sky, so a click at the canvas's center opens a citizen, not the society.
 - The Codex app-server bindings are generated on demand and never committed; the recorded turns in `packages/adapter-codex/fixtures` catch a release that changes the fields read. Scan a recorded stream for token-like strings before committing it.
 - Codex reads the runner account's own `~/.codex/config.toml` and global `AGENTS.md`; the Claude adapter loads project settings only.

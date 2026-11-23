@@ -192,7 +192,7 @@ Vite's default `localhost` resolved to `::1` alone in this container, and `kubec
 
 ### `@lobehub/icons` is not a dependency on purpose
 
-It has antd 6 and `@lobehub/ui` as peers, which is a design system to install for two glyphs; the two marks are copied as path data with the attribution in `marks.ts`. React 19's production client alone is about 400 kB minified, which is why the chunk-size warning limit is raised in `vite.config.ts`.
+It has antd 6 and `@lobehub/ui` as peers, which is a design system to install for a few glyphs; the marks are copied as path data with the attribution in `marks.ts`. React 19's production client alone is about 400 kB minified, which is why the chunk-size warning limit is raised in `vite.config.ts`.
 
 ### EventSource cannot send an authorization header
 

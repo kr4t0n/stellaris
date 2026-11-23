@@ -142,7 +142,10 @@ function PullRequest({ task, now }: { task: Task; now: number }) {
   );
 }
 
-/** Approve alone, for a stage that waits on the user on a task with no open thread to write in. */
+/**
+ * Approve alone, for a stage that waits on the user on a task whose thread could not be read: one
+ * from before tasks had threads, or a read that failed.
+ */
 function ApproveAlone({ action }: { action: ComposerAction }) {
   const run = useMutation({ mutationFn: () => action.run("") });
   return (
@@ -492,15 +495,24 @@ export function TaskView() {
           </section>
         </StickyList>
       </div>
+      {/* Keyed by its task, so a note typed for one never finishes the next one a link opens in
+          this view. The key is `box:<id>`, as the proposal's box's is, where the bare id was the
+          message list's key beside it and React kept the old list beside the new one; here the
+          box's siblings take no key, so the prefix only keeps a later move from repeating that. A
+          task's thread closes only with the task, so one with a stage for the user has an open
+          thread or none. Until the read answers, the foot waits; once it fails, as with a 404
+          for a task from before threads or a server's error, Approve stands alone, so the stage
+          can still be finished. */}
       {thread?.state === "open" ? (
         <Composer
+          key={`box:${current.id}`}
           target={{ threadId: current.id }}
           placeholder="Write in the task's thread"
           actions={approve === undefined ? undefined : [approve]}
         />
-      ) : approve === undefined ? null : (
-        <ApproveAlone action={approve} />
-      )}
+      ) : messages.error !== null && approve !== undefined ? (
+        <ApproveAlone key={`box:${current.id}`} action={approve} />
+      ) : null}
     </>
   );
 }

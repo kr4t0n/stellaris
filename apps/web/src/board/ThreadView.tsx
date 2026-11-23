@@ -37,7 +37,11 @@ function ThreadStream({ id, target }: { id: string; target: string | undefined }
   if (detail.data === undefined) {
     return (
       <PaneNote>
-        {namesNothing(detail.error) ? `There is no thread ${id}.` : "Reading the thread…"}
+        {namesNothing(detail.error)
+          ? `There is no thread ${id}.`
+          : detail.isError
+            ? "Could not read the thread."
+            : "Reading the thread…"}
       </PaneNote>
     );
   }

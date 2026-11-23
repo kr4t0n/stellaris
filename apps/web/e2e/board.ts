@@ -324,6 +324,33 @@ const HANDOVER = {
   body: `Survey done: twelve methods in SURVEY.md, with sources. The write-up is [report.md](/home/tiger/runner-data/worktrees/ada/.tasks/${STAGE_TASK}/docs/report.md); my scratch notes are in [notes](/tmp/ada-notes.md). The [table's citation](/home/tiger/runner-data/worktrees/ada/.tasks/${STAGE_TASK}/docs/report.md:7) points at the numbers.`,
 };
 
+/** A second study, its sign-off waiting on the user too, which `linked` lists in lab. */
+export const LINKED_TASK = "01M3Q2AAAAAAAAAAAAAAAAAAA2";
+const LINKED = { ...TASK, id: LINKED_TASK, title: "Profile the shortest-path solvers" };
+const LINKED_THREAD = {
+  ...TASK_THREAD,
+  id: LINKED_TASK,
+  title: LINKED.title,
+  subject: { kind: "task", id: LINKED_TASK },
+};
+
+/** A post in each study's thread that names the other, whose link opens it in the same view. */
+const TO_LINKED = {
+  id: "01M3Q2AAAAAAAAAAAAAAAAAAC1",
+  author: "ada",
+  channel: "lab/general",
+  thread: STAGE_TASK,
+  ts: CREATED,
+  mentions: [],
+  body: `The profile is task ${LINKED_TASK}.`,
+};
+const TO_STUDY = {
+  ...TO_LINKED,
+  id: "01M3Q2AAAAAAAAAAAAAAAAAAC2",
+  thread: LINKED_TASK,
+  body: `It profiles what task ${STAGE_TASK} compared.`,
+};
+
 /** An image ada uploaded to the board, and an id that names none. */
 export const UPLOADED_IMAGE = "01M3Q2RRRRRRRRRRRRRRRRRRR1";
 export const MISSING_IMAGE = "01M3Q2RRRRRRRRRRRRRRRRRRR2";
@@ -1329,6 +1356,8 @@ export async function fakeBoard(
     earlyApproval?: boolean;
     /** The same, with the check a stage the user does rather than a gate. */
     ungated?: boolean;
+    /** Lists a second study waiting on the user, and links each study from the other's thread. */
+    linked?: boolean;
     /** Adds ada, a researcher retired after two counted turns. */
     retired?: boolean;
     /** Adds ren, a researcher in lab with heartbeat turns, two of them in a task's thread. */
@@ -1471,8 +1500,10 @@ export async function fakeBoard(
   let waitingAsk = options.asked === true;
   const screenshot =
     options.uploads === true ? png(SCREENSHOT_SIZE.width, SCREENSHOT_SIZE.height) : Buffer.alloc(0);
+  const linked = options.linked === true;
   const threadMessages: Array<Record<string, unknown>> = [
     HANDOVER,
+    ...(linked ? [TO_LINKED] : []),
     ...(options.uploads === true ? [SCREENSHOTS, IMAGE_EDGES] : []),
     ...(waitingAsk ? [ASK] : []),
   ];
@@ -2216,9 +2247,13 @@ export async function fakeBoard(
       case "/api/projects":
         return json(route, [lab, ...(archived ? [ARCHIVED_PROJECT] : []), ...podProjects]);
       case "/api/projects/lab/tasks":
-        return json(route, [task]);
+        return json(route, linked ? [task, LINKED] : [task]);
       case `/api/tasks/${STAGE_TASK}`:
         return json(route, task);
+      case `/api/tasks/${LINKED_TASK}`:
+        return json(route, LINKED);
+      case `/api/threads/${LINKED_TASK}`:
+        return json(route, { thread: LINKED_THREAD, messages: [TO_STUDY] });
       case `/api/tasks/${STAGE_TASK}/changes`:
         return json(route, TASK_CHANGES);
       case "/api/projects/iphone/tasks":

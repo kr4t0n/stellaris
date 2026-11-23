@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { fakeBoard, STAGE_TASK } from "./board.js";
+import { fakeBoard, LINKED_TASK, STAGE_TASK } from "./board.js";
 
 function viewOf(page: Page): Locator {
   return page.getByRole("region", { name: "Board content" });
@@ -345,6 +345,80 @@ test("a task with no thread to write in still gets Approve, alone", async ({ pag
     path: "/api/verbs/advance_task",
     body: { task_id: STAGE_TASK },
   });
+});
+
+test("a task whose thread can't be read says so, and can still be approved, alone", async ({
+  page,
+}) => {
+  const board = await fakeBoard(page);
+  let reads = 0;
+  await page.route(`**/api/threads/${STAGE_TASK}`, (route) => {
+    reads += 1;
+    return route.fulfill({ status: 500, json: { error: "INTERNAL", message: "disk full" } });
+  });
+  await page.goto(`/task/${STAGE_TASK}`);
+
+  const view = viewOf(page);
+  await expect(view.getByRole("region", { name: "Thread" })).toHaveText(
+    "Could not read the thread.",
+  );
+  await expect(view.getByRole("textbox", { name: "Write in the task's thread" })).toHaveCount(0);
+  expect(reads).toBeGreaterThan(0);
+  await view.getByRole("button", { name: "Approve", exact: true }).click();
+  await expect(view.locator("header").first()).toContainText("landing");
+  expect(board.writes).toEqual([
+    { path: "/api/verbs/advance_task", body: { task_id: STAGE_TASK } },
+  ]);
+});
+
+test("while the task's thread is on its way, its foot waits, never showing Approve alone", async ({
+  page,
+}) => {
+  await fakeBoard(page);
+  const held = Promise.withResolvers<void>();
+  await page.route(`**/api/threads/${STAGE_TASK}`, async (route) => {
+    await held.promise;
+    await route.fallback();
+  });
+  await page.goto(`/task/${STAGE_TASK}`);
+
+  const view = viewOf(page);
+  const approve = view.getByRole("button", { name: "Approve", exact: true });
+  await expect(topOf(page)).toContainText("Stage 2 of 2 · Sign off");
+  await expect(view.getByRole("region", { name: "Thread" })).toHaveText("Reading the thread…");
+  await expect(approve).toHaveCount(0);
+  held.resolve();
+  // The one Approve then is the box's, after Send.
+  await expect(view.getByRole("textbox", { name: "Write in the task's thread" })).toBeVisible();
+  await expect(approve).toHaveCount(1);
+  const check = await approve.boundingBox();
+  const send = await view.getByRole("button", { name: "Send" }).boundingBox();
+  if (check === null || send === null) {
+    throw new Error("the composer is not laid out");
+  }
+  expect(send.x + send.width).toBeLessThanOrEqual(check.x);
+});
+
+test("a note typed for one task stays with it when a link opens another", async ({ page }) => {
+  const board = await fakeBoard(page, { linked: true });
+  await page.goto(`/task/${STAGE_TASK}`);
+
+  const view = viewOf(page);
+  const header = view.locator("header").first();
+  const box = view.getByRole("textbox", { name: "Write in the task's thread" });
+  await expect(header).toContainText("Compare shortest-path algorithms");
+  await view.locator(`article a[href="/task/${LINKED_TASK}"]`).click();
+  await expect(header).toContainText("Profile the shortest-path solvers");
+  await box.fill("Profiled on the city graphs only.");
+  // Back to the study, read already, so the view stays as it is and only its task changes.
+  await view.locator(`article a[href="/task/${STAGE_TASK}"]`).click();
+  await expect(header).toContainText("Compare shortest-path algorithms");
+  await expect(box).toHaveValue("");
+  await view.getByRole("button", { name: "Approve", exact: true }).click();
+  await expect(header).toContainText("landing");
+  expect(board.writes).toEqual([
+    { path: "/api/verbs/advance_task", body: { task_id: STAGE_TASK } },
+  ]);
 });
 
 test("an address that names nothing says so, an id the board refuses unread included", async ({

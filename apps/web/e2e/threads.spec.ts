@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { fakeBoard } from "./board.js";
+import { ANSWERED_ASK, fakeBoard } from "./board.js";
 
 test("the new-thread form says whom its first message wakes, read as the message is sent", async ({
   page,
@@ -22,4 +22,18 @@ test("the new-thread form says whom its first message wakes, read as the message
   await expect(page).toHaveURL(/\/thread\//);
   const posted = board.writes.find((write) => write.path === "/api/verbs/post_message");
   expect(posted?.body).toMatchObject({ body: "@stew please run it" });
+});
+
+test("a thread that can't be read says so, and one the board doesn't have says that", async ({
+  page,
+}) => {
+  await fakeBoard(page, { asks: true });
+  await page.route(`**/api/threads/${ANSWERED_ASK}`, (route) =>
+    route.fulfill({ status: 500, json: { error: "INTERNAL", message: "disk full" } }),
+  );
+  const view = page.getByRole("region", { name: "Board content" });
+  await page.goto(`/thread/${ANSWERED_ASK}`);
+  await expect(view).toContainText("Could not read the thread.");
+  await page.goto("/thread/01ARZ3NDEKTSV4RRFFQ69G5FAV");
+  await expect(view).toContainText("There is no thread 01ARZ3NDEKTSV4RRFFQ69G5FAV.");
 });

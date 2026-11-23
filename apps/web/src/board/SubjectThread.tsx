@@ -32,8 +32,14 @@ export function SubjectThread({
   const messages = detail.data?.messages ?? [];
   const newest = messages.at(-1)?.id ?? null;
   useEffect(() => markSeen(id, newest), [id, newest]);
+  // The subject's view says first when the board has no thread for it, so an error here is a read
+  // that failed.
   if (detail.data === undefined) {
-    return <p className="mt-2 text-meta">Reading the thread…</p>;
+    return (
+      <p className="mt-2 text-meta">
+        {detail.isError ? "Could not read the thread." : "Reading the thread…"}
+      </p>
+    );
   }
   const record = detail.data.thread;
   return (

@@ -1,10 +1,4 @@
-import {
-  CliKindSchema,
-  type CliKind,
-  type EffortOption,
-  type Member,
-  type ModelOption,
-} from "@stellaris/shared";
+import type { CliKind, EffortOption, Member, ModelOption } from "@stellaris/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "../components/Button.js";
@@ -12,16 +6,6 @@ import { Picker, type Choice } from "../components/Picker.js";
 import { ApiError } from "../lib/api.js";
 import { useAgentModels, useSession } from "../lib/session.js";
 import { Failure } from "./ThreadForms.js";
-
-/** The CLIs as choices: the one the citizen runs on, and one to switch it to. */
-function cliChoicesOf(current: CliKind): Choice[] {
-  return CliKindSchema.options.map((cli) => ({
-    value: cli,
-    name: cli,
-    id: null,
-    description: cli === current ? "Runs on it now." : "",
-  }));
-}
 
 /** The CLI's default, as a choice: no model set on the citizen. */
 const CLI_DEFAULT = "";
@@ -71,24 +55,27 @@ function effortChoicesOf(model: ModelOption | undefined, unlisted: string | null
 }
 
 /**
- * Chooses the CLI a citizen's turns run on, the model they run with, from the models the chosen
- * CLI lists, or the CLI's own default, and the reasoning effort, from the levels the chosen model
- * lists, or the model's own default. All apply from the citizen's next turn; another CLI starts
- * with both defaults, since a model and its levels belong to one CLI.
+ * Chooses the model a citizen's turns run with on `cli`, from the models that CLI lists, or its own
+ * default, and the reasoning effort, from the levels the chosen model lists, or the model's own
+ * default. `cli` is the citizen's own, or another chosen from its mark to switch it to, which
+ * starts at both defaults, since a model and its levels belong to one CLI, and saves the three in
+ * one write. All apply from the citizen's next turn.
  */
 export function ModelForm({
   member,
   runsOn,
+  cli,
   onDone,
 }: {
   member: Member;
   /** The CLI the citizen runs on now. */
   runsOn: CliKind;
+  /** The CLI the form chooses a model on. */
+  cli: CliKind;
   onDone: () => void;
 }) {
   const { api } = useSession();
   const client = useQueryClient();
-  const [cli, setCli] = useState(runsOn);
   const models = useAgentModels(member.name, cli);
   const switching = cli !== runsOn;
   const current = switching ? CLI_DEFAULT : (member.model ?? CLI_DEFAULT);
@@ -134,13 +121,6 @@ export function ModelForm({
       setEffort(MODEL_DEFAULT);
     }
   };
-  // Another CLI goes back to its defaults, and the CLI it runs on to what it is set to.
-  const chooseCli = (value: string): void => {
-    const next = CliKindSchema.parse(value);
-    setCli(next);
-    setChoice(next === runsOn ? (member.model ?? CLI_DEFAULT) : CLI_DEFAULT);
-    setEffort(next === runsOn ? (member.effort ?? MODEL_DEFAULT) : MODEL_DEFAULT);
-  };
   const changed = switching || choice !== current || effort !== currentEffort;
 
   return (
@@ -152,23 +132,6 @@ export function ModelForm({
         save.mutate();
       }}
     >
-      {/* The CLI on a row of its own, with where its list came from, leaves the model's row whole. */}
-      <div className="flex items-center gap-2">
-        <div className="flex w-24 shrink-0">
-          <Picker
-            label="CLI"
-            choices={cliChoicesOf(runsOn)}
-            value={cli}
-            onChange={chooseCli}
-            listClassName="left-0 w-64"
-          />
-        </div>
-        {models.data === undefined ? null : (
-          <p className="min-w-0 truncate text-meta">
-            Listed by {models.data.cli} on {models.data.runner}
-          </p>
-        )}
-      </div>
       <div className="flex items-center gap-2">
         {models.isPending ? (
           <p className="min-w-0 flex-1 truncate text-meta">Asking {cli} for its models…</p>

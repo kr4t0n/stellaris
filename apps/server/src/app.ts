@@ -114,6 +114,12 @@ const ProjectRunnerBodySchema = z.object({
 /** A model for a citizen, or null for its CLI's own default. */
 const ModelBodySchema = z.object({ model: ModelNameSchema.nullable() });
 const EffortBodySchema = z.object({ effort: EffortSchema.nullable() });
+/** A CLI to switch to, with the model and effort to run there, each its default when left out. */
+const CliBodySchema = z.object({
+  cli: CliKindSchema,
+  model: ModelNameSchema.nullable().optional(),
+  effort: EffortSchema.nullable().optional(),
+});
 /** How many commits of a home's history one request reads. */
 const HistoryLimitSchema = z.coerce.number().int().min(1).max(500);
 /** Message ids, comma-separated, as the interface asks for the ones its text names. */
@@ -407,6 +413,12 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     );
     return c.json(agent);
   });
+  api.put("/agents/:name/cli", async (c) => {
+    const name = nameOf(c);
+    const body = CliBodySchema.parse(await c.req.json());
+    const { tokenHash: _hash, ...agent } = await board.setAgentCli(c.get("actor"), name, body);
+    return c.json(agent);
+  });
   api.put("/agents/:name/runner", async (c) => {
     const name = nameOf(c);
     const body = HomeRunnerBodySchema.parse(await c.req.json());
@@ -432,12 +444,14 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   });
   // A citizen's choices come from the runner its turns run on, since that runner's install of the
   // CLI decides which models and effort levels exist: its pinned runner, else where its projects
-  // live, else any runner with its CLI.
+  // live, else any runner with its CLI. `cli` names another CLI to list, one to switch it to.
   api.get("/agents/:name/models", async (c) => {
     const agent = await board.readAgent(nameOf(c));
     if (agent.cli === null) {
       throw new BoardError("INVALID_STATE", `${agent.name} takes no turns, so it has no models`);
     }
+    const asked = c.req.query("cli");
+    const cli = asked === undefined ? agent.cli : CliKindSchema.parse(asked);
     if (models === undefined) {
       throw new RunnerAwayError("this server asks no runner for models");
     }
@@ -447,7 +461,7 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     const prefer = [agent.homeRunner, ...agent.memberships.map((slug) => placed.get(slug))].filter(
       (runner): runner is string => runner !== undefined,
     );
-    return c.json(await models.list(agent.cli, prefer));
+    return c.json(await models.list(cli, prefer));
   });
   api.put("/roles/:name", async (c) => {
     const name = nameOf(c);

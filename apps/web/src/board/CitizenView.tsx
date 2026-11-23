@@ -1,4 +1,4 @@
-import { currentStage, SOCIETY_SCOPE, type RunningTurn } from "@stellaris/shared";
+import { currentStage, SOCIETY_SCOPE, type CliKind, type RunningTurn } from "@stellaris/shared";
 import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { useState } from "react";
 import { Button } from "../components/Button.js";
@@ -28,7 +28,8 @@ import {
 import { CitizenHistory } from "./CitizenHistory.js";
 import { CitizenMemory } from "./CitizenMemory.js";
 import { CitizenTurns } from "./CitizenTurns.js";
-import { scopeName, wakeScopes, type CitizenTab } from "./citizen.js";
+import { CliMenu } from "./CliMenu.js";
+import { offeredClis, scopeName, wakeScopes, type CitizenTab } from "./citizen.js";
 import { ModelForm } from "./ModelForm.js";
 import { RunnerForm } from "./RunnerForm.js";
 import { StickyList } from "./StickyList.js";
@@ -121,6 +122,8 @@ function CitizenPage({
   const projects = useProjects();
   const clock = useNow(30_000);
   const [open, setOpen] = useState<"wake" | "model" | "runner" | null>(null);
+  // A CLI chosen from the citizen's mark to switch it to, which the model form is open on.
+  const [switchTo, setSwitchTo] = useState<CliKind | null>(null);
 
   const member = members.data?.find((candidate) => candidate.name === name);
   if (member === undefined) {
@@ -137,10 +140,14 @@ function CitizenPage({
   const state: State =
     runningScopes.length > 0 ? "working" : queued !== undefined ? "queued" : "idle";
   const latest = turnsOf(live, name)[0];
-  // What the CLI last reported, then what the citizen is set to when that differs.
+  // What the CLI last reported, then what the citizen is set to when that differs. With no report,
+  // as before its first turn on a CLI it was switched to, what it is set to is all there is.
   const observed = latest?.model ?? member.lastModel;
   const model = observed ?? member.model ?? "CLI default";
-  const setTo = member.model !== undefined && member.model !== observed ? member.model : null;
+  const setTo =
+    member.model !== undefined && observed !== undefined && member.model !== observed
+      ? member.model
+      : null;
   const charter = roles.data?.find((role) => role.name === member.role);
   const scopes = wakeScopes(member);
   const wakeable = member.status === "active" && member.cli !== null;
@@ -152,7 +159,20 @@ function CitizenPage({
     <>
       <PaneHeader
         leading={
-          member.cli === null ? null : (
+          member.cli === null ? null : wakeable ? (
+            <CliMenu
+              shown={open === "model" ? (switchTo ?? member.cli) : member.cli}
+              offered={offeredClis(member.cli, runners.data ?? [])}
+              onChoose={(cli) => {
+                // Another CLI opens the model form on it; the citizen's own puts it back there.
+                const other = cli === member.cli ? null : cli;
+                setSwitchTo(other);
+                if (other !== null) {
+                  setOpen("model");
+                }
+              }}
+            />
+          ) : (
             <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-surface-2/70">
               <CliIcon cli={member.cli} size={20} />
             </span>
@@ -215,8 +235,17 @@ function CitizenPage({
           paused={scheduler.data?.paused ?? false}
           onDone={() => setOpen(null)}
         />
-      ) : open === "model" ? (
-        <ModelForm member={member} onDone={() => setOpen(null)} />
+      ) : open === "model" && member.cli !== null ? (
+        <ModelForm
+          key={switchTo ?? member.cli}
+          member={member}
+          runsOn={member.cli}
+          cli={switchTo ?? member.cli}
+          onDone={() => {
+            setOpen(null);
+            setSwitchTo(null);
+          }}
+        />
       ) : open === "runner" ? (
         <RunnerForm member={member} onDone={() => setOpen(null)} />
       ) : null}

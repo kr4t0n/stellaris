@@ -305,6 +305,9 @@ test("a proposal whose thread can't be read can still be decided, from the box f
   const reason = page.getByRole("textbox", { name: "Reason" });
   await expect(reason).toBeVisible();
   await expect(page.getByRole("button", { name: "Send" })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Thread" })).toContainText(
+    "Could not read the thread.",
+  );
   expect(reads).toBeGreaterThan(0);
   await reason.fill("Four tasks are enough.");
   await page.getByRole("button", { name: "Approve", exact: true }).click();

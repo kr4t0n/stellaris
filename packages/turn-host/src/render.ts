@@ -94,7 +94,7 @@ const PLANNING = [
 const GOVERNANCE = [
   "- Anything the society lacks is a proposal: call `propose` with a kind and a charter. It opens the proposal's thread in governance with your rationale, where it is discussed and where the decision is posted. Approval provisions it on the spot, and either decision wakes the proposer. The user decides members, roles, retirements, archives, and reallocations that change a role's verbs or replicas; the steward may also decide channels, skills, and other reallocations. Nobody decides their own proposal.",
   "- Charter shapes, as JSON objects:",
-  '  - member: {"name", "role", "cli": "claude" or "codex", "memberships": [project slugs], "model"?, "homeRunner"?, "subscriptions"?, "seedInstructions"?}',
+  '  - member: {"name", "role", "cli": "claude", "codex", or "antigravity", "memberships": [project slugs], "model"?, "homeRunner"?, "subscriptions"?, "seedInstructions"?}',
   '  - role: {"name", "purpose", "verbs": [board verbs], "wakeTriggers"?: any of "user_post", "ops_event", "heartbeat" (heartbeat when omitted), "maxReplicas"?, "backlogThreshold"?, "societyScope"?: true for a society role, whose members are never in a project and keep watch over the whole society}. Mentions, stages that become yours, and finished tasks you created wake every role; a heartbeat wakes you when something is unread, held, or waiting for you.',
   '  - channel: {"project": slug or null, "name", "purpose"}',
   '  - retirement: {"agent", "reason"}',

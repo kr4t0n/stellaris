@@ -207,6 +207,7 @@ export class SkyScene {
     this.glyphs = {
       claude: new Path2D(CLI_MARKS.claude.path),
       codex: new Path2D(CLI_MARKS.codex.path),
+      antigravity: new Path2D(CLI_MARKS.antigravity.path),
     };
     const random = mulberry32(7);
     this.specks = Array.from({ length: SPECKS }, () => ({

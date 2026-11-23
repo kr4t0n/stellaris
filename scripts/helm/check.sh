@@ -38,6 +38,9 @@ cases=(
 |      serviceAccountName: runner-reader|      automountServiceAccountToken: true"
   "an existing claim and secret|--set persistence.existingClaim=stellaris-data --set auth.github.enabled=true \
 --set auth.github.clientId=client-1 --set auth.github.existingSecret=github-oauth --set auth.github.users={octocat}"
+  "an antigravity citizen|--set society.citizens[0].name=desk --set society.citizens[0].role=concierge \
+--set society.citizens[0].cli=antigravity\
+|              stellaris agent add desk --role concierge --cli antigravity > /dev/null"
   "runner pools|--set runner.enabled=true --set runner.networkPolicy.enabled=true --set runner.config.concurrency=4 \
 --set runner.persistence.size=20Gi --set runner.pools[0].name=main --set runner.pools[1].name=gpu \
 --set runner.pools[1].replicas=2 --set runner.pools[1].config.capabilities={gpu} --set runner.pools[1].persistence.size=200Gi\
@@ -51,6 +54,8 @@ refusals=(
 --set server.metrics.port=4700"
   "runner.extraVolumes: home is the runner's claim|--set runner.enabled=true --set runner.extraVolumes[0].name=home \
 --set runner.extraVolumes[0].emptyDir.medium=Memory"
+  "desk's cli must be claude, codex, or antigravity, not \"gemini\"|--set society.citizens[0].name=desk \
+--set society.citizens[0].role=concierge --set society.citizens[0].cli=gemini"
   "auth.github.clientId is required|--set auth.github.enabled=true"
   "auth.github.appleAppId needs GitHub sign-in|--set auth.github.appleAppId=ABCDE12345.com.example.app"
   "is not <team id>.<bundle id>|--set auth.github.enabled=true --set auth.github.clientId=client-1 \

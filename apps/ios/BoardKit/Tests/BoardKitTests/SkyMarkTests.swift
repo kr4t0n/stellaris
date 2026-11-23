@@ -29,7 +29,9 @@ import Testing
 
   @Test func theMarksAreTheWebs() throws {
     let marks = try SkyMarkTests.web("lib/marks.ts")
-    for (cli, mark) in [("claude", CliMark.claude), ("codex", CliMark.codex)] {
+    for (cli, mark) in [
+      ("claude", CliMark.claude), ("codex", CliMark.codex), ("antigravity", CliMark.antigravity),
+    ] {
       let block = "  \(cli): {"
       #expect(try SkyMarkTests.value("label", in: marks, after: block) == mark.label)
       #expect(try SkyMarkTests.value("path", in: marks, after: block) == mark.path)
@@ -60,7 +62,7 @@ import Testing
 
   /// Each mark reads to its end, inside its 24-unit grid, in the subpaths its data draws.
   @Test func theMarksReadWhole() {
-    for (mark, subpaths) in [(CliMark.claude, 3), (CliMark.codex, 3)] {
+    for (mark, subpaths) in [(CliMark.claude, 3), (CliMark.codex, 3), (CliMark.antigravity, 1)] {
       let elements = skyPath(mark.path)
       #expect(elements.filter { $0 == .close }.count == subpaths, "\(mark.label)")
       let points = elements.flatMap { element -> [SkyPoint] in

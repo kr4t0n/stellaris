@@ -153,7 +153,7 @@ Claude Code has no call that waits on a sub-agent, whose end it reports by itsel
 - **The client is written by hand**, against the ACP types in `@agentclientprotocol/sdk` 2.9.1, which is no dependency: the stable v1 schema, plus the unstable `PromptResponse.usage`.
 - **What agy asks of the client.** A `session/request_permission` is answered `allow_once`, never `allow_always`, which would save a rule into the account's settings. `--dangerously-skip-permissions` should leave none to answer. Every other request is refused, since the client offers no file system or terminal.
 - **One session per process** (`--process-per-session`) keeps each session's MCP servers its own. The board's server goes in `session/new`'s and `session/resume`'s `mcpServers`, as `http` with an `Authorization` header holding the turn's token. So the token reaches agy over stdin, never on a command line. The process also gets it as `STELLARIS_AGENT_TOKEN`, as the other CLIs do.
-- **No telemetry.** With `--disable-telemetry`, agy sent nothing to any host but 127.0.0.1. Without it, agy called `play.googleapis.com`. `agy models` and `agy -p` take no such flag: `agy models` called `play.googleapis.com` too, so nothing here runs either.
+- **No telemetry.** With `--disable-telemetry`, agy sent nothing to any host but 127.0.0.1. Without it, agy called `play.googleapis.com`. `agy models` and `agy -p` take no such flag, and both called `play.googleapis.com` too. So the adapter never runs `agy models`, and runs `agy -p` only for the quota, behind a proxy that refuses that host ([the quota](#the-plan-quota-comes-from-print-modes-usage-behind-a-proxy-that-refuses-telemetry)).
 - **`--gemini-dir` with an absolute path moves all of `~/.gemini`:** settings, configuration, conversations, and logs. A turn run with it read its settings from that folder and wrote nothing under the temp `HOME`. `--app-data-dir` names the subfolder inside it, `antigravity-cli` by default.
 - **The agy process never updates itself.** It runs with `AGY_CLI_DISABLE_AUTO_UPDATE=true`, since otherwise it updates its own binary in the background.
 
@@ -223,6 +223,28 @@ The table is agy 1.5.15 against the stub, one new session and one prompt each, w
 | 400, 401, 403                                       | 1 each   |               | `… Error 400, …`, `… Error 401, …`, `… Error 403, …`                                                | no        |
 
 A plan's usage limit on a signed-in account has not been seen yet, so its words are unknown. Until they are, a 429 reads as transient whatever it says.
+
+### The plan quota comes from print mode's `/usage`, behind a proxy that refuses telemetry
+
+ACP reads no quota: `session/new` names the plan's tier in `_meta.antigravity.tier`, with no usage or reset. So `readQuota` runs `agy -p /usage --output-format json`, then `/credits` the same way. Neither makes a model call or leaves a conversation. Print mode takes no `--gemini-dir`, so it runs with `HOME` set to the folder that holds the sign-in's `.gemini`.
+
+- **Telemetry.** Print mode has no `--disable-telemetry`. On agy 1.5.15, signed in, two reads reached for `play.googleapis.com` five times, and a refusing proxy turned each away. So every read runs behind `startTelemetryGuard`: a CONNECT proxy on 127.0.0.1, given to the process as its HTTPS and HTTP proxy with every `NO_PROXY` and `ALL_PROXY` removed. It refuses that host and tunnels the rest.
+- **The hosts it passed** were `oauth2.googleapis.com`, `www.googleapis.com`, `daily-cloudcode-pa.googleapis.com`, `aicode.googleapis.com` and `lh3.googleusercontent.com`.
+- **A runner's own proxy is bypassed.** The guard dials each host itself, so a runner that reaches Google only through a proxy of its own gets a failed read, and its quota stays unknown.
+
+`/usage` answers groups of models that share their buckets, such as "Gemini Models" and "Claude and GPT models". Each bucket has an `id`, a `window` (`weekly`), a `remaining_fraction` and a `reset_time`. `quotaFromUsage` makes each bucket a window keyed by its id, labelled with its group, and used by what its fraction leaves:
+
+- **One group's bucket spent** stops only that group's models, so the quota is a `warning`.
+- **Every bucket spent** is `limited`, until the last of them resets.
+
+`/credits` gives `remaining_credits`, kept as the balance. A `/credits` that fails costs only the balance.
+
+**Failures.**
+
+- An API key's login answers `/usage` with "not available with a Gemini API key", which reads as `none`, and is asked for no balance.
+- Any other failure fails the read in agy's words. One account's first read on 2026-11-23 answered "Eligibility check failed: Your current account is not eligible for Antigravity, because it is not currently available in your location.", and an hour later the same read answered.
+
+The fixtures `print-*-recorded.json` in `packages/adapter-antigravity` are those answers, from agy 1.5.15.
 
 ## Usage, cost, and models
 

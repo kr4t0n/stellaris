@@ -9,7 +9,8 @@ import type {
   TurnRequest,
   TurnResult,
 } from "@stellaris/runner-core";
-import type { AgentEvent, ModelOption } from "@stellaris/shared";
+import type { AgentEvent, CliQuota, ModelOption } from "@stellaris/shared";
+import { readPrintQuota, type RunPrint } from "./quota.js";
 import type { SpawnAgy } from "./rpc.js";
 import {
   AntigravityAcpSession,
@@ -29,6 +30,10 @@ export interface AntigravityOptions {
   readonly recordDir?: string | undefined;
   /** Spawns `agy acp`; injectable for tests. */
   readonly spawn?: SpawnAgy | undefined;
+  /** Runs `agy -p` to its end, for the quota read; injectable for tests. */
+  readonly runPrint?: RunPrint | undefined;
+  /** The clock quota reports are stamped by; tests inject one. */
+  readonly now?: (() => Date) | undefined;
 }
 
 /**
@@ -56,6 +61,18 @@ export class AntigravityBackend implements AgentBackend {
   /** The models agy offers, asked of a server started for the question. */
   listModels(): Promise<ModelOption[]> {
     return listAcpModels(this.sessionOptions());
+  }
+
+  /** The plan quota from `agy -p /usage` and `/credits`, which make no model call. */
+  readQuota(): Promise<CliQuota> {
+    const { options } = this;
+    return readPrintQuota({
+      ...(options.agyPath === undefined ? {} : { agyPath: options.agyPath }),
+      ...(options.geminiDir === undefined ? {} : { geminiDir: options.geminiDir }),
+      ...(options.env === undefined ? {} : { env: options.env }),
+      ...(options.runPrint === undefined ? {} : { runPrint: options.runPrint }),
+      ...(options.now === undefined ? {} : { now: options.now }),
+    });
   }
 
   async runTurn(

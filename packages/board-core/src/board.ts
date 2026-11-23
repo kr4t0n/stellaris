@@ -6237,9 +6237,10 @@ export class Board {
    * each left unset for the new CLI's default when not given, since the old ones belong to the old
    * CLI. It applies from the citizen's next turn: a turn in flight ends on the old CLI, and the
    * stages it holds keep their leases. It is refused unless every runner its turns must run on
-   * offers the new CLI (`cliRefusal`). Every session id its conversations keep goes, of both CLIs,
-   * with the runner each began on kept, so the next turn in each starts a session on the new CLI and
-   * none resumes one from before the switch, as a switch back would find of the CLI's earlier ones.
+   * offers the new CLI (`cliRefusal`). Every session id its conversations keep goes, of every CLI
+   * kind, with the runner each began on kept, so the next turn in each starts a session on the new
+   * CLI and none resumes one from before the switch, as a switch back would find of the CLI's
+   * earlier ones.
    */
   async setAgentCli(
     actor: Actor,

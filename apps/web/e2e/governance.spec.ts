@@ -269,6 +269,54 @@ test("a proposal with no thread to write in gets a box for the reason alone, wit
   await expect(reason).toHaveCount(0);
 });
 
+test("the box for the reason alone grows with its text, as the thread's box does", async ({
+  page,
+}) => {
+  await fakeBoard(page);
+  await page.route(`**/api/threads/${SKILL_PROPOSAL}`, (route) =>
+    route.fulfill({
+      status: 404,
+      json: { error: "NOT_FOUND", message: `no thread ${SKILL_PROPOSAL}` },
+    }),
+  );
+  await page.setViewportSize({ width: 376, height: 800 });
+  await page.goto(`/proposal/${SKILL_PROPOSAL}`);
+  const reason = page.getByRole("textbox", { name: "Reason" });
+  const oneLine = await reason.evaluate((element) => element.clientHeight);
+  await reason.fill("Four tasks ran it, and the referee caught two wrong figures.");
+  // Taller than one line, with nothing scrolled out of sight.
+  await expect
+    .poll(() => reason.evaluate((element) => element.clientHeight))
+    .toBeGreaterThan(oneLine);
+  expect(await reason.evaluate((element) => element.scrollHeight - element.clientHeight)).toBe(0);
+});
+
+test("a proposal whose thread can't be read can still be decided, from the box for the reason alone", async ({
+  page,
+}) => {
+  const board = await fakeBoard(page);
+  let reads = 0;
+  await page.route(`**/api/threads/${SKILL_PROPOSAL}`, (route) => {
+    reads += 1;
+    return route.fulfill({ status: 500, json: { error: "INTERNAL", message: "disk full" } });
+  });
+  await page.goto(`/proposal/${SKILL_PROPOSAL}`);
+
+  const reason = page.getByRole("textbox", { name: "Reason" });
+  await expect(reason).toBeVisible();
+  await expect(page.getByRole("button", { name: "Send" })).toHaveCount(0);
+  expect(reads).toBeGreaterThan(0);
+  await reason.fill("Four tasks are enough.");
+  await page.getByRole("button", { name: "Approve", exact: true }).click();
+  await expect(page.getByText("Approved by you")).toBeVisible();
+  expect(board.writes).toEqual([
+    {
+      path: "/api/verbs/approve",
+      body: { proposal_id: SKILL_PROPOSAL, reason: "Four tasks are enough." },
+    },
+  ]);
+});
+
 test("while the proposal's thread is on its way, its foot waits, never showing the box for a reason alone", async ({
   page,
 }) => {

@@ -1,11 +1,11 @@
 import type { Proposal } from "@stellaris/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { BackLink } from "../components/BackLink.js";
 import { Markdown } from "../components/Markdown.js";
-import { namesNothing } from "../lib/api.js";
+import { ApiError, namesNothing } from "../lib/api.js";
 import { ago } from "../lib/format.js";
 import {
   useMembers,
@@ -24,7 +24,6 @@ import { StatusChip } from "./ProposalsView.js";
 import { ActionButton, blockedWith, Composer, type ComposerAction } from "./Composer.js";
 import { StickyList } from "./StickyList.js";
 import { SubjectThread } from "./SubjectThread.js";
-import { Failure } from "./ThreadForms.js";
 
 const ProvisionSchema = z.object({
   agent: z.string().optional(),
@@ -154,6 +153,14 @@ function useDecisions(proposal: Proposal | undefined): readonly ComposerAction[]
 function DecideAlone({ actions }: { actions: readonly ComposerAction[] }) {
   const [text, setText] = useState("");
   const box = useRef<HTMLTextAreaElement>(null);
+  // After every render the box fits its text, as the thread's box does, up to its maximum height.
+  useLayoutEffect(() => {
+    const element = box.current;
+    if (element !== null) {
+      element.style.height = "auto";
+      element.style.height = `${element.scrollHeight}px`;
+    }
+  });
   const run = useMutation({
     mutationFn: (index: number) => actions[index]?.run(text.trim()) ?? Promise.resolve(),
   });
@@ -189,9 +196,11 @@ function DecideAlone({ actions }: { actions: readonly ComposerAction[] }) {
           );
         })}
       </div>
-      <div className="mt-2">
-        <Failure error={run.error} />
-      </div>
+      {run.error === null ? null : (
+        <p role="alert" className="mt-2 text-xs text-red-400">
+          {run.error instanceof ApiError ? run.error.message : actions[run.variables ?? 0]?.failure}
+        </p>
+      )}
     </div>
   );
 }
@@ -306,9 +315,13 @@ export function ProposalView() {
           )}
         </section>
       </StickyList>
-      {/* Keyed too, so a reason typed for one proposal never decides the next one opened. A
-          proposal's thread closes with its decision, so one waiting has an open thread or none;
-          while the thread is on its way, the foot waits. */}
+      {/* Keyed by its proposal, so a reason typed for one never decides the next one a link opens
+          in this view, and by `box:<id>`, never the id alone, which the message list beside it
+          takes: with one key on both, React kept the old list beside the new one. A proposal's
+          thread closes with its decision, so one waiting has an open thread or none. Until the
+          read answers, the foot waits; once it fails, as with a 404 for a proposal from before
+          threads or a server's error, the reason box stands alone, so the proposal can still be
+          decided. */}
       {thread?.state === "open" ? (
         <Composer
           key={`box:${current.id}`}
@@ -316,7 +329,7 @@ export function ProposalView() {
           placeholder="Write in the thread"
           actions={decisions}
         />
-      ) : threadless && decisions !== undefined ? (
+      ) : messages.error !== null && decisions !== undefined ? (
         <DecideAlone key={`box:${current.id}`} actions={decisions} />
       ) : null}
     </>

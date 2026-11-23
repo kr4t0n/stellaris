@@ -11,6 +11,7 @@ import {
   type TurnRecord,
 } from "@stellaris/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { Board, type TurnInFlight } from "./board.js";
 import { EventLog } from "./events.js";
 import { TurnCounters, type TurnCounts } from "./turn-counters.js";
@@ -638,6 +639,51 @@ describe("Board.countTurns", () => {
     expect(running()).toEqual([
       ["demo", "eng-1", 0],
       ["demo", "eng-2", 0],
+    ]);
+  });
+
+  it("labels an end logged before ends named their CLI with the CLI its citizen had then, after a switch too", async () => {
+    const before = await society();
+    await turn(before, "eng-1", { usage: usage(1, 2) });
+    await turn(before, "eng-1", { usage: usage(3, 0), exitReason: "error", error: "boom" });
+    // Ends from before ends named their CLI.
+    const log = path.join(dir, "events", "log.jsonl");
+    const lines = (await readFile(log, "utf8")).split("\n").filter((line) => line !== "");
+    const stripped = lines.map((line) => {
+      const each = z
+        .object({ type: z.string(), payload: z.record(z.string(), z.unknown()) })
+        .passthrough()
+        .parse(JSON.parse(line));
+      if (each.type === "turn.completed" || each.type === "turn.failed") {
+        const { cli: _cli, ...payload } = each.payload;
+        return JSON.stringify({ ...each, payload });
+      }
+      return line;
+    });
+    expect(stripped).not.toEqual(lines);
+    await writeFile(log, `${stripped.join("\n")}\n`);
+    const labels = (counts: TurnCounts) => [
+      ...new Set(counts.tokens.map((series) => `${series.agent}/${series.cli}`)),
+      ...counts.failed.map((series) => `failed ${series.agent}/${series.cli}`),
+    ];
+
+    const board = await Board.open(dir, { now: () => clock });
+    expect(labels((await board.countTurns()).read())).toEqual([
+      "eng-1/claude",
+      "failed eng-1/claude",
+    ]);
+    await board.addRunner(USER, "pod");
+    await board.markRunner("pod", { status: "connected", clis: ["claude", "codex"] });
+    await board.setAgentCli(USER, "eng-1", { cli: "codex" });
+    await turn(board, "eng-1", { usage: usage(5, 0), cli: "codex" });
+    // A fresh seed, as the next start makes, after a switch there and back.
+    await board.setAgentCli(USER, "eng-1", { cli: "claude" });
+    await board.setAgentCli(USER, "eng-1", { cli: "codex" });
+    const after = await Board.open(dir, { now: () => clock });
+    expect(labels((await after.countTurns()).read())).toEqual([
+      "eng-1/claude",
+      "eng-1/codex",
+      "failed eng-1/claude",
     ]);
   });
 

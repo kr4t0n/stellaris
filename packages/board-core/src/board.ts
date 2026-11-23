@@ -334,6 +334,13 @@ const SKIPPED_IN_HOME = new Set([".git", "turns", ".claude", ".codex"]);
 /** How many conversations' session records a runner's rename reads, or writes, at once. */
 const SESSION_BATCH = 64;
 
+/** What a switch of a citizen's CLI logs with `agent.configured`, as far as the counters read it. */
+const CliSwitchSchema = z.object({
+  agent: NameSchema,
+  cli: CliKindSchema,
+  previous: z.object({ cli: CliKindSchema }),
+});
+
 /** Runner token hashes by runner name, kept in the state directory rather than the projection. */
 const RunnerTokensSchema = z.object({
   runners: z.record(z.string(), z.object({ tokenHash: z.string().min(1) })),
@@ -4743,8 +4750,19 @@ export class Board {
       }
     });
     const events = await this.events.readSince(null, Number.MAX_SAFE_INTEGER);
-    for (const agent of await this.listAgents()) {
-      clis.set(agent.name, agent.cli);
+    const agents = await this.listAgents();
+    // An end logged before ends named their CLI came before every switch of one, so it ran on the
+    // CLI its citizen had before its first switch, logged with that switch, or else on its record's.
+    const firstClis = new Map<string, CliKind>();
+    for (const event of [...events, ...waiting]) {
+      const switched =
+        event.type === "agent.configured" ? CliSwitchSchema.safeParse(event.payload) : null;
+      if (switched?.success === true && !firstClis.has(switched.data.agent)) {
+        firstClis.set(switched.data.agent, switched.data.previous.cli);
+      }
+    }
+    for (const agent of agents) {
+      clis.set(agent.name, firstClis.get(agent.name) ?? agent.cli);
       // A record written while the list was read is in the roster already, and newer.
       if (agent.cli !== null && !roster.has(agent.name)) {
         roster.set(agent.name, { name: agent.name, memberships: agent.memberships });

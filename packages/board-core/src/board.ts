@@ -6114,7 +6114,8 @@ export class Board {
         lastTurnOutcome = `${turn.trigger.kind} on ${scope}${turnConversation(turn)}: ${turn.exitReason ?? "running"}${
           turn.status === null ? "" : `, ${turn.status.summary.slice(0, 160)}`
         }`;
-        lastModel = turn.model ?? undefined;
+        // A model another CLI reported, before a switch, is not the citizen's CLI's.
+        lastModel = turn.cli === agent.cli ? (turn.model ?? undefined) : undefined;
       }
     }
     const member = MemberSchema.parse({

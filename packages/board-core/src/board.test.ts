@@ -1844,6 +1844,25 @@ describe("Board", () => {
     expect((await board.readAgent("eng-1")).cli).toBe("claude");
 
     // rev-1 is on codex in demo, on se, which offers claude.
+    const ran = await board.beginTurn({
+      agent: "rev-1",
+      project: "demo",
+      runner: "se",
+      cli: "codex",
+      session: "c-0",
+      trigger: { kind: "mention", from: "user", fromUser: true, reason: "asked" },
+      startedAt: clock.toISOString(),
+      endedAt: null,
+      exitReason: null,
+      status: null,
+      error: null,
+      usage: null,
+      costUsd: 0,
+      toolCalls: 0,
+      model: "gpt-5.5",
+    });
+    await board.finishTurn({ ...ran, endedAt: clock.toISOString(), exitReason: "completed" });
+    expect((await board.listMembers()).find((m) => m.name === "rev-1")?.lastModel).toBe("gpt-5.5");
     await board.setAgentModel(USER, "rev-1", "gpt-5.5");
     await board.setAgentEffort(USER, "rev-1", "xhigh");
     const task = await board.createTask(USER, { project: "demo", title: "t" });
@@ -1860,9 +1879,10 @@ describe("Board", () => {
     expect(switched).toMatchObject({ cli: "claude" });
     expect(switched.model).toBeUndefined();
     expect(switched.effort).toBeUndefined();
-    expect((await board.listMembers()).find((m) => m.name === "rev-1")).toMatchObject({
-      cli: "claude",
-    });
+    // What its last turn ran on codex is not its model on claude.
+    const member = (await board.listMembers()).find((m) => m.name === "rev-1");
+    expect(member).toMatchObject({ cli: "claude" });
+    expect(member?.lastModel).toBeUndefined();
     // No conversation keeps a session to resume, and each still names the runner it began on.
     expect(await board.readSessions("rev-1", "demo")).toEqual({ runner: "se" });
     expect(await board.readSessions("rev-1", "demo", task.id)).toEqual({ runner: "se" });

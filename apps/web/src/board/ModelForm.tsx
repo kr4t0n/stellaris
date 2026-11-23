@@ -1,4 +1,10 @@
-import type { EffortOption, Member, ModelOption } from "@stellaris/shared";
+import {
+  CliKindSchema,
+  type CliKind,
+  type EffortOption,
+  type Member,
+  type ModelOption,
+} from "@stellaris/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "../components/Button.js";
@@ -6,6 +12,16 @@ import { Picker, type Choice } from "../components/Picker.js";
 import { ApiError } from "../lib/api.js";
 import { useAgentModels, useSession } from "../lib/session.js";
 import { Failure } from "./ThreadForms.js";
+
+/** The CLIs as choices: the one the citizen runs on, and one to switch it to. */
+function cliChoicesOf(current: CliKind): Choice[] {
+  return CliKindSchema.options.map((cli) => ({
+    value: cli,
+    name: cli,
+    id: null,
+    description: cli === current ? "Runs on it now." : "A new session in every conversation.",
+  }));
+}
 
 /** The CLI's default, as a choice: no model set on the citizen. */
 const CLI_DEFAULT = "";
@@ -55,20 +71,40 @@ function effortChoicesOf(model: ModelOption | undefined, unlisted: string | null
 }
 
 /**
- * Chooses the model a citizen's turns run with, from the models its CLI lists, or the CLI's own
- * default, and the reasoning effort, from the levels the chosen model lists, or the model's own
- * default. Both apply from the citizen's next turn.
+ * Chooses the CLI a citizen's turns run on, the model they run with, from the models the chosen
+ * CLI lists, or the CLI's own default, and the reasoning effort, from the levels the chosen model
+ * lists, or the model's own default. All apply from the citizen's next turn; another CLI starts
+ * with both defaults, since a model and its levels belong to one CLI.
  */
-export function ModelForm({ member, onDone }: { member: Member; onDone: () => void }) {
+export function ModelForm({
+  member,
+  runsOn,
+  onDone,
+}: {
+  member: Member;
+  /** The CLI the citizen runs on now. */
+  runsOn: CliKind;
+  onDone: () => void;
+}) {
   const { api } = useSession();
   const client = useQueryClient();
-  const models = useAgentModels(member.name);
-  const current = member.model ?? CLI_DEFAULT;
-  const currentEffort = member.effort ?? MODEL_DEFAULT;
+  const [cli, setCli] = useState(runsOn);
+  const models = useAgentModels(member.name, cli);
+  const switching = cli !== runsOn;
+  const current = switching ? CLI_DEFAULT : (member.model ?? CLI_DEFAULT);
+  const currentEffort = switching ? MODEL_DEFAULT : (member.effort ?? MODEL_DEFAULT);
   const [choice, setChoice] = useState(current);
   const [effort, setEffort] = useState(currentEffort);
   const save = useMutation({
     mutationFn: async () => {
+      if (switching) {
+        await api.setCli(member.name, {
+          cli,
+          model: choice === CLI_DEFAULT ? null : choice,
+          effort: effort === MODEL_DEFAULT ? null : effort,
+        });
+        return;
+      }
       if (choice !== current) {
         await api.setModel(member.name, choice === CLI_DEFAULT ? null : choice);
       }
@@ -82,7 +118,7 @@ export function ModelForm({ member, onDone }: { member: Member; onDone: () => vo
 
   const listed = models.data?.models ?? [];
   const unlisted =
-    member.model !== undefined && !listed.some((model) => model.id === member.model)
+    !switching && member.model !== undefined && !listed.some((model) => model.id === member.model)
       ? member.model
       : null;
   const modelOf = (value: string): ModelOption | undefined =>
@@ -98,7 +134,14 @@ export function ModelForm({ member, onDone }: { member: Member; onDone: () => vo
       setEffort(MODEL_DEFAULT);
     }
   };
-  const changed = choice !== current || effort !== currentEffort;
+  // Another CLI goes back to its defaults, and the CLI it runs on to what it is set to.
+  const chooseCli = (value: string): void => {
+    const next = CliKindSchema.parse(value);
+    setCli(next);
+    setChoice(next === runsOn ? (member.model ?? CLI_DEFAULT) : CLI_DEFAULT);
+    setEffort(next === runsOn ? (member.effort ?? MODEL_DEFAULT) : MODEL_DEFAULT);
+  };
+  const changed = switching || choice !== current || effort !== currentEffort;
 
   return (
     <form
@@ -110,11 +153,20 @@ export function ModelForm({ member, onDone }: { member: Member; onDone: () => vo
       }}
     >
       <div className="flex items-center gap-2">
+        <div className="flex w-24 shrink-0">
+          <Picker
+            label="CLI"
+            choices={cliChoicesOf(runsOn)}
+            value={cli}
+            onChange={chooseCli}
+            listClassName="left-0 w-64"
+          />
+        </div>
         {models.isPending ? (
-          <p className="min-w-0 flex-1 truncate text-meta">Asking {member.cli} for its models…</p>
+          <p className="min-w-0 flex-1 truncate text-meta">Asking {cli} for its models…</p>
         ) : models.error !== null ? (
           <p role="alert" className="min-w-0 flex-1 truncate text-xs text-red-400">
-            {member.cli} did not list its models:{" "}
+            {cli} did not list its models:{" "}
             {models.error instanceof ApiError
               ? models.error.message
               : "the board server did not answer"}

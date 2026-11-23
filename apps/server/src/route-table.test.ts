@@ -228,6 +228,7 @@ describe("the route table", () => {
       ["POST /api/agents/:name/retire", { reason: "done" }],
       ["PUT /api/agents/:name/model", { model: "model-1" }],
       ["PUT /api/agents/:name/effort", { effort: "high" }],
+      ["PUT /api/agents/:name/cli", { cli: "codex" }],
       ["PUT /api/agents/:name/runner", { runner: null }],
       ["PUT /api/roles/:name", { purpose: "Plans.", verbs: [] }],
       ["PUT /api/runners/:name/name", { name: "runner-2" }],

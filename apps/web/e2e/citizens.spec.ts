@@ -438,6 +438,61 @@ test("a citizen's reasoning effort is chosen from its model's levels, and a mode
   expect(board.writes).toEqual([{ path: "/api/agents/desk/effort", body: { effort: "max" } }]);
 });
 
+test("a citizen's CLI is switched with a model and effort from that CLI's lists, which start at its defaults", async ({
+  page,
+}) => {
+  const board = await fakeBoard(page);
+  await page.goto("/citizen/desk");
+  const view = page.getByRole("region", { name: "Board content" });
+  await view.getByRole("button", { name: "Model…" }).click();
+  const form = page.getByRole("form", { name: "Model of desk" });
+  const cli = form.getByRole("button", { name: /^CLI: / });
+  const model = form.getByRole("button", { name: /^Model: / });
+  const effort = form.getByRole("button", { name: /^Effort: / });
+  const save = form.getByRole("button", { name: "Save" });
+  await expect(cli).toHaveAccessibleName("CLI: claude");
+  await model.click();
+  await form.getByRole("button", { name: /^Sonnet 5/ }).click();
+
+  // Codex's models are listed by its install on desk's runner, from its defaults.
+  await cli.click();
+  await expect(form).toContainText("A new session in every conversation.");
+  await form.getByRole("button", { name: /^codex/ }).click();
+  await expect(cli).toHaveAccessibleName("CLI: codex");
+  await expect(form).toContainText("Listed by codex on pod");
+  await expect(model).toHaveAccessibleName("Model: CLI default · GPT-5.5");
+  await expect(effort).toHaveAccessibleName("Effort: Default · medium");
+  await expect(save).toBeEnabled();
+
+  // Back on claude, the choices are what desk is set to, so nothing is left to save.
+  await cli.click();
+  await form.getByRole("button", { name: /^claude/ }).click();
+  await expect(form).toContainText("Listed by claude on pod");
+  await expect(model).toHaveAccessibleName("Model: CLI default · Opus 5.5");
+  await expect(save).toBeDisabled();
+
+  await cli.click();
+  await form.getByRole("button", { name: /^codex/ }).click();
+  await model.click();
+  await form.getByRole("button", { name: /^GPT-5.5/ }).click();
+  await effort.click();
+  await form.getByRole("button", { name: /^xhigh/ }).click();
+  await save.click();
+  await expect(form).toHaveCount(0);
+  // No turn has run on codex, so what it is set to is the model shown.
+  await expect(view).toContainText("concierge · gpt-5.5 · xhigh effort · on pod");
+  // One write carries all three.
+  expect(board.writes).toEqual([
+    { path: "/api/agents/desk/cli", body: { cli: "codex", model: "gpt-5.5", effort: "xhigh" } },
+  ]);
+
+  await view.getByRole("button", { name: "Model…" }).click();
+  await expect(cli).toHaveAccessibleName("CLI: codex");
+  await expect(model).toHaveAccessibleName("Model: GPT-5.5 · gpt-5.5");
+  await expect(effort).toHaveAccessibleName("Effort: xhigh");
+  await expect(save).toBeDisabled();
+});
+
 test("a citizen's work outside projects is moved to another runner, or left to be pinned again", async ({
   page,
 }) => {

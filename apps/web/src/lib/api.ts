@@ -481,9 +481,16 @@ export function createApi(token: string) {
     stopTurn: (turnId: string) =>
       write("POST", `/api/turns/${encodeURIComponent(turnId)}/stop`, token, {}, StoppedSchema),
     /** The models a CLI offers, from its own listing. */
-    /** A citizen's choices, from the runner its turns run on, which the answer names. */
-    agentModels: (name: string) =>
-      get(`/api/agents/${encodeURIComponent(name)}/models`, token, RunnerModelsSchema),
+    /**
+     * A citizen's choices, from the runner its turns run on, which the answer names: its CLI's, or
+     * those of `cli`, a CLI to switch it to.
+     */
+    agentModels: (name: string, cli?: CliKind) =>
+      get(
+        `/api/agents/${encodeURIComponent(name)}/models${cli === undefined ? "" : `?cli=${cli}`}`,
+        token,
+        RunnerModelsSchema,
+      ),
     /** The runners the society has, connected or not, with what each offers. */
     runners: () => get("/api/runners", token, RunnerSchema.array()),
     /**
@@ -572,6 +579,21 @@ export function createApi(token: string) {
         `/api/agents/${encodeURIComponent(name)}/model`,
         token,
         { model },
+        AgentRecordSchema,
+      ),
+    /**
+     * Switches the CLI a citizen's turns run on from its next turn, with the model and effort to
+     * run there, each null for its default.
+     */
+    setCli: (
+      name: string,
+      switched: { cli: CliKind; model: string | null; effort: string | null },
+    ) =>
+      write(
+        "PUT",
+        `/api/agents/${encodeURIComponent(name)}/cli`,
+        token,
+        switched,
         AgentRecordSchema,
       ),
     /** Sets the reasoning effort a citizen's turns run with from its next turn, or null for the model's default. */

@@ -137,10 +137,14 @@ function CitizenPage({
   const state: State =
     runningScopes.length > 0 ? "working" : queued !== undefined ? "queued" : "idle";
   const latest = turnsOf(live, name)[0];
-  // What the CLI last reported, then what the citizen is set to when that differs.
+  // What the CLI last reported, then what the citizen is set to when that differs. With no report,
+  // as before its first turn on a CLI it was switched to, what it is set to is all there is.
   const observed = latest?.model ?? member.lastModel;
   const model = observed ?? member.model ?? "CLI default";
-  const setTo = member.model !== undefined && member.model !== observed ? member.model : null;
+  const setTo =
+    member.model !== undefined && observed !== undefined && member.model !== observed
+      ? member.model
+      : null;
   const charter = roles.data?.find((role) => role.name === member.role);
   const scopes = wakeScopes(member);
   const wakeable = member.status === "active" && member.cli !== null;
@@ -215,8 +219,8 @@ function CitizenPage({
           paused={scheduler.data?.paused ?? false}
           onDone={() => setOpen(null)}
         />
-      ) : open === "model" ? (
-        <ModelForm member={member} onDone={() => setOpen(null)} />
+      ) : open === "model" && member.cli !== null ? (
+        <ModelForm member={member} runsOn={member.cli} onDone={() => setOpen(null)} />
       ) : open === "runner" ? (
         <RunnerForm member={member} onDone={() => setOpen(null)} />
       ) : null}

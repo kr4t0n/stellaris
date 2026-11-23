@@ -147,6 +147,8 @@ async function dirs(dir: string): Promise<string[]> {
 
 interface Resident {
   readonly session: ResidentSession;
+  /** The CLI the session runs on; a citizen switched to another starts afresh on that one's backend. */
+  readonly cli: CliKind;
   readonly token: string;
   /** The model the session started with; a citizen given another model gets a fresh session. */
   readonly model: string | undefined;
@@ -1310,7 +1312,7 @@ export class TurnExecutor {
    * until the idle timeout or recycle it when its citizen's memory changed or the turn failed. A session given another
    * token, model, or instructions than it started with starts afresh, since the CLI read them at its
    * start and a compaction puts its instructions back, and so does one whose job names no session,
-   * since the server dropped the one it was warm on.
+   * since the server dropped the one it was warm on, or another CLI, whose backend hosts its own.
    */
   private async runResident(
     backend: AgentBackend,
@@ -1335,7 +1337,8 @@ export class TurnExecutor {
     const warm = this.residents.get(resident.key);
     if (
       warm !== undefined &&
-      (warm.model !== spec.model ||
+      (warm.cli !== job.cli ||
+        warm.model !== spec.model ||
         warm.effort !== spec.effort ||
         warm.token !== job.mcp.token ||
         warm.instructions !== instructions ||
@@ -1344,7 +1347,7 @@ export class TurnExecutor {
     ) {
       await this.closeResident(
         resident.key,
-        "model, effort, token, instructions, memory, or session changed",
+        "CLI, model, effort, token, instructions, memory, or session changed",
       );
     }
     let current = this.residents.get(resident.key);
@@ -1361,6 +1364,7 @@ export class TurnExecutor {
       });
       current = {
         session,
+        cli: job.cli,
         token: job.mcp.token,
         model: spec.model,
         effort: spec.effort,

@@ -5611,27 +5611,10 @@ export class Board {
           agents.push(agent.name);
         }
       }
-      // Read and written a batch at a time, as a rename does. Only the sessions' ids go, as when a
-      // session ends: a record that kept none, as a removal cut short leaves, counts no more.
-      let sessions = 0;
-      const files = await this.sessionFiles();
-      for (let at = 0; at < files.length; at += SESSION_BATCH) {
-        const cleared = await Promise.all(
-          files.slice(at, at + SESSION_BATCH).map(async (file) => {
-            const record = await readJson(file, SessionsFileSchema);
-            if (
-              record.runner !== parsed ||
-              (record.claude === undefined && record.codex === undefined)
-            ) {
-              return false;
-            }
-            const { claude: _claude, codex: _codex, ...kept } = record;
-            await writeJson(file, kept);
-            return true;
-          }),
-        );
-        sessions += cleared.filter((each) => each).length;
-      }
+      const sessions = await this.clearSessionIds(
+        await this.sessionFiles(),
+        (record) => record.runner === parsed,
+      );
       const { [parsed]: removed, ...others } = tokens;
       if (removed !== undefined) {
         await writeJson(this.runnerTokensFile(), { runners: others });
@@ -5652,10 +5635,40 @@ export class Board {
     });
   }
 
-  /** Every conversation's session record, each citizen's scopes and the threads, channels, and places beside them. */
-  private async sessionFiles(): Promise<string[]> {
+  /**
+   * Drops the session ids of the records `which` picks, keeping the rest of each, as when a session
+   * ends, read and written a batch at a time, as a rename does; returns how many held one. A record
+   * that kept none, as a removal cut short leaves, counts no more.
+   */
+  private async clearSessionIds(
+    files: readonly string[],
+    which: (record: SessionsFile) => boolean,
+  ): Promise<number> {
+    let cleared = 0;
+    for (let at = 0; at < files.length; at += SESSION_BATCH) {
+      const batch = await Promise.all(
+        files.slice(at, at + SESSION_BATCH).map(async (file) => {
+          const record = await readJson(file, SessionsFileSchema);
+          if (!which(record) || (record.claude === undefined && record.codex === undefined)) {
+            return false;
+          }
+          const { claude: _claude, codex: _codex, ...kept } = record;
+          await writeJson(file, kept);
+          return true;
+        }),
+      );
+      cleared += batch.filter((each) => each).length;
+    }
+    return cleared;
+  }
+
+  /**
+   * Every conversation's session record, each citizen's scopes and the threads, channels, and
+   * places beside them, or one citizen's alone.
+   */
+  private async sessionFiles(only?: Name): Promise<string[]> {
     const dirs: string[] = [];
-    for (const agent of await listDirs(this.paths.agents())) {
+    for (const agent of only === undefined ? await listDirs(this.paths.agents()) : [only]) {
       for (const scope of await listDirs(this.paths.agentProjects(agent))) {
         const dir = this.paths.agentProject(agent, scope);
         dirs.push(dir);
@@ -6195,6 +6208,104 @@ export class Board {
       });
       return next;
     });
+  }
+
+  /**
+   * Switches the CLI a citizen's turns run on, with the model and the effort it runs with there,
+   * each left unset for the new CLI's default when not given, since the old ones belong to the old
+   * CLI. It applies from the citizen's next turn: a turn in flight ends on the old CLI, and the
+   * stages it holds keep their leases. It is refused unless every runner its turns must run on
+   * offers the new CLI (`cliRefusal`). Every session id its conversations keep goes, of both CLIs,
+   * with the runner each began on kept, so the next turn in each starts a session on the new CLI and
+   * none resumes one from before the switch, as a switch back would find of the CLI's earlier ones.
+   */
+  async setAgentCli(
+    actor: Actor,
+    name: Name,
+    input: { cli: CliKind; model?: string | null | undefined; effort?: string | null | undefined },
+  ): Promise<Agent> {
+    this.assertUser(actor, "only the user may switch a citizen's CLI");
+    const cli = CliKindSchema.parse(input.cli);
+    const model = input.model ?? null;
+    const effort = input.effort ?? null;
+    const chosenModel = model === null ? null : ModelNameSchema.parse(model);
+    const chosenEffort = effort === null ? null : EffortSchema.parse(effort);
+    return this.mutex.run(async () => {
+      const current = await this.readAgent(name);
+      if (current.status !== "active" || current.cli === null) {
+        throw new BoardError("INVALID_STATE", `${name} takes no turns, so it has no CLI to switch`);
+      }
+      if (current.cli === cli) {
+        throw new BoardError("INVALID_STATE", `${name} runs on ${cli} already`);
+      }
+      const refusal = await this.cliRefusal(current, cli);
+      if (refusal !== null) {
+        throw new BoardError("INVALID_STATE", `${name} cannot switch to ${cli}: ${refusal}`);
+      }
+      const { model: previousModel, effort: previousEffort, ...rest } = current;
+      const next = await this.updateAgent(name, () => ({
+        ...rest,
+        cli,
+        ...(chosenModel === null ? {} : { model: chosenModel }),
+        ...(chosenEffort === null ? {} : { effort: chosenEffort }),
+      }));
+      const sessions = await this.clearSessionIds(await this.sessionFiles(name), () => true);
+      await this.refreshMember(name);
+      await this.events.append("agent.configured", actor.name, {
+        agent: name,
+        cli,
+        model: chosenModel,
+        effort: chosenEffort,
+        previous: {
+          cli: current.cli,
+          model: previousModel ?? null,
+          effort: previousEffort ?? null,
+        },
+        sessions,
+      });
+      return next;
+    });
+  }
+
+  /**
+   * Why a citizen's turns could not all run on `cli`, or null when they can: each runner they must
+   * run on offers it, as the runner last reported when it connected. Those are its pinned runner,
+   * and the runner each project it belongs to lives on; a project on none yet goes where the CLI is
+   * at its first turn. With no pin, its work outside projects goes to any runner with the CLI, so
+   * some runner must offer it.
+   */
+  private async cliRefusal(agent: Agent, cli: CliKind): Promise<string | null> {
+    const runners = new Map((await this.listRunners()).map((runner) => [runner.name, runner.clis]));
+    const offered = (runner: Name): string => {
+      const clis = runners.get(runner) ?? [];
+      return clis.length === 0 ? "has reported no CLI" : `offers only ${clis.join(" and ")}`;
+    };
+    const reasons: string[] = [];
+    if (agent.homeRunner !== undefined && !(runners.get(agent.homeRunner) ?? []).includes(cli)) {
+      reasons.push(
+        `its work outside projects runs on runner ${agent.homeRunner}, which ${offered(agent.homeRunner)}`,
+      );
+    }
+    const living = new Map<Name, Name[]>();
+    for (const slug of agent.memberships) {
+      const project = await this.readProject(slug).catch(() => null);
+      const runner = project?.archived === undefined ? project?.runner : undefined;
+      if (runner !== undefined && !(runners.get(runner) ?? []).includes(cli)) {
+        living.set(runner, [...(living.get(runner) ?? []), slug]);
+      }
+    }
+    for (const [runner, slugs] of living) {
+      reasons.push(
+        `${slugs.join(", ")} ${slugs.length === 1 ? "lives" : "live"} on runner ${runner}, which ${offered(runner)}`,
+      );
+    }
+    if (
+      agent.homeRunner === undefined &&
+      ![...runners.values()].some((clis) => clis.includes(cli))
+    ) {
+      reasons.push("no runner offers it");
+    }
+    return reasons.length === 0 ? null : reasons.join("; ");
   }
 
   private async updateAgent(name: Name, mutate: (agent: Agent) => Agent): Promise<Agent> {

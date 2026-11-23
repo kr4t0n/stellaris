@@ -135,6 +135,37 @@ describe("agy's quota from print mode", () => {
       limitedBy: "a",
       limitedUntil: "2026-11-25T00:00:00.000Z",
     });
+    // A spent bucket with no reset known never stands for the limit while one with a reset is spent,
+    // in either order.
+    const known = {
+      name: "Known",
+      buckets: [{ id: "known", remaining_fraction: 0, reset_time: "2026-11-25T00:00:00Z" }],
+    };
+    const unknown = { name: "Unknown", buckets: [{ id: "unknown", remaining_amount: 0 }] };
+    for (const groups of [
+      [known, unknown],
+      [unknown, known],
+    ]) {
+      expect(
+        quotaFromUsage(
+          { status: "SUCCESS", command: { name: "usage", data: { groups } } },
+          null,
+          AT,
+        ),
+      ).toMatchObject({
+        status: "limited",
+        limitedBy: "known",
+        limitedUntil: "2026-11-25T00:00:00.000Z",
+      });
+    }
+    // With no reset known anywhere, the limit is still named, with no time to lift it.
+    expect(
+      quotaFromUsage(
+        { status: "SUCCESS", command: { name: "usage", data: { groups: [unknown] } } },
+        null,
+        AT,
+      ),
+    ).toMatchObject({ status: "limited", limitedBy: "unknown", limitedUntil: null });
   });
 
   it("reads an API key's login as one with no plan quota", async () => {

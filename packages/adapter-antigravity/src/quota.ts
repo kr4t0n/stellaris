@@ -178,6 +178,14 @@ function usedPercentOf(bucket: Record<string, unknown>): number | null {
   return null;
 }
 
+/** Two resets in time order by their code units, an unknown one after every known one. */
+function byReset(a: string | null, b: string | null): number {
+  if (a === null || b === null) {
+    return (a === null ? 1 : 0) - (b === null ? 1 : 0);
+  }
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 /** A print-mode result's `command.data`, or the read's failure in agy's words. */
 function commandData(raw: unknown, command: string): Record<string, unknown> | string {
   const result = isDict(raw) ? raw : {};
@@ -228,8 +236,10 @@ export function quotaFromUsage(usage: unknown, credits: unknown, at: Date): CliQ
   });
   const spent = windows.filter((window) => (window.usedPercent ?? 0) >= 100);
   const limited = windows.length > 0 && spent.length === windows.length;
-  // The first reset frees its group's models; one with no reset known comes last.
-  const binding = spent.toSorted((a, b) => (a.resetsAt ?? "~").localeCompare(b.resetsAt ?? "~"))[0];
+  // The first reset frees its group's models. Resets are ISO times in one form, so their UTF-16 code
+  // units order them, never `localeCompare`, whose collation puts a symbol before a digit; a bucket
+  // with no reset known comes last.
+  const binding = spent.toSorted((a, b) => byReset(a.resetsAt, b.resetsAt))[0];
   const balance = commandData(credits, "credits");
   const remaining =
     typeof balance === "string" || typeof balance["remaining_credits"] !== "number"

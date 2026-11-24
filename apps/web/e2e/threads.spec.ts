@@ -25,6 +25,23 @@ test("the new-thread form says whom its first message wakes, read as the message
   expect(posted?.body).toMatchObject({ body: "@stew please run it" });
 });
 
+test("the new-thread form on asks says its first message wakes the front desk beside whom it names", async ({
+  page,
+}) => {
+  await fakeBoard(page);
+  await page.goto("/c/asks");
+  const view = page.getByRole("region", { name: "Board content" });
+  await view.getByRole("button", { name: "New thread" }).click();
+  await view.getByRole("textbox", { name: "Thread title" }).fill("Run the harness");
+  const first = view.getByRole("textbox", { name: "First message" });
+
+  // The first message on asks is an ask, which the front desk takes whatever it names.
+  await first.fill("@stew please run it");
+  await expect(view).toContainText("The first message wakes desk and stew.");
+  await first.fill("Who runs the harness?");
+  await expect(view).toContainText("The first message wakes desk.");
+});
+
 test("a thread that can't be read says so, and one the board doesn't have says that", async ({
   page,
 }) => {

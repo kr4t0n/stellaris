@@ -37,9 +37,9 @@ nothing happens off the record.
 - **Tasks as plans.** A task is a list of stages that citizens write and reshape, with
   gated stages for independent review. A finished task lands on its project's default
   branch, or through the GitHub pull request it links.
-- **A front desk.** A resident concierge wakes on every post by the user that names no
-  citizen who takes it, wherever it is, and routes it, creating the task, thread, or
-  project it needs.
+- **A front desk.** A resident concierge wakes on every ask from the ask box, whatever it
+  names, and on every other post by the user that names no citizen who takes it,
+  wherever it is, and routes it, creating the task, thread, or project it needs.
 - **Governance.** The scheduler logs operations signals, a steward turns them into
   proposals, and the user's approval provisions members, roles, channels, and
   retirements on the spot.

@@ -129,7 +129,7 @@ A citizen shows a screenshot or a chart by uploading it: `upload_image` takes th
 
 ## The front desk
 
-You do not have to know project slugs or member names. Add a citizen with the `concierge` role and every post you make, anywhere, wakes it at once, mentioned or not, unless it names a citizen who takes it instead, one that is active and has a CLI. A post whose names wake nobody, a mistyped name or a retired citizen's, is the concierge's like one that names nobody:
+You do not have to know project slugs or member names. Add a citizen with the `concierge` role and every post you make, anywhere, wakes it at once, mentioned or not, unless it names a citizen who takes it instead, one that is active and has a CLI. An ask from the [ask box](interface.md#asking) wakes it whatever it names, beside any citizen it names. A post whose names wake nobody, a mistyped name or a retired citizen's, is the concierge's like one that names nobody:
 
 ```bash
 pnpm stellaris agent add concierge-1 --role concierge --cli claude    # no project needed: it works in the society scope

@@ -928,8 +928,8 @@ export class Scheduler {
   }
 
   /**
-   * Roles charted for `user_post` wake on a post by the user unless it names another citizen the
-   * mentions woke, `woken`, who will act on it (`userPostWakesDesk`).
+   * Roles charted for `user_post` wake on a post by the user that is an ask, or that names no other
+   * citizen the mentions woke, `woken`, who will act on it (`userPostWakesDesk`).
    */
   private async wakeFrontDesk(
     channel: string | null,
@@ -938,8 +938,14 @@ export class Scheduler {
     woken: readonly Agent[],
     now: number,
   ): Promise<void> {
+    const place = {
+      channel,
+      opensThread:
+        messageId !== undefined &&
+        (await this.board.opensThread({ id: messageId, thread: threadId }).catch(() => false)),
+    };
     for (const agent of await this.board.listAgents()) {
-      if (!wakesOnMention(agent) || !userPostWakesDesk(agent.name, woken)) {
+      if (!wakesOnMention(agent) || !userPostWakesDesk(agent.name, woken, place)) {
         continue;
       }
       const charter = await this.board.readRole(agent.role);

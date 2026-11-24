@@ -1,6 +1,6 @@
 # Stellaris Helm chart
 
-Deploys the Stellaris board server on Kubernetes: the board, the scheduler, the HTTP API, the MCP endpoint, and the web interface, all on one port. The server runs no turns; runners, on the machines where the Claude Code and Codex CLIs and their logins are, connect to it over HTTP, and the chart can run them in the cluster as well.
+Deploys the Stellaris board server on Kubernetes: the board, the scheduler, the HTTP API, the MCP endpoint, and the web interface, all on one port. The server runs no turns; runners, on the machines where the Claude Code, Codex, and Antigravity CLIs and their logins are, connect to it over HTTP, and the chart can run them in the cluster as well.
 
 ## What this chart deploys
 
@@ -68,13 +68,14 @@ runner:
     enabled: true
 ```
 
-runs a runner beside the server from the runner image, which brings Claude Code, Codex, and the toolchains agents use. It is a StatefulSet: each pod is a runner of its own, with a name that stays and a claim of its own (`home-stellaris-runner-0`) as its home, which holds the CLIs' logins, the runner's token, the agents' homes, and the repositories and worktrees of the projects living on it, their only copy. The runners reach the server through the chart's Service, and their agents reach the board's MCP endpoint the same way. `runner.serverUrl` names another server; with `server.enabled: false` it is required, and the chart deploys runners alone, for a board elsewhere.
+runs a runner beside the server from the runner image, which brings Claude Code, Codex, Antigravity's `agy`, and the toolchains agents use. It is a StatefulSet: each pod is a runner of its own, with a name that stays and a claim of its own (`home-stellaris-runner-0`) as its home, which holds the CLIs' logins, the runner's token, the agents' homes, and the repositories and worktrees of the projects living on it, their only copy. The runners reach the server through the chart's Service, and their agents reach the board's MCP endpoint the same way. `runner.serverUrl` names another server; with `server.enabled: false` it is required, and the chart deploys runners alone, for a board elsewhere.
 
-A pod starts with its CLIs logged out and enrolls. Log both CLIs in and give the runner's account a git identity, then approve the code from its log on the board under runners, where the pod's name is the suggested one:
+A pod starts with its CLIs logged out and enrolls. Log its CLIs in, agy only where `runner.config.clis` names `antigravity`, and give the runner's account a git identity, then approve the code from its log on the board under runners, where the pod's name is the suggested one:
 
 ```bash
 kubectl -n stellaris exec -it stellaris-runner-0 -c runner -- claude auth login
 kubectl -n stellaris exec -it stellaris-runner-0 -c runner -- codex login --device-auth
+kubectl -n stellaris exec -it stellaris-runner-0 -c runner -- agy acp --login --disable-telemetry
 kubectl -n stellaris exec stellaris-runner-0 -c runner -- git config --global user.name "Your Name"
 kubectl -n stellaris exec stellaris-runner-0 -c runner -- git config --global user.email you@example.com
 kubectl -n stellaris logs stellaris-runner-0 -c runner | grep approve
@@ -272,7 +273,7 @@ From a chart before 0.3.24, upgrade to 0.3.24 first (`--version 0.3.24`) and let
 | `runner.existingSecret`, `Key`         | empty, `token`                                      | A Secret holding a token registered by hand, for one replica                     |
 | `runner.config.logLevel`               | `info`                                              | `STELLARIS_LOG_LEVEL`                                                            |
 | `runner.config.concurrency`            | empty, 2                                            | `STELLARIS_CONCURRENCY`, turns at once on each runner, or `unlimited`            |
-| `runner.config.clis`                   | empty, both                                         | `STELLARIS_CLIS`, `claude` and `codex`                                           |
+| `runner.config.clis`                   | empty, `claude` and `codex`                         | `STELLARIS_CLIS`, of `claude`, `codex`, and `antigravity`                        |
 | `runner.config.capabilities`           | empty                                               | `STELLARIS_CAPABILITIES`, what the runners offer                                 |
 | `runner.config.codexSandbox`           | empty, none                                         | `STELLARIS_CODEX_SANDBOX`                                                        |
 | `runner.terminationGracePeriodSeconds` | `1200`                                              | How long a stopping runner may drain its turns                                   |

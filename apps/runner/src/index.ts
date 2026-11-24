@@ -1,6 +1,4 @@
 #!/usr/bin/env node
-import { ClaudeAgentBackend } from "@stellaris/adapter-claude";
-import { CodexBackend, CodexSandboxSchema } from "@stellaris/adapter-codex";
 import {
   GitIdentityCheck,
   RunnerHttpError,
@@ -10,11 +8,11 @@ import {
   forgetCredentials,
   readCredentials,
   saveCredentials,
-  type AgentBackend,
   type RunnerDaemon,
 } from "@stellaris/runner-core";
-import { STELLARIS_VERSION, loadRunnerConfig, type CliKind } from "@stellaris/shared";
+import { STELLARIS_VERSION, loadRunnerConfig } from "@stellaris/shared";
 import pino from "pino";
+import { buildBackends } from "./backends.js";
 
 const VERSION = STELLARIS_VERSION;
 
@@ -25,11 +23,12 @@ if (process.argv.includes("--version")) {
 if (process.argv.includes("--help")) {
   console.log(
     [
-      "stellaris-runner: runs a Stellaris society's turns on this machine with Claude Code and Codex.",
-      "Start it with STELLARIS_SERVER_URL set to the board server: the first start prints a code",
-      "to approve on the board, and the runner keeps what approval returns in STELLARIS_RUNNER_DIR",
-      "(./runner-data) with its other files. STELLARIS_RUNNER_TOKEN takes a token registered on the",
-      "board instead. Every setting is a STELLARIS_* variable:",
+      "stellaris-runner: runs a Stellaris society's turns on this machine with the CLIs that",
+      "STELLARIS_CLIS names: claude (Claude Code), codex, and antigravity (agy), claude and codex",
+      "when it is unset. Start it with STELLARIS_SERVER_URL set to the board server: the first",
+      "start prints a code to approve on the board, and the runner keeps what approval returns in",
+      "STELLARIS_RUNNER_DIR (./runner-data) with its other files. STELLARIS_RUNNER_TOKEN takes a",
+      "token registered on the board instead. Every setting is a STELLARIS_* variable:",
       "https://github.com/kr4t0n/stellaris#environment-variables",
     ].join("\n"),
   );
@@ -38,26 +37,17 @@ if (process.argv.includes("--help")) {
 
 const config = loadRunnerConfig(process.env);
 const log = pino({ level: config.logLevel });
-const recordDir = process.env["STELLARIS_RECORD_DIR"];
 
-const backends: Partial<Record<CliKind, AgentBackend>> = {};
-if (config.clis.includes("claude")) {
-  backends.claude = new ClaudeAgentBackend({
-    stderr: (line) => log.debug({ claude: line.trimEnd() }, "cli stderr"),
-    recordDir,
-  });
-}
-if (config.clis.includes("codex")) {
-  backends.codex = new CodexBackend({
-    stderr: (line) => log.debug({ codex: line.trimEnd() }, "cli stderr"),
-    recordDir,
-    // Full access by default: no sandbox, no approvals. A runner that wants Codex's own
-    // sandbox back sets STELLARIS_CODEX_SANDBOX; on Linux that needs user namespaces.
-    sandbox: CodexSandboxSchema.parse(
-      process.env["STELLARIS_CODEX_SANDBOX"] ?? "danger-full-access",
-    ),
-  });
-}
+const backends = (() => {
+  try {
+    return buildBackends(config.clis, {
+      env: process.env,
+      stderr: (cli, line) => log.debug({ [cli]: line.trimEnd() }, "cli stderr"),
+    });
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : String(error));
+  }
+})();
 
 const layout = new RunnerLayout(config.dataDir);
 

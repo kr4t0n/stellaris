@@ -43,7 +43,7 @@ same "the runner image's runner version" "$(docker run --rm "$runner_image" stel
 same "the runner image's account" \
   "$(docker run --rm "$runner_image" sh -c 'echo "$(id -un) $(id -u):$(id -g) $HOME"')" \
   "stellaris 1000:100 /home/stellaris"
-docker run --rm "$runner_image" sh -c 'claude --version && codex --version && git --version &&
+docker run --rm "$runner_image" sh -c 'claude --version && codex --version && agy --version && git --version &&
   kubectl version --client && helm version && helm plugin list | grep "^diff[[:space:]]" &&
   helm diff version && helmfile --version'
 # The runner's Claude turns run the Agent SDK's own Claude Code, not the claude on the PATH: the

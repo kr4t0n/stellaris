@@ -278,7 +278,6 @@ interface HandedTurn {
  * memory when told, as a turn that changes its memory does, and fails a turn when told.
  */
 class InstructionsBackend implements AgentBackend {
-  readonly kind = "claude" as const;
   readonly turns: HandedTurn[] = [];
   readonly starts: string[] = [];
   /** The memory the next turn leaves its citizen with. */
@@ -287,6 +286,8 @@ class InstructionsBackend implements AgentBackend {
   failNext = false;
   /** Whether the next turn is stopped, and whether a model call answered before the stop. */
   stopNext: "before a model call" | "after a model call" | null = null;
+
+  constructor(readonly kind: CliKind = "claude") {}
 
   newSession(): Promise<string> {
     return Promise.resolve("session-1");
@@ -3165,6 +3166,40 @@ describe("turns on a runner over the runner protocol", () => {
     await board.finishTurn(before);
     expect(changedIn((await turn()).prompt).times).toBe(1);
     expect(changedIn((await turn()).prompt)).toEqual(UNCHANGED);
+  });
+
+  it("carries changed instructions into a resumed Claude Code or Codex session's prompt, and never into agy's, which takes them on every resume", async () => {
+    const { board } = await Board.init(dir, { name: "instructions" });
+    const backends = {
+      claude: new InstructionsBackend("claude"),
+      codex: new InstructionsBackend("codex"),
+      antigravity: new InstructionsBackend("antigravity"),
+    };
+    society = await startTestSociety({ board, backends: () => backends });
+    const { run } = society;
+    for (const cli of ["claude", "codex", "antigravity"] as const) {
+      const name = `steward-${cli}`;
+      await board.addAgent(USER, { name, role: "steward", cli });
+      const backend = backends[cli];
+      const turn = async (): Promise<HandedTurn> => {
+        await run(manual(name, "society"));
+        const handed = backend.turns.at(-1);
+        if (handed === undefined) {
+          throw new Error(`the turn reached no ${cli}`);
+        }
+        return handed;
+      };
+      expect((await turn()).newSession).toBe(true);
+      backend.remember = `- MARKER-${cli}`;
+      expect(changedIn((await turn()).prompt)).toEqual(UNCHANGED);
+      const changed = await turn();
+      expect(changed.newSession).toBe(false);
+      expect(changed.instructions).toContain(`- MARKER-${cli}`);
+      expect(changedIn(changed.prompt)).toEqual(
+        cli === "antigravity" ? UNCHANGED : { text: changed.instructions?.trimEnd(), times: 1 },
+      );
+      expect(changedIn((await turn()).prompt)).toEqual(UNCHANGED);
+    }
   });
 
   it("carries changed instructions into a warm session's prompt, and starts its process afresh on them", async () => {

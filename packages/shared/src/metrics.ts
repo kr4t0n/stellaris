@@ -19,7 +19,7 @@ export const READ_VERBS: readonly VerbName[] = ["read_inbox", "search", "get_tas
 
 /**
  * Whether a tool call, as a turn's transcript names it, changed the board: a board verb other than
- * a read. Both CLIs name a board verb `mcp__board__<verb>`.
+ * a read. Every adapter names a board verb `mcp__board__<verb>`.
  */
 export function isBoardAction(tool: string): boolean {
   const verb = /^mcp__board__(.+)$/.exec(tool)?.[1];

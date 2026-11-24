@@ -168,6 +168,39 @@ describe("agy's quota from print mode", () => {
     ).toMatchObject({ status: "limited", limitedBy: "unknown", limitedUntil: null });
   });
 
+  it("reads a reset at the Unix epoch, as agy gives a bucket no window runs in, as none", () => {
+    // Read through a runner from agy 1.5.15 on 2026-11-24: a group no turn had used, with both buckets.
+    const unused = {
+      name: "Claude and GPT models",
+      buckets: [
+        {
+          id: "3p-weekly",
+          window: "weekly",
+          remaining_fraction: 1,
+          reset_time: "1970-01-01T00:00:00Z",
+        },
+        { id: "3p-5h", remaining_fraction: 1, reset_time: "1970-01-01T00:00:00Z" },
+      ],
+    };
+    const usage = { status: "SUCCESS", command: { name: "usage", data: { groups: [unused] } } };
+    expect(quotaFromUsage(usage, null, AT).windows).toMatchObject([
+      { key: "3p-weekly", usedPercent: 0, minutes: 10_080, resetsAt: null },
+      { key: "3p-5h", usedPercent: 0, minutes: null, resetsAt: null },
+    ]);
+    // Spent with such a reset, the limit has no time to lift, rather than one long past.
+    const spent = {
+      name: "Spent",
+      buckets: [{ id: "spent", remaining_fraction: 0, reset_time: "1970-01-01T00:00:00Z" }],
+    };
+    expect(
+      quotaFromUsage(
+        { status: "SUCCESS", command: { name: "usage", data: { groups: [spent] } } },
+        null,
+        AT,
+      ),
+    ).toMatchObject({ status: "limited", limitedBy: "spent", limitedUntil: null });
+  });
+
   it("reads an API key's login as one with no plan quota", async () => {
     expect(quotaFromUsage(await fixture("print-usage-api-key-recorded.json"), null, AT)).toEqual({
       observedAt: "2026-11-23T15:00:00.000Z",

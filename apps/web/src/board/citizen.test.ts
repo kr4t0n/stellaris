@@ -31,6 +31,10 @@ function entry(overrides: Partial<TurnHistoryEntry> = {}): TurnHistoryEntry {
   };
 }
 
+function runner(name: string, clis: string[]) {
+  return RunnerSchema.parse({ name, os: "linux", clis, capabilities: [], status: "connected" });
+}
+
 describe("citizen", () => {
   it("offers a citizen's projects, and the society outside them, whatever its charter", () => {
     const member = {
@@ -175,8 +179,6 @@ describe("citizen", () => {
   });
 
   it("offers the CLIs some runner has, and the citizen's own, in the board's order", () => {
-    const runner = (name: string, clis: string[]) =>
-      RunnerSchema.parse({ name, os: "linux", clis, capabilities: [], status: "connected" });
     const claudeOnly = [runner("mini", ["claude"]), runner("laptop", [])];
     expect(offeredClis("claude", claudeOnly)).toEqual(["claude"]);
     // The CLI a citizen runs on stays offered when no runner reports it.

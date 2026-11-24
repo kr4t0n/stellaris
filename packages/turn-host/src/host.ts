@@ -64,6 +64,17 @@ export interface HostLog {
   error(context: object, message: string): void;
 }
 
+/**
+ * Whether a CLI keeps the instructions a session began with when it resumes the session, whatever it
+ * is given then, so that a change must ride in the prompt. agy keeps none: every `session/new` and
+ * `session/resume` carries the current ones as the system prompt's append.
+ */
+const KEEPS_FIRST_INSTRUCTIONS: Readonly<Record<CliKind, boolean>> = {
+  claude: true,
+  codex: true,
+  antigravity: false,
+};
+
 /** What the host needs to know of the runner a turn goes to. */
 export interface RunnerSeat {
   readonly name: Name;
@@ -469,13 +480,15 @@ export class TurnHost {
         : { channelPostWaitMs: this.channelPostWaitMs }),
     };
     const instructions = renderInstructions(rendered);
-    // Both CLIs keep the instructions a session began with when they resume it, whatever they are
-    // given then, so a resumed session whose instructions changed since it last received them gets
-    // them in the prompt, as does one the board knows nothing of, as from before it kept them.
+    // Claude Code and Codex keep the instructions a session began with when they resume it,
+    // whatever they are given then, so a resumed session of theirs whose instructions changed since
+    // it last received them gets them in the prompt, as does one the board knows nothing of, as
+    // from before it kept them. agy takes the current ones on every resume.
     const instructionsNow = instructionsHash(rendered);
     const instructionsHeld =
       !newSession && lastTurn?.session === recorded ? lastTurn.sessionInstructionsHash : undefined;
-    const changedInstructions = !newSession && instructionsHeld !== instructionsNow;
+    const changedInstructions =
+      !newSession && KEEPS_FIRST_INSTRUCTIONS[agent.cli] && instructionsHeld !== instructionsNow;
     // Roles that route for the user get the roster and the projects still taking work in every digest.
     const societyView: SocietyView | null = charter.wakeTriggers.includes(USER_POST_TRIGGER)
       ? {

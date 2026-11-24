@@ -208,6 +208,9 @@ importers:
 
   apps/runner:
     dependencies:
+      '@stellaris/adapter-antigravity':
+        specifier: workspace:*
+        version: link:../../packages/adapter-antigravity
       '@stellaris/adapter-claude':
         specifier: workspace:*
         version: link:../../packages/adapter-claude

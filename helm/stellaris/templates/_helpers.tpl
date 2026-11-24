@@ -245,8 +245,8 @@ plain words by these checks. Runners are refused what they would read wrong or e
 {{- $_ := set $tokens $token $at -}}
 {{- end -}}
 {{- range $values.config.clis -}}
-{{- if not (has . (list "claude" "codex")) -}}
-{{- fail (printf "%s.config.clis: %q is not claude or codex" $at (toString .)) -}}
+{{- if not (has . (list "claude" "codex" "antigravity")) -}}
+{{- fail (printf "%s.config.clis: %q is not claude, codex, or antigravity" $at (toString .)) -}}
 {{- end -}}
 {{- end -}}
 {{- range $values.extraVolumes -}}

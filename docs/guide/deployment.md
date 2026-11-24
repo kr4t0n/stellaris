@@ -73,7 +73,7 @@ agy acp --login --disable-telemetry
 
 It prints a Google sign-in link; open it, sign in, and paste the code back, and it exits.
 
-- **Where the sign-in lands.** In agy's state folder, `~/.gemini`, or the folder `STELLARIS_GEMINI_DIR` names, which must be called `.gemini`; give the login `--gemini-dir` with that folder too. With no D-Bus session, as in a container or on a server, agy keeps the sign-in in a file there, `antigravity-cli/antigravity-oauth-token`, readable by its account alone, rather than in a keyring. Every turn on that runner runs as that account, so every turn can read it, as it can Claude Code's and Codex's logins: a runner is one trust domain.
+- **Where the sign-in lands.** In agy's state folder, `~/.gemini` in the runner account's home, which the runner's turns and its quota reads use too. With no D-Bus session, as in a container or on a server, agy keeps the sign-in in a file there, `antigravity-cli/antigravity-oauth-token`, readable by its account alone, rather than in a keyring. Every turn on that runner runs as that account, so every turn can read it, as it can Claude Code's and Codex's logins: a runner is one trust domain.
 - **Telemetry.** The runner starts every `agy acp` with `--disable-telemetry` and reads the quota through a proxy of its own that refuses Google's telemetry host. `agy` run by hand, its interactive CLI or `agy models`, sends telemetry until it is turned off: for a personal account, open `agy`, then `/config`, and switch **Enable Telemetry** off.
 - **Where Google offers it.** Antigravity is not offered in every location. agy refuses an account Google does not serve where the runner is with "Eligibility check failed: Your current account is not eligible for Antigravity, because it is not currently available in your location.", and a quota read refused so leaves the quota unknown.
 - **An API key** signs agy in instead: `GEMINI_API_KEY` in the runner's environment, with `{"modelProvider":"gemini"}` in `antigravity-cli/settings.json` under the state folder, without which agy asks for a sign-in. A key has no plan quota, so the board shows none.
@@ -122,7 +122,6 @@ With `STELLARIS_APPLE_APP_ID` set, the iOS app signs in on an `https` address of
 - `STELLARIS_LOG_LEVEL` (`info`): the runner's log level; `debug` also logs the CLI's stderr.
 - `STELLARIS_CONCURRENCY` (`2`): turns at once on its machine; a number or `unlimited`.
 - `STELLARIS_CLIS` (`claude,codex`): the CLIs it runs turns with, of `claude`, `codex`, and `antigravity`.
-- `STELLARIS_GEMINI_DIR` (none, agy's own `~/.gemini`): the folder agy keeps its sign-in, settings, and conversations in, which must be called `.gemini`; a relative path is resolved from where the runner starts, and one starting with `~`, which no shell expanded, is refused.
 - `STELLARIS_CAPABILITIES` (none): comma-separated capabilities it offers, matched against what projects and tasks require.
 - `STELLARIS_CODEX_SANDBOX` (`danger-full-access`): the default runs Codex without a sandbox or approvals; `read-only` or `workspace-write` keep its sandbox, which on Linux needs user namespaces.
 - `STELLARIS_RECORD_DIR` (none): when set, every turn's raw CLI stream is appended there as JSONL, for fixtures.

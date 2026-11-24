@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { CliKindSchema, loadRunnerConfig } from "@stellaris/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { antigravityOptions, buildBackends } from "./backends.js";
+import { buildBackends } from "./backends.js";
 
 const settings = { env: {}, stderr: () => undefined };
 
@@ -30,34 +30,7 @@ describe("the runner's backends", () => {
     expect(() => loadRunnerConfig({ STELLARIS_CLIS: "gemini" })).toThrow('"invalid_value"');
   });
 
-  it("points agy at the folder STELLARIS_GEMINI_DIR names, made absolute, and only one called .gemini", () => {
-    expect(antigravityOptions({})).toEqual({});
-    expect(antigravityOptions({ STELLARIS_GEMINI_DIR: " " })).toEqual({});
-    expect(antigravityOptions({ STELLARIS_GEMINI_DIR: "/srv/agy/.gemini" })).toEqual({
-      geminiDir: "/srv/agy/.gemini",
-    });
-    expect(antigravityOptions({ STELLARIS_GEMINI_DIR: "agy/.gemini/" })).toEqual({
-      geminiDir: path.resolve("agy/.gemini"),
-    });
-    expect(() => antigravityOptions({ STELLARIS_GEMINI_DIR: "/srv/agy" })).toThrow(
-      "STELLARIS_GEMINI_DIR must name a folder called .gemini, not /srv/agy",
-    );
-    // A `~` no shell expanded would name `<cwd>/~/.gemini`, which the name check alone takes.
-    for (const unexpanded of ["~/.gemini", "~stellaris/.gemini"]) {
-      expect(() => antigravityOptions({ STELLARIS_GEMINI_DIR: unexpanded })).toThrow(
-        `STELLARIS_GEMINI_DIR must be a whole path, not ${unexpanded}, which no shell expanded`,
-      );
-    }
-    expect(() =>
-      buildBackends(["antigravity"], { ...settings, env: { STELLARIS_GEMINI_DIR: "/srv/agy" } }),
-    ).toThrow("STELLARIS_GEMINI_DIR");
-    // A runner without Antigravity never reads the setting.
-    expect(
-      Object.keys(buildBackends(["claude"], { ...settings, env: { STELLARIS_GEMINI_DIR: "x" } })),
-    ).toEqual(["claude"]);
-  });
-
-  it("starts the agy on the PATH, with telemetry off and the folder STELLARIS_GEMINI_DIR names", async () => {
+  it("starts the agy on the PATH, with telemetry off and its own state folder", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "stellaris-backends-"));
     try {
       const args = path.join(dir, "args");
@@ -65,17 +38,14 @@ describe("the runner's backends", () => {
         mode: 0o755,
       });
       vi.stubEnv("PATH", `${dir}${path.delimiter}${process.env["PATH"] ?? ""}`);
-      const geminiDir = path.join(dir, ".gemini");
-      const backends = buildBackends(["antigravity"], {
-        ...settings,
-        env: { STELLARIS_GEMINI_DIR: geminiDir },
-      });
+      const backends = buildBackends(["antigravity"], settings);
       // The stand-in exits at once, so the question fails once agy has been started.
       await expect(backends.antigravity?.listModels?.()).rejects.toThrow("agy acp exited");
       const given = (await readFile(args, "utf8")).trimEnd().split("\n");
       expect(given[0]).toBe("acp");
       expect(given).toContain("--disable-telemetry");
-      expect(given.slice(given.indexOf("--gemini-dir"))).toEqual(["--gemini-dir", geminiDir]);
+      // agy keeps its state in ~/.gemini, where its quota read, which takes no flag, looks too.
+      expect(given).not.toContain("--gemini-dir");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

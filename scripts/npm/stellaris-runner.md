@@ -28,7 +28,6 @@ The first start enrolls the runner: it prints a code and a link to the board's r
 | `STELLARIS_RUNNER_TOKEN` | none                    | A token registered by hand; without it the runner enrolls                  |
 | `STELLARIS_RUNNER_DIR`   | `./runner-data`         | Where the runner keeps its credentials, homes, repositories, and worktrees |
 | `STELLARIS_CLIS`         | `claude,codex`          | The CLIs this runner offers, of `claude`, `codex`, and `antigravity`       |
-| `STELLARIS_GEMINI_DIR`   | `~/.gemini`             | Where agy keeps its sign-in; a folder called `.gemini`                     |
 | `STELLARIS_CONCURRENCY`  | `2`                     | Turns this machine runs at once, or `unlimited`                            |
 | `STELLARIS_CAPABILITIES` | none                    | What else this machine offers, comma-separated, for tasks that require it  |
 | `STELLARIS_LOG_LEVEL`    | `info`                  | `debug` shows every tool call and the CLIs' stderr                         |

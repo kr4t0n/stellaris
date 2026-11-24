@@ -145,7 +145,7 @@ Claude Code has no call that waits on a sub-agent, whose end it reports by itsel
 
 ## Antigravity
 
-`packages/adapter-antigravity` drives Google's Antigravity CLI, `agy`, over the Agent Client Protocol. A runner builds it when `STELLARIS_CLIS` names `antigravity`, and starts the `agy` on its `PATH` with `--gemini-dir` set to `STELLARIS_GEMINI_DIR` when that is set, a folder that must be called `.gemini`, since print mode reads `$HOME/.gemini` for the quota, and otherwise with agy's own `~/.gemini`. Everything below was measured on agy 1.5.14 and 1.5.15, from the release tarballs checked against their published sha256, against a local stub of the Gemini API with a dummy key (`GOOGLE_GEMINI_BASE_URL`, `GEMINI_API_KEY`, and `{"modelProvider":"gemini"}` in agy's settings), a temp `HOME`, and a proxy that refused every host but 127.0.0.1.
+`packages/adapter-antigravity` drives Google's Antigravity CLI, `agy`, over the Agent Client Protocol. A runner builds it when `STELLARIS_CLIS` names `antigravity`, and starts the `agy` on its `PATH` with no `--gemini-dir`, so its turns keep their state in agy's own `~/.gemini`, where print mode, which reads the quota and takes no such flag, looks too. The adapter's `geminiDir` option, which the runner doesn't set, moves both, to a folder that must be called `.gemini`. Everything below was measured on agy 1.5.14 and 1.5.15, from the release tarballs checked against their published sha256, against a local stub of the Gemini API with a dummy key (`GOOGLE_GEMINI_BASE_URL`, `GEMINI_API_KEY`, and `{"modelProvider":"gemini"}` in agy's settings), a temp `HOME`, and a proxy that refused every host but 127.0.0.1.
 
 ### agy speaks ACP over stdio, one session per process
 

@@ -1,5 +1,4 @@
-import path from "node:path";
-import { AntigravityBackend, type AntigravityOptions } from "@stellaris/adapter-antigravity";
+import { AntigravityBackend } from "@stellaris/adapter-antigravity";
 import { ClaudeAgentBackend } from "@stellaris/adapter-claude";
 import { CodexBackend, CodexSandboxSchema } from "@stellaris/adapter-codex";
 import type { AgentBackend } from "@stellaris/runner-core";
@@ -9,32 +8,6 @@ import type { CliKind } from "@stellaris/shared";
 export interface BackendSettings {
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly stderr: (cli: CliKind, line: string) => void;
-}
-
-/**
- * agy's options from the runner's environment. `STELLARIS_GEMINI_DIR` names the folder agy keeps
- * its sign-in, settings, and conversations in, in place of `~/.gemini`; it must be called `.gemini`,
- * since print mode, which reads the quota, takes no `--gemini-dir` and reads `$HOME/.gemini`. A
- * path starting with `~` is refused: no shell expanded it, so it would name a folder under the
- * one the runner started in.
- */
-export function antigravityOptions(
-  env: Readonly<Record<string, string | undefined>>,
-): Pick<AntigravityOptions, "geminiDir"> {
-  const dir = env["STELLARIS_GEMINI_DIR"]?.trim() ?? "";
-  if (dir === "") {
-    return {};
-  }
-  if (dir.startsWith("~")) {
-    throw new Error(
-      `STELLARIS_GEMINI_DIR must be a whole path, not ${dir}, which no shell expanded`,
-    );
-  }
-  const geminiDir = path.resolve(dir);
-  if (path.basename(geminiDir) !== ".gemini") {
-    throw new Error(`STELLARIS_GEMINI_DIR must name a folder called .gemini, not ${geminiDir}`);
-  }
-  return { geminiDir };
 }
 
 /**
@@ -55,10 +28,10 @@ const BUILDERS: { readonly [K in CliKind]: (settings: BackendSettings) => AgentB
       // sandbox back sets STELLARIS_CODEX_SANDBOX; on Linux that needs user namespaces.
       sandbox: CodexSandboxSchema.parse(env["STELLARIS_CODEX_SANDBOX"] ?? "danger-full-access"),
     }),
-  // agy on the PATH, as the runner's image has it.
+  // agy on the PATH with its state in ~/.gemini, as the runner's image has them. Its quota read,
+  // print mode, takes no --gemini-dir and reads $HOME/.gemini, so the folder is agy's own.
   antigravity: ({ env, stderr }) =>
     new AntigravityBackend({
-      ...antigravityOptions(env),
       stderr: (line) => stderr("antigravity", line),
       recordDir: env["STELLARIS_RECORD_DIR"],
     }),

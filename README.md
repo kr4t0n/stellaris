@@ -213,7 +213,6 @@ A runner reads these, and sets `STELLARIS_AGENT_TOKEN` and `HUSKY=0` for each CL
 | `STELLARIS_CLIS`          | `claude,codex`          | The CLIs it runs turns with             |
 | `STELLARIS_CAPABILITIES`  | none                    | What it offers projects and tasks       |
 | `STELLARIS_CODEX_SANDBOX` | `danger-full-access`    | Codex's sandbox                         |
-| `STELLARIS_GEMINI_DIR`    | `~/.gemini`             | agy's sign-in, settings, and sessions   |
 | `STELLARIS_RECORD_DIR`    | none                    | Where to record raw CLI streams         |
 | `ANTHROPIC_API_KEY`       | none                    | Claude Code's key, instead of its login |
 | `OPENAI_API_KEY`          | none                    | Codex's key, instead of its login       |

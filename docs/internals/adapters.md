@@ -228,6 +228,10 @@ The table is agy 1.5.15 against the stub, one new session and one prompt each, w
 
 A plan's usage limit on a signed-in account has not been seen yet, so its words are unknown. Until they are, a 429 reads as transient whatever it says.
 
+### A signed-in runner reaches five Google hosts and no telemetry host
+
+On 2026-11-24 a runner built from the branch that wired agy in, with `STELLARIS_CLIS=antigravity` and a signed-in account, ran two turns of one citizen through agy 1.5.15: a new session that called `read_inbox` and five more tools, then a resume of it with none. Both completed, on `gemini-3.8-flash`, which agy picked with no model set. Every connection went through a proxy that logged each host: `daily-cloudcode-pa.googleapis.com`, `aicode.googleapis.com`, `www.googleapis.com`, `oauth2.googleapis.com` and `lh3.googleusercontent.com`. None asked for `play.googleapis.com`. A network policy for a runner that offers Antigravity lets those through. The quota read through the runner (`POST /api/runners/:name/quota/antigravity`) answered in 6.8 s, behind its own guard.
+
 ### The plan quota comes from print mode's `/usage`, behind a proxy that refuses telemetry
 
 ACP reads no quota: `session/new` names the plan's tier in `_meta.antigravity.tier`, with no usage or reset. So `readQuota` runs `agy -p /usage --output-format json`, then `/credits` the same way. Neither makes a model call or leaves a conversation. Print mode takes no `--gemini-dir`, so it runs with `HOME` set to the folder that holds the sign-in's `.gemini`.
@@ -240,6 +244,8 @@ ACP reads no quota: `session/new` names the plan's tier in `_meta.antigravity.ti
 
 `quotaFromUsage` makes each bucket a window keyed by its id and labelled with its group:
 
+- **Resets.** A bucket no window runs in, as both of a group nobody had used that week, has its `reset_time` at the Unix epoch (agy 1.5.15, 2026-11-24), which reads as no reset known. Kept as 1970, the interface showed a window just read as reset since the read.
+- **Length.** `window` gives it, by `WINDOW_MINUTES`. The same read had a `3p-5h` bucket, absent the day before, whose length the table doesn't give, so its meter shows none.
 - **Used percent.** A fraction gives it. An amount has no total to give a percent: an amount of 0 is spent (100%), and any more leaves the percent unknown, as a bucket with neither field does.
 - **A `disabled` bucket** meters nothing and is left out.
 - **One group's bucket spent** stops only that group's models, so the quota is a `warning`.

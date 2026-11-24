@@ -14,7 +14,9 @@ export interface BackendSettings {
 /**
  * agy's options from the runner's environment. `STELLARIS_GEMINI_DIR` names the folder agy keeps
  * its sign-in, settings, and conversations in, in place of `~/.gemini`; it must be called `.gemini`,
- * since print mode, which reads the quota, takes no `--gemini-dir` and reads `$HOME/.gemini`.
+ * since print mode, which reads the quota, takes no `--gemini-dir` and reads `$HOME/.gemini`. A
+ * path starting with `~` is refused: no shell expanded it, so it would name a folder under the
+ * one the runner started in.
  */
 export function antigravityOptions(
   env: Readonly<Record<string, string | undefined>>,
@@ -22,6 +24,11 @@ export function antigravityOptions(
   const dir = env["STELLARIS_GEMINI_DIR"]?.trim() ?? "";
   if (dir === "") {
     return {};
+  }
+  if (dir.startsWith("~")) {
+    throw new Error(
+      `STELLARIS_GEMINI_DIR must be a whole path, not ${dir}, which no shell expanded`,
+    );
   }
   const geminiDir = path.resolve(dir);
   if (path.basename(geminiDir) !== ".gemini") {

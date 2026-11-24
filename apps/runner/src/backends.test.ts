@@ -42,6 +42,12 @@ describe("the runner's backends", () => {
     expect(() => antigravityOptions({ STELLARIS_GEMINI_DIR: "/srv/agy" })).toThrow(
       "STELLARIS_GEMINI_DIR must name a folder called .gemini, not /srv/agy",
     );
+    // A `~` no shell expanded would name `<cwd>/~/.gemini`, which the name check alone takes.
+    for (const unexpanded of ["~/.gemini", "~stellaris/.gemini"]) {
+      expect(() => antigravityOptions({ STELLARIS_GEMINI_DIR: unexpanded })).toThrow(
+        `STELLARIS_GEMINI_DIR must be a whole path, not ${unexpanded}, which no shell expanded`,
+      );
+    }
     expect(() =>
       buildBackends(["antigravity"], { ...settings, env: { STELLARIS_GEMINI_DIR: "/srv/agy" } }),
     ).toThrow("STELLARIS_GEMINI_DIR");

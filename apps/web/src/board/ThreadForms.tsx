@@ -75,7 +75,10 @@ export function NewThreadForm({ channel, onDone }: { channel: string; onDone: ()
       void navigate({ to: "/thread/$threadId", params: { threadId: thread.id } });
     },
   });
-  const wakes = first === "" ? [] : wakesFor(first, members.data ?? [], roles.data ?? []);
+  const wakes =
+    first === ""
+      ? []
+      : wakesFor(first, members.data ?? [], roles.data ?? [], { channel, opensThread: true });
 
   return (
     <form

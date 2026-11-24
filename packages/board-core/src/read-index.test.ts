@@ -11,6 +11,8 @@ const REV: Actor = { name: "rev-1", role: "reviewer" };
 // A message file is `<id>-<author>.md`, so `rev-a`'s files end in `-a.md` too.
 const A: Actor = { name: "a", role: "engineer" };
 const REV_A: Actor = { name: "rev-a", role: "reviewer" };
+// The front desk, whose digest takes the user's posts that wake it, an ask among them.
+const DESK: Actor = { name: "desk", role: "concierge" };
 const MISSING = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 
 /** Every message file under a folder, at any depth. */
@@ -60,10 +62,14 @@ async function reads(board: Board, ids: { threads: Ulid[]; tasks: Ulid[] }) {
   const everyId: Ulid[] = [];
   for (const id of [...ids.threads, MISSING]) {
     const messages = await settled(board.listThread(id));
+    const opens: boolean[] = [];
     if (Array.isArray(messages)) {
       everyId.push(...messages.map((message) => message.id));
+      for (const message of messages) {
+        opens.push(await board.opensThread(message));
+      }
     }
-    threads[id] = { record: await settled(board.readThread(id)), messages };
+    threads[id] = { record: await settled(board.readThread(id)), messages, opens };
   }
   const tasks: Record<string, unknown> = {};
   for (const id of [...ids.tasks, MISSING]) {
@@ -78,7 +84,7 @@ async function reads(board: Board, ids: { threads: Ulid[]; tasks: Ulid[] }) {
     }
   }
   const digests: Record<string, unknown> = {};
-  for (const actor of [ENG, REV, A, REV_A]) {
+  for (const actor of [ENG, REV, A, REV_A, DESK]) {
     const conversations: Actor[] = [
       actor,
       { ...actor, scope: "lab" },
@@ -152,6 +158,7 @@ describe("the read index", () => {
         wakeTriggers: ["heartbeat"],
       });
     }
+    await board.addAgent(USER, { name: DESK.name, role: DESK.role, cli: "claude" });
     for (const actor of [ENG, REV, A, REV_A]) {
       await board.addAgent(USER, {
         name: actor.name,
@@ -218,6 +225,11 @@ describe("the read index", () => {
     await board.postMessage(USER, { thread_id: topic.id, body: "@eng-1 over to you" });
     await board.closeThread(REV, { thread_id: topic.id, summary: "Done." });
     await same("a thread closed");
+    const ask = await board.openThread(USER, { channel: "asks", title: "A look" });
+    ids.threads.push(ask.id);
+    await board.postMessage(USER, { thread_id: ask.id, body: "@eng-1 a look?" });
+    await board.postMessage(USER, { thread_id: ask.id, body: "@eng-1 and this" });
+    await same("an ask opened naming a member, and a reply");
 
     await board.claimTask(ENG, { task_id: task });
     await same("a task claimed");

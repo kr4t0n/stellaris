@@ -149,6 +149,11 @@ export class ReadIndex {
     );
   }
 
+  /** The oldest message in a folder. */
+  firstIn(folder: string): Message | undefined {
+    return this.folders.get(path.resolve(folder))?.[0];
+  }
+
   /** How many messages a folder holds, and its newest. */
   summary(folder: string): FolderSummary {
     const list = this.folders.get(path.resolve(folder)) ?? [];

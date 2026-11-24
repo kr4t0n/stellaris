@@ -564,7 +564,7 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
   }
   if (dispatch.trigger.kind === "user_post") {
     lines.push(
-      "The user posted, naming no citizen who wakes for it. Route it: answer where it was posted, in its thread when it came in one, or create what it needs: a task with a plan whose stages name who does them, a thread, or a project, adding citizens to a project first when they are not members. A name in it that woke nobody may be mistyped, or a citizen's who is retired or has no CLI.",
+      "The user posted, naming no citizen who wakes for it, or opened an ask on the asks channel, which is yours whatever it names, beside any citizen it names who woke for it. Route it: answer where it was posted, in its thread when it came in one, or create what it needs: a task with a plan whose stages name who does them, a thread, or a project, adding citizens to a project first when they are not members. A name in it that woke nobody may be mistyped, or a citizen's who is retired or has no CLI.",
     );
   }
 

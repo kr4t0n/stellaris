@@ -640,7 +640,10 @@ const SEED_INSTRUCTIONS_HEADING = "## Seed instructions";
 /** The wake trigger that marks a role as a reader of operations signals, such as the steward. */
 const OPS_WAKE_TRIGGER = "ops_event";
 
-/** The wake trigger that marks a role as the front desk, woken by the user's posts that name nobody else who wakes. */
+/**
+ * The wake trigger that marks a role as the front desk, woken by the user's asks and by the user's
+ * other posts that name nobody else who wakes.
+ */
 const FRONT_DESK_TRIGGER = "user_post";
 
 /** Where readers of operations signals follow governance; proposals reach them as threads. */
@@ -1508,6 +1511,13 @@ export class Board {
 
   async readThread(id: Ulid): Promise<Thread> {
     return (await this.findThread(id)).thread;
+  }
+
+  /** Whether a message is the first of its thread, as an ask is (`isAsk`). */
+  async opensThread(message: { id: Ulid; thread?: Ulid | undefined }): Promise<boolean> {
+    return (
+      message.thread !== undefined && (await this.firstInThread(message.thread)) === message.id
+    );
   }
 
   /**
@@ -2397,6 +2407,17 @@ export class Board {
       }
       return found;
     };
+    // The first message of each thread a post by the user is in, read once each.
+    const firsts = new Map<Ulid, Ulid | null>();
+    const opensThread = async (message: Message): Promise<boolean> => {
+      if (message.thread === undefined) {
+        return false;
+      }
+      if (!firsts.has(message.thread)) {
+        firsts.set(message.thread, await this.firstInThread(message.thread));
+      }
+      return firsts.get(message.thread) === message.id;
+    };
     const threadParticipation = new Map<Ulid, boolean>();
     const openChannels = new Map<ChannelRef, boolean>();
     const liveProjects = new Map<Name, boolean>();
@@ -2434,7 +2455,10 @@ export class Board {
         (frontDesk &&
           message.author === USER_NAME &&
           (message.step !== undefined ||
-            userPostWakesDesk(actor.name, await namedIn(message.mentions))));
+            userPostWakesDesk(actor.name, await namedIn(message.mentions), {
+              channel: message.channel,
+              opensThread: await opensThread(message),
+            })));
       // News: a post outside the citizen's projects, in a channel it follows, asking nothing of it,
       // which only a general conversation carries.
       if (newsFrom !== undefined && thread === null && filedIn === SOCIETY_SCOPE && !asked) {
@@ -7828,6 +7852,19 @@ export class Board {
    */
   private async readMessagesIn(dir: string, since: Ulid | null, upto?: Ulid): Promise<Message[]> {
     return this.reads?.messagesIn(dir, since, upto) ?? this.readMessageFiles(dir, since, upto);
+  }
+
+  /** The id of a thread's first message: none while it has none or the board can't find it. */
+  private async firstInThread(id: Ulid): Promise<Ulid | null> {
+    const found = await this.tryFindThread(id);
+    if (found === null) {
+      return null;
+    }
+    const dir = this.paths.threadMessages(found.threads, id);
+    if (this.reads !== null) {
+      return this.reads.firstIn(dir)?.id ?? null;
+    }
+    return (await listFiles(dir))[0]?.slice(0, 26) ?? null;
   }
 
   /** `readMessagesIn` from the folder's files, read by name first. */

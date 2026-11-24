@@ -754,6 +754,54 @@ describe("Board", () => {
     expect(await thread(topic.id)).toEqual([inTopic.id, askTopic.id]);
   });
 
+  it("counts an ask for the front desk whatever it names, and a reply in its thread as any post", async () => {
+    const { board } = await society();
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    const DESK: Actor = { name: "desk", role: "concierge" };
+    const ask = async (body: string) => {
+      const thread = await board.openThread(USER, { channel: "asks", title: body });
+      return { thread, ask: await board.postMessage(USER, { thread_id: thread.id, body }) };
+    };
+    const unread = async () =>
+      (await board.unreadByConversation(DESK)).map(({ thread: id, count }) => ({
+        where: id === naming.thread.id ? "naming" : id === nobody.thread.id ? "nobody" : id,
+        count,
+      }));
+
+    // An ask is the front desk's whatever it names, and so is one naming nobody, once.
+    const naming = await ask("@eng-1 can you add a health check?");
+    const nobody = await ask("@desk what runs where?");
+    expect(await unread()).toEqual([
+      { where: "naming", count: 1 },
+      { where: "nobody", count: 1 },
+    ]);
+    expect(
+      (
+        await board.readDigest(
+          { ...DESK, scope: "society", thread: naming.thread.id },
+          { advance: false },
+        )
+      ).messages.map((m) => m.id),
+    ).toEqual([naming.ask.id]);
+
+    // A reply in an ask's thread naming a citizen who wakes is theirs, and so is the first post of
+    // a thread on another channel.
+    await board.postMessage(USER, { thread_id: naming.thread.id, body: "@eng-1 and the docs" });
+    const topic = await board.openThread(USER, { channel: "general", title: "the logo" });
+    await board.postMessage(USER, { thread_id: topic.id, body: "@rev-1 which one?" });
+    expect(await unread()).toEqual([
+      { where: "naming", count: 1 },
+      { where: "nobody", count: 1 },
+    ]);
+
+    // A reply naming nobody who wakes is the desk's, as anywhere.
+    await board.postMessage(USER, { thread_id: naming.thread.id, body: "and the tests?" });
+    expect(await unread()).toEqual([
+      { where: "naming", count: 2 },
+      { where: "nobody", count: 1 },
+    ]);
+  });
+
   it("scans a digest without holding up a post, and counts nothing written during the scan", async () => {
     const { board } = await society();
     for (let n = 0; n < 500; n += 1) {

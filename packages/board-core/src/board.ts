@@ -53,6 +53,7 @@ import {
   sameRepository,
   USER_NAME,
   USER_ROLE,
+  userPostWakesDesk,
   parseChannelRef,
   PROJECT_DEFAULT_CHANNELS,
   ProjectSchema,
@@ -452,8 +453,8 @@ export interface UnreadConversation {
 /**
  * A message of a digest, with the conversation it is filed in: its scope and, but for the home,
  * its part, a thread's id, `#channel`, or `~project` as `conversationPart` gives. News is read by
- * any general conversation. `asked` marks a post that mentions the reader, or the user's post for
- * the front desk.
+ * any general conversation. `asked` marks a post that mentions the reader, or for the front desk
+ * the user's post that wakes it and the user's step note.
  */
 interface DigestEntry {
   scope: Name;
@@ -639,7 +640,7 @@ const SEED_INSTRUCTIONS_HEADING = "## Seed instructions";
 /** The wake trigger that marks a role as a reader of operations signals, such as the steward. */
 const OPS_WAKE_TRIGGER = "ops_event";
 
-/** The wake trigger that marks a role as the front desk, woken by every post of the user's. */
+/** The wake trigger that marks a role as the front desk, woken by the user's posts that name nobody else who wakes. */
 const FRONT_DESK_TRIGGER = "user_post";
 
 /** Where readers of operations signals follow governance; proposals reach them as threads. */
@@ -2346,8 +2347,8 @@ export class Board {
   /**
    * The digest after each conversation's cursor, oldest first, with the scope and thread each
    * message is filed in: what mentions the member, sits in a channel it follows, or belongs to a
-   * thread it takes part in, and for the front desk, which every post by the user wakes, every post
-   * by the user wherever it is. With a conversation, only what is filed there: for a thread, every
+   * thread it takes part in, and for the front desk, every post by the user that wakes it
+   * (`userPostWakesDesk`) and every step note of the user's, wherever it is. With a conversation, only what is filed there: for a thread, every
    * message of the thread, since the conversation is about it; for a channel's, that channel's
    * top-level messages; for a project's in the society scope, the top-level messages of every
    * channel of a project the member is not in; for a scope's home, general's, since each thread,
@@ -2381,6 +2382,21 @@ export class Board {
     const charter = await this.readRole(agent.role);
     const subscribed = new Set(agent.subscriptions);
     const frontDesk = charter.wakeTriggers.includes(FRONT_DESK_TRIGGER);
+    // The records of the citizens the user's posts name, read once each.
+    const citizens = new Map<string, Agent | null>();
+    const namedIn = async (mentions: readonly string[]): Promise<Agent[]> => {
+      const found: Agent[] = [];
+      for (const name of mentions) {
+        if (!citizens.has(name)) {
+          citizens.set(name, await this.readAgent(name).catch(() => null));
+        }
+        const citizen = citizens.get(name);
+        if (citizen !== undefined && citizen !== null) {
+          found.push(citizen);
+        }
+      }
+      return found;
+    };
     const threadParticipation = new Map<Ulid, boolean>();
     const openChannels = new Map<ChannelRef, boolean>();
     const liveProjects = new Map<Name, boolean>();
@@ -2414,7 +2430,11 @@ export class Board {
       const filedIn = wakeScope(agent, parseChannelRef(message.channel).project);
       const thread = message.thread ?? null;
       const asked =
-        message.mentions.includes(actor.name) || (frontDesk && message.author === USER_NAME);
+        message.mentions.includes(actor.name) ||
+        (frontDesk &&
+          message.author === USER_NAME &&
+          (message.step !== undefined ||
+            userPostWakesDesk(actor.name, await namedIn(message.mentions))));
       // News: a post outside the citizen's projects, in a channel it follows, asking nothing of it,
       // which only a general conversation carries.
       if (newsFrom !== undefined && thread === null && filedIn === SOCIETY_SCOPE && !asked) {

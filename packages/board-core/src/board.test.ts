@@ -682,12 +682,71 @@ describe("Board", () => {
     expect(await ids("demo")).toEqual([]);
 
     // News wakes no work role; a society role reads it in its own scope, where its heartbeat looks:
-    // rev-1's three posts, and the user's, which the front desk reads wherever it is.
+    // rev-1's three posts and the user's, in general, which the front desk follows.
     await board.postMessage(REV, { channel: "general", body: "one more thing" });
     expect(await board.unreadByConversation(ENG)).toEqual([]);
     expect(await board.unreadByConversation({ name: "desk", role: "concierge" })).toEqual([
       { scope: "society", thread: null, channel: null, place: null, count: 4 },
     ]);
+  });
+
+  it("leaves a user post naming a citizen who wakes out of the front desk's count, and in its thread", async () => {
+    const { board } = await society();
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    const DESK: Actor = { name: "desk", role: "concierge" };
+    const task = await board.createTask(DESK, {
+      project: "demo",
+      title: "build",
+      stages: [{ name: "build", agent: "eng-1" }],
+    });
+    const topic = await board.openThread(REV, { channel: "demo/general", title: "the logo" });
+    const thread = async (id: Ulid): Promise<string[]> =>
+      (
+        await board.readDigest({ ...DESK, scope: "society", thread: id }, { advance: false })
+      ).messages.map((m) => m.id);
+    const unread = async () =>
+      (await board.unreadByConversation(DESK)).map(({ thread: id, place, count }) => ({
+        where: id === task.id ? "task" : id === topic.id ? "topic" : (place ?? "home"),
+        count,
+      }));
+
+    // A post naming a citizen who wakes is theirs, in a task's thread, a topic's, or a channel.
+    const inTask = await board.postMessage(USER, { thread_id: task.id, body: "@eng-1 go ahead" });
+    const inTopic = await board.postMessage(USER, { thread_id: topic.id, body: "@rev-1 which?" });
+    await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 and the docs" });
+    expect(await unread()).toEqual([]);
+    expect(
+      (await board.readDigest({ ...DESK, scope: "society", place: "demo" }, { advance: false }))
+        .messages,
+    ).toEqual([]);
+
+    // One naming nobody who wakes, as a typo, is the front desk's, wherever it is.
+    const typo = await board.postMessage(USER, {
+      thread_id: task.id,
+      body: "@klin and the tests?",
+    });
+    const nobody = await board.postMessage(USER, { channel: "demo/general", body: "anyone?" });
+    expect(await unread()).toEqual([
+      { where: "task", count: 1 },
+      { where: "demo", count: 1 },
+    ]);
+    expect(
+      (
+        await board.readDigest({ ...DESK, scope: "society", place: "demo" }, { advance: false })
+      ).messages.map((m) => m.id),
+    ).toEqual([nobody.id]);
+
+    // When someone asks the front desk in the thread, the ask counts, and its turn there reads
+    // the earlier post too.
+    const askTask = await board.postMessage(ENG, { thread_id: task.id, body: "@desk a gate?" });
+    const askTopic = await board.postMessage(REV, { thread_id: topic.id, body: "@desk who says?" });
+    expect(await unread()).toEqual([
+      { where: "task", count: 2 },
+      { where: "demo", count: 1 },
+      { where: "topic", count: 1 },
+    ]);
+    expect(await thread(task.id)).toEqual([inTask.id, typo.id, askTask.id]);
+    expect(await thread(topic.id)).toEqual([inTopic.id, askTopic.id]);
   });
 
   it("scans a digest without holding up a post, and counts nothing written during the scan", async () => {
@@ -1384,7 +1443,8 @@ describe("Board", () => {
   it("files a project's channels in a conversation of their own for a citizen outside it, until it is archived", async () => {
     const { board } = await society();
     await board.addProject(USER, { slug: "lab", channels: ["general", "dev"] });
-    // The front desk, a society role, reads every post by the user, in every project's channels.
+    // The front desk, a society role, reads every post by the user that names nobody, in every
+    // project's channels.
     await board.addAgent(USER, { name: "concierge-1", role: "concierge", cli: "claude" });
     const FRONT: Actor = { name: "concierge-1", role: "concierge" };
     const demoGeneral = await board.postMessage(USER, { channel: "demo/general", body: "demo?" });
@@ -3638,7 +3698,7 @@ describe("Board", () => {
     );
     expect(completedEvent?.payload["model"]).toBe("claude-opus-5-5");
 
-    // Every post by the user wakes the front desk, so every one reaches its digest, even in a
+    // A post by the user naming nobody wakes the front desk, so it reaches its digest, even in a
     // thread it takes no part in; the thread's participants read it as usual, and nobody else.
     const topic = await board.openThread(ENG, { channel: "demo/dev", title: "flaky test" });
     const aside = await board.postMessage(USER, {

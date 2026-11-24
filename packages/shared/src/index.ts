@@ -11,4 +11,5 @@ export * from "./config.js";
 export * from "./runner.js";
 export * from "./quota.js";
 export * from "./images.js";
+export * from "./wakes.js";
 export * from "./version.js";

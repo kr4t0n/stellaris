@@ -40,7 +40,8 @@ function describe(
 /**
  * Asking the society from anywhere: a composer floating in the middle of the sky, with the user's
  * latest asks under it. Each ask opens a thread on the society's asks channel, which wakes the
- * front desk in a conversation of its own; an ask opens its thread in the board.
+ * front desk in a conversation of its own unless the ask names a citizen who wakes for it; an ask
+ * opens its thread in the board.
  */
 export function AskBox({
   left,

@@ -36,11 +36,12 @@ function charter(name: string, wakeTriggers: RoleCharter["wakeTriggers"]): RoleC
 }
 
 describe("wakes", () => {
-  it("says whom a post wakes: the front desk, and every active citizen mentioned", () => {
+  it("says whom a post wakes: every active citizen mentioned, else the front desk", () => {
     const members = [
       member("desk", "concierge"),
       member("ada", "researcher"),
       member("old", "researcher", { status: "retired" }),
+      member("ghost", "researcher", { cli: null }),
       member("user", "user", { cli: null }),
     ];
     const roles = [
@@ -48,7 +49,15 @@ describe("wakes", () => {
       charter("researcher", ["heartbeat"]),
     ];
     expect(wakesFor("hello", members, roles)).toEqual(["desk"]);
-    expect(wakesFor("@ada and @old and @nobody", members, roles)).toEqual(["desk", "ada"]);
+    expect(wakesFor("@ada and @old and @nobody", members, roles)).toEqual(["ada"]);
+    // Naming the desk wakes it once.
+    expect(wakesFor("@desk who takes this?", members, roles)).toEqual(["desk"]);
+    expect(wakesFor("@desk and @ada", members, roles)).toEqual(["ada", "desk"]);
+    // Names that wake nobody leave the post to the desk.
+    const texts = ["@klin a look?", "@old a look?", "@ghost a look?", "@user note"];
+    expect(texts.map((text) => [text, wakesFor(text, members, roles)])).toEqual(
+      texts.map((text) => [text, ["desk"]]),
+    );
   });
 
   it("wakes nobody for a name in code, as the board decides it", () => {
@@ -56,9 +65,9 @@ describe("wakes", () => {
     const roles = [charter("concierge", ["user_post"]), charter("researcher", ["heartbeat"])];
     expect(wakesFor("Run `@ada --fix`:\n\n```\n@ada\n```", members, roles)).toEqual(["desk"]);
     expect(wakesFor("Log:\n\n~~~\n@ada\n\nstill code, @ada", members, roles)).toEqual(["desk"]);
-    expect(wakesFor("`@ada` means you, @ada", members, roles)).toEqual(["desk", "ada"]);
+    expect(wakesFor("`@ada` means you, @ada", members, roles)).toEqual(["ada"]);
     // Indentation alone makes code, so the form reads the text as it is sent.
     expect(wakesFor("    @ada please run it", members, roles)).toEqual(["desk"]);
-    expect(wakesFor("@ada please run it", members, roles)).toEqual(["desk", "ada"]);
+    expect(wakesFor("@ada please run it", members, roles)).toEqual(["ada"]);
   });
 });

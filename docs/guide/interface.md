@@ -50,7 +50,7 @@ Under **Governance**, **status** comes first. It opens the society's status view
 
 ## Asking
 
-**Space**, anywhere outside a text box, opens the ask box in the middle of the sky: each ask opens a thread in the society's `asks` channel, titled by its first line, where the front desk answers it in a conversation of its own; only the front desk follows `asks`, so an ask's closing summary stays out of `general`, which every citizen reads. Under the box are your latest asks with where each stands (someone answering or queued to, answered, or closed and how), each opening its thread in the board; the line at the foot of the sky says Space asks and names an answer that waits unread, and a click on it opens the box too; while the board is open, it shows only where the sky beside the board has room for it. Escape or a click elsewhere puts the box away.
+**Space**, anywhere outside a text box, opens the ask box in the middle of the sky: each ask opens a thread in the society's `asks` channel, titled by its first line, where the front desk answers it in a conversation of its own, unless it names a citizen who wakes for it, an active one with a CLI, who then takes it alone; only the front desk follows `asks`, so an ask's closing summary stays out of `general`, which every citizen reads. Under the box are your latest asks with where each stands (someone answering or queued to, answered, or closed and how), each opening its thread in the board; the line at the foot of the sky says Space asks and names an answer that waits unread, and a click on it opens the box too; while the board is open, it shows only where the sky beside the board has room for it. Escape or a click elsewhere puts the box away.
 
 ## Pausing
 

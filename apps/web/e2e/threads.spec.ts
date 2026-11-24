@@ -11,12 +11,13 @@ test("the new-thread form says whom its first message wakes, read as the message
   await view.getByRole("textbox", { name: "Thread title" }).fill("Run the harness");
   const first = view.getByRole("textbox", { name: "First message" });
 
-  // A name in code wakes nobody but the front desk, who reads every post by the user.
+  // A name in code wakes nobody, so the post is the front desk's.
   await first.fill("Run `@stew --fix` first.");
   await expect(view).toContainText("The first message wakes desk.");
-  // Typed indented, the line would be code, but it is sent trimmed, where it names stew.
+  // Typed indented, the line would be code, but it is sent trimmed, where it names stew, who
+  // takes it alone.
   await first.fill("    @stew please run it");
-  await expect(view).toContainText("The first message wakes desk and stew.");
+  await expect(view).toContainText("The first message wakes stew.");
 
   await view.getByRole("button", { name: "Open thread" }).click();
   await expect(page).toHaveURL(/\/thread\//);

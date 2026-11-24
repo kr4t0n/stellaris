@@ -40,7 +40,8 @@ Open the board
 {{- if not $runner.enabled }}
 
 Connect a runner
-  Turns run on runners, on the machines where the Claude Code and Codex CLIs and their logins are.
+  Turns run on runners, on the machines where the Claude Code, Codex, and Antigravity CLIs and
+  their logins are.
   Start one there with STELLARIS_SERVER_URL set to an address of this server it can reach:
 
     STELLARIS_SERVER_URL={{ $url }} stellaris-runner

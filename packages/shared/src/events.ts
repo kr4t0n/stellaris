@@ -111,7 +111,7 @@ export function readBoardEvent(value: unknown): BoardEvent | null {
 
 /**
  * The tokens a turn used. `inputTokens` is the input neither read from the cache nor written to
- * it, so the turn's whole input is the sum of the three input counts, on either CLI.
+ * it, so the turn's whole input is the sum of the three input counts, on every CLI.
  */
 export const UsageSchema = z.object({
   inputTokens: z.number().int().nonnegative(),

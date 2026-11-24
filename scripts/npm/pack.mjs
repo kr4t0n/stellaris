@@ -45,8 +45,8 @@ const PACKAGES = [
     dir: "stellaris-runner",
     name: "@kubitnodes/stellaris-runner",
     description:
-      "The Stellaris runner: runs a society's turns with Claude Code and Codex on the machine it is started on",
-    keywords: ["stellaris", "agents", "claude-code", "codex", "runner"],
+      "The Stellaris runner: runs a society's turns with Claude Code, Codex, and Antigravity on the machine it is started on",
+    keywords: ["stellaris", "agents", "claude-code", "codex", "antigravity", "runner"],
     entries: [{ app: "apps/runner", out: "dist/index.js", bin: "stellaris-runner" }],
     web: false,
   },

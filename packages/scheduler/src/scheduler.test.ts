@@ -2725,6 +2725,34 @@ describe("Scheduler", () => {
     expect(runner.dispatches.map((d) => d.trigger.kind)).not.toContain("user_post");
   });
 
+  it("wakes the front desk at once for a user post naming it, as for one naming nobody", async () => {
+    const { board, runner, scheduler } = await setup({
+      timings: { userDebounceMs: 5_000, waitingStageMs: 3_600_000, heartbeatMs: 3_600_000 },
+    });
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    await scheduler.tick();
+    await scheduler.drain();
+    runner.dispatches.length = 0;
+    const wakes = () => runner.dispatches.map((d) => `${d.agent}:${d.trigger.kind}`);
+
+    // The user's mention of the desk is its own wake, and the post is the desk's too: no debounce.
+    await board.postMessage(USER, { channel: "demo/general", body: "@desk who takes this?" });
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(wakes()).toEqual(["desk:mention"]);
+
+    // A mention of anyone else waits out the user's debounce, and the desk sleeps through it.
+    runner.dispatches.length = 0;
+    await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 can you?" });
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(wakes()).toEqual([]);
+    advance(5_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(wakes()).toEqual(["eng-1:mention"]);
+  });
+
   it("wakes the front desk on heartbeat for a user post naming nobody who wakes, not one naming the worker", async () => {
     const { board, runner, scheduler } = await setup({ timings: { waitingStageMs: 3_600_000 } });
     await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });

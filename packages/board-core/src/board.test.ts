@@ -693,6 +693,9 @@ describe("Board", () => {
   it("leaves a user post naming a citizen who wakes out of the front desk's count, and in its thread", async () => {
     const { board } = await society();
     await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    await board.addAgent(USER, { name: "ghost", role: "reviewer", cli: null });
+    await board.addAgent(USER, { name: "old", role: "reviewer", cli: "claude" });
+    await board.retireAgent(USER, { name: "old", reason: "test" });
     const DESK: Actor = { name: "desk", role: "concierge" };
     const task = await board.createTask(DESK, {
       project: "demo",
@@ -720,14 +723,16 @@ describe("Board", () => {
         .messages,
     ).toEqual([]);
 
-    // One naming nobody who wakes, as a typo, is the front desk's, wherever it is.
+    // One naming nobody who wakes, a typo, a retired or CLI-less citizen, or nobody at all, is
+    // the front desk's, wherever it is.
     const typo = await board.postMessage(USER, {
       thread_id: task.id,
       body: "@klin and the tests?",
     });
+    const gone = await board.postMessage(USER, { thread_id: task.id, body: "@old or @ghost?" });
     const nobody = await board.postMessage(USER, { channel: "demo/general", body: "anyone?" });
     expect(await unread()).toEqual([
-      { where: "task", count: 1 },
+      { where: "task", count: 2 },
       { where: "demo", count: 1 },
     ]);
     expect(
@@ -741,11 +746,11 @@ describe("Board", () => {
     const askTask = await board.postMessage(ENG, { thread_id: task.id, body: "@desk a gate?" });
     const askTopic = await board.postMessage(REV, { thread_id: topic.id, body: "@desk who says?" });
     expect(await unread()).toEqual([
-      { where: "task", count: 2 },
+      { where: "task", count: 3 },
       { where: "demo", count: 1 },
       { where: "topic", count: 1 },
     ]);
-    expect(await thread(task.id)).toEqual([inTask.id, typo.id, askTask.id]);
+    expect(await thread(task.id)).toEqual([inTask.id, typo.id, gone.id, askTask.id]);
     expect(await thread(topic.id)).toEqual([inTopic.id, askTopic.id]);
   });
 

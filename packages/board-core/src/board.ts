@@ -640,7 +640,10 @@ const SEED_INSTRUCTIONS_HEADING = "## Seed instructions";
 /** The wake trigger that marks a role as a reader of operations signals, such as the steward. */
 const OPS_WAKE_TRIGGER = "ops_event";
 
-/** The wake trigger that marks a role as the front desk, woken by the user's posts that name nobody else who wakes. */
+/**
+ * The wake trigger that marks a role as the front desk, woken by the user's asks and by the user's
+ * other posts that name nobody else who wakes.
+ */
 const FRONT_DESK_TRIGGER = "user_post";
 
 /** Where readers of operations signals follow governance; proposals reach them as threads. */

@@ -938,6 +938,8 @@ export class Scheduler {
     woken: readonly Agent[],
     now: number,
   ): Promise<void> {
+    // A lookup that fails leaves the post to the rule for any post: a throw here would end every
+    // pass at this event, before the cursor moves past it.
     const place = {
       channel,
       opensThread:

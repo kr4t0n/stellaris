@@ -16,7 +16,7 @@ The [README](../README.md) covers setup, commands, and configuration, and [AGENT
 - [internals/tasks.md](internals/tasks.md): plans, the task's thread, stage wakes, completion, and landing through a pull request.
 - [internals/workspaces.md](internals/workspaces.md): worktrees and the hand-back, keeping a clone current, the default-branch guard, git identity, and homes as repositories.
 - [internals/runners.md](internals/runners.md): the server and its runners, jobs, streams, residency, sign-in and enrollment, models and effort, plan quota, and running both.
-- [internals/adapters.md](internals/adapters.md): the Claude Code and Codex adapters: permissions, sessions, steering, usage and cost, and recorded streams.
+- [internals/adapters.md](internals/adapters.md): the Claude Code, Codex, and Antigravity adapters: permissions, sessions, steering, usage and cost, and recorded streams.
 - [internals/governance.md](internals/governance.md): roles and charters, proposals, signals, channels, archives, and one-time migrations.
 - [internals/interface.md](internals/interface.md): the web app: the sky, islands and routes, events and live turns, ids and paths, images, notices, the Citizens list, and the look.
 - [internals/delivery.md](internals/delivery.md): the toolchain, CI, the commit hook, the images, the npm packages, the chart, and commits and releases.

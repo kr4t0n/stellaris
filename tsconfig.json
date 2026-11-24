@@ -9,6 +9,7 @@
     { "path": "packages/runner-core" },
     { "path": "packages/adapter-claude" },
     { "path": "packages/adapter-codex" },
+    { "path": "packages/adapter-antigravity" },
     { "path": "apps/server" },
     { "path": "apps/runner" },
     { "path": "apps/cli" },

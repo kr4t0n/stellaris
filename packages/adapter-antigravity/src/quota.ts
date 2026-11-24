@@ -161,6 +161,15 @@ function isoOf(raw: unknown): string | null {
 }
 
 /**
+ * A bucket's reset, or null for none known. agy 1.5.15 prints a bucket no window runs in, as those
+ * of a group nobody has used lately, with its reset at the Unix epoch, which is no reset at all.
+ */
+function resetOf(raw: unknown): string | null {
+  const reset = isoOf(raw);
+  return reset === null || Date.parse(reset) <= 0 ? null : reset;
+}
+
+/**
  * How much of a bucket is used, in percent. agy 1.5.15 prints a bucket with a `remaining_fraction`
  * or a `remaining_amount`, one of the two upstream, each left out when unset. A fraction gives the
  * percent. An amount has no total, so it says only whether the bucket is spent: none left is 100,
@@ -228,7 +237,7 @@ export function quotaFromUsage(usage: unknown, credits: unknown, at: Date): CliQ
           ...(label === undefined ? {} : { label: label.slice(0, 80) }),
           minutes: WINDOW_MINUTES[str(bucket["window"]) ?? ""] ?? null,
           usedPercent: usedPercentOf(bucket),
-          resetsAt: isoOf(bucket["reset_time"]),
+          resetsAt: resetOf(bucket["reset_time"]),
           observedAt,
         },
       ];

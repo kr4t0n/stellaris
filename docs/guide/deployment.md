@@ -65,7 +65,7 @@ The `agy` login is for a runner started with `-e STELLARIS_CLIS=claude,codex,ant
 
 ## Signing agy in
 
-A runner offers Antigravity only where `STELLARIS_CLIS` names `antigravity`, and starts the `agy` on its `PATH`: the runner's image has one, and elsewhere it comes from [its releases](https://github.com/google-antigravity/antigravity-cli/releases), the tarball for the machine checked against the release's sha256. Sign it in once as the runner's account, on the machine or, for the image, on its volume as above:
+A runner offers Antigravity only where `STELLARIS_CLIS` names `antigravity`, and starts the `agy` on its `PATH`: the runner's image has one, and elsewhere it comes from [its releases](https://github.com/google-antigravity/antigravity-cli/releases). The tarball for the machine, checked against the release's sha256, holds one file, `antigravity`; install it as `agy`, as the image does (`install -m 0755 antigravity /usr/local/bin/agy`). A runner that finds no `agy` fails every Antigravity turn and model list with only "agy acp exited". Sign it in once as the runner's account, on the machine or, for the image, on its volume as above:
 
 ```bash
 agy acp --login --disable-telemetry
@@ -122,7 +122,7 @@ With `STELLARIS_APPLE_APP_ID` set, the iOS app signs in on an `https` address of
 - `STELLARIS_LOG_LEVEL` (`info`): the runner's log level; `debug` also logs the CLI's stderr.
 - `STELLARIS_CONCURRENCY` (`2`): turns at once on its machine; a number or `unlimited`.
 - `STELLARIS_CLIS` (`claude,codex`): the CLIs it runs turns with, of `claude`, `codex`, and `antigravity`.
-- `STELLARIS_GEMINI_DIR` (none, agy's own `~/.gemini`): the folder agy keeps its sign-in, settings, and conversations in, which must be called `.gemini`; a relative path is resolved from where the runner starts.
+- `STELLARIS_GEMINI_DIR` (none, agy's own `~/.gemini`): the folder agy keeps its sign-in, settings, and conversations in, which must be called `.gemini`; a relative path is resolved from where the runner starts, and one starting with `~`, which no shell expanded, is refused.
 - `STELLARIS_CAPABILITIES` (none): comma-separated capabilities it offers, matched against what projects and tasks require.
 - `STELLARIS_CODEX_SANDBOX` (`danger-full-access`): the default runs Codex without a sandbox or approvals; `read-only` or `workspace-write` keep its sandbox, which on Linux needs user namespaces.
 - `STELLARIS_RECORD_DIR` (none): when set, every turn's raw CLI stream is appended there as JSONL, for fixtures.

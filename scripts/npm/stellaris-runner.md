@@ -10,7 +10,7 @@ Node 24 or newer and git are required.
 npm install --global @kubitnodes/stellaris-runner
 ```
 
-The runner runs Claude Code through the Claude Agent SDK, which comes with it, and uses Claude Code's login: sign in once with the Claude Code CLI (`npm install --global @anthropic-ai/claude-code`, then `claude`), or set `ANTHROPIC_API_KEY`. Codex is installed on its own, with `npm install --global @openai/codex`, and signed in with `codex login`. Google's Antigravity CLI, `agy`, comes from [its releases](https://github.com/google-antigravity/antigravity-cli/releases), on the `PATH`, and is signed in with `agy acp --login --disable-telemetry`, for a runner whose `STELLARIS_CLIS` names `antigravity` ([signing agy in](https://github.com/kr4t0n/stellaris/blob/main/docs/guide/deployment.md#signing-agy-in)).
+The runner runs Claude Code through the Claude Agent SDK, which comes with it, and uses Claude Code's login: sign in once with the Claude Code CLI (`npm install --global @anthropic-ai/claude-code`, then `claude`), or set `ANTHROPIC_API_KEY`. Codex is installed on its own, with `npm install --global @openai/codex`, and signed in with `codex login`. Google's Antigravity CLI comes from [its releases](https://github.com/google-antigravity/antigravity-cli/releases), whose tarball holds one file, `antigravity`, which goes on the `PATH` as `agy` (`install -m 0755 antigravity /usr/local/bin/agy`), and is signed in with `agy acp --login --disable-telemetry`, for a runner whose `STELLARIS_CLIS` names `antigravity` ([signing agy in](https://github.com/kr4t0n/stellaris/blob/main/docs/guide/deployment.md#signing-agy-in)).
 
 ## Run
 

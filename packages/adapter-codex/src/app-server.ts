@@ -512,7 +512,8 @@ function toolOutputOf(item: Dict): string {
         .join("\n");
     }
     // Codex reports an image only once it has read and decoded the file, and the model was given
-    // the image itself, which both adapters show as they show an image block in a result.
+    // the image itself, which the Claude and Codex adapters show as they show an image block in a
+    // result.
     case "imageView":
       return "[image]";
     case "collabAgentToolCall":

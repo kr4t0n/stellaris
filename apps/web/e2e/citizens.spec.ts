@@ -210,7 +210,7 @@ test("a citizen's turns and memory are tabs of its view", async ({ page }) => {
   await expect(view.getByText("1 turn · 151K in · 1.5K out", { exact: true })).toBeVisible();
   await expect(view).toContainText("Routed the survey request to ada and filed the task.");
   await expect(view.getByText("3m · 4 tools · 151K in · 1.5K out", { exact: true })).toBeVisible();
-  // Turns read the same on either CLI: tokens, never dollars, which Codex does not report.
+  // Turns read the same on every CLI: tokens, never dollars, which Codex and agy do not report.
   await expect(view).not.toContainText("$");
   await expect(view.getByTitle(/^151,361 input tokens: 146,048 read from the cache/)).toHaveCount(
     2,

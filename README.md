@@ -217,6 +217,7 @@ A runner reads these, and sets `STELLARIS_AGENT_TOKEN` and `HUSKY=0` for each CL
 | `STELLARIS_RECORD_DIR`    | none                    | Where to record raw CLI streams         |
 | `ANTHROPIC_API_KEY`       | none                    | Claude Code's key, instead of its login |
 | `OPENAI_API_KEY`          | none                    | Codex's key, instead of its login       |
+| `GEMINI_API_KEY`          | none                    | agy's key, with a setting of its own    |
 
 Never commit a real token, nor the GitHub client secret.
 

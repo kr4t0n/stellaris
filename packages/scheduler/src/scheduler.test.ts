@@ -2700,7 +2700,7 @@ describe("Scheduler", () => {
     expect(await woken("@desk and @eng-1, this one")).toEqual(["desk:mention", "eng-1:mention"]);
     // A post whose names wake nobody is the desk's: a typo, a retired or CLI-less citizen, the
     // user, a name in code, a package's scope, an address.
-    for (const body of [
+    const bodies = [
       "@klin can you add a health check?",
       "@old, still around?",
       "@ghost please review",
@@ -2708,9 +2708,12 @@ describe("Scheduler", () => {
       "Run `@eng-1 --fix`",
       "bump @types/node and mail ops@example.com",
       "and the build?",
-    ]) {
-      expect(await woken(body), body).toEqual(["desk:user_post"]);
+    ];
+    const each: Array<[string, string[]]> = [];
+    for (const body of bodies) {
+      each.push([body, await woken(body)]);
     }
+    expect(each).toEqual(bodies.map((body) => [body, ["desk:user_post"]]));
 
     // The user's note on a step that names a citizen still wakes no front desk.
     const task = await board.createTask(USER, {

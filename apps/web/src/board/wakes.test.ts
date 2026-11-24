@@ -54,9 +54,10 @@ describe("wakes", () => {
     expect(wakesFor("@desk who takes this?", members, roles)).toEqual(["desk"]);
     expect(wakesFor("@desk and @ada", members, roles)).toEqual(["ada", "desk"]);
     // Names that wake nobody leave the post to the desk.
-    for (const text of ["@klin a look?", "@old a look?", "@ghost a look?", "@user note"]) {
-      expect(wakesFor(text, members, roles), text).toEqual(["desk"]);
-    }
+    const texts = ["@klin a look?", "@old a look?", "@ghost a look?", "@user note"];
+    expect(texts.map((text) => [text, wakesFor(text, members, roles)])).toEqual(
+      texts.map((text) => [text, ["desk"]]),
+    );
   });
 
   it("wakes nobody for a name in code, as the board decides it", () => {

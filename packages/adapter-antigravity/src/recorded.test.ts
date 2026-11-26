@@ -240,6 +240,45 @@ describe("recorded agy acp turns", () => {
     });
   });
 
+  /**
+   * agy 1.5.15 against a stub that refused each prompt with a 429 carrying the sentence a signed-in
+   * account met on 2026-11-26, the Third-party one with `QUOTA_EXHAUSTED` as its reason: agy asked
+   * once, with no retry, and put the sentence in its executor's words.
+   */
+  it("reads a recorded refusal of each pool's quota as the plan's limit on that pool, never transient", async () => {
+    const at = new Date("2026-11-26T16:26:47.000Z");
+    for (const [fixture, pool, until, words] of [
+      [
+        "acp-quota-individual-recorded.jsonl",
+        "gemini",
+        "2026-11-26T18:09:08.000Z",
+        "Message: Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h42m21s., Status: RESOURCE_EXHAUSTED",
+      ],
+      [
+        "acp-quota-third-party-recorded.jsonl",
+        "3p",
+        "2026-11-26T20:16:41.000Z",
+        "Message: Third-party quota reached. Please switch to Gemini models or upgrade your subscription to increase your limits. Resets in 3h49m54s., Status: RESOURCE_EXHAUSTED",
+      ],
+    ] as const) {
+      const { spawn, sent } = await replay(fixture);
+      const result = await new AntigravityBackend({ spawn, now: () => at }).runTurn(request({}));
+      expect(methodsOf(sent)).toEqual(["initialize", "session/new", "session/prompt"]);
+      expect(result.exitReason).toBe("error");
+      expect(result.error).toMatch(
+        /^usage limit reached: agent executor error: generating and executing: Error 429, /,
+      );
+      expect(result.error).toContain(words);
+      expect(result.transient).toBeUndefined();
+      expect(result.quota).toMatchObject({
+        source: "turn",
+        status: "warning",
+        limitedUntil: null,
+        pools: [{ key: pool, limited: true, limitedUntil: until }],
+      });
+    }
+  });
+
   it("fails a turn whose key the service refused, never as transient", async () => {
     const { spawn } = await replay("acp-key-recorded.jsonl");
     const result = await new AntigravityBackend({ spawn }).runTurn(request({}));

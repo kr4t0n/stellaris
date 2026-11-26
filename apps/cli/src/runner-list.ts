@@ -1,4 +1,10 @@
-import { runnerLimitHold, runnerSyncing, syncedFiles, type Runner } from "@stellaris/shared";
+import {
+  poolHolds,
+  runnerLimitHold,
+  runnerSyncing,
+  syncedFiles,
+  type Runner,
+} from "@stellaris/shared";
 
 /** A connected runner's board sync while it holds its turns, with its last failure. */
 function syncState(runner: Runner): string {
@@ -16,7 +22,8 @@ function syncState(runner: Runner): string {
 
 /**
  * One runner as `runner list` prints it: its name, whether it is connected, paused, or syncing its
- * board copy, its OS and version, what it offers, and the CLIs paused or held by their limits.
+ * board copy, its OS and version, what it offers, and the CLIs paused or held by their limits, a
+ * pool's limit naming the pool.
  */
 export function runnerListLine(runner: Runner, now: Date): string {
   return `${runner.name}  ${runner.status}${runner.paused === undefined ? "" : "  paused"}${syncState(runner)}  ${runner.os}${
@@ -28,7 +35,13 @@ export function runnerListLine(runner: Runner, now: Date): string {
     .join("")}${runner.clis
     .map((cli) => {
       const hold = runnerLimitHold(runner, cli, now);
-      return hold === null ? "" : `  ${cli} held until ${hold.until}`;
+      const quota = runner.quotas?.[cli];
+      return `${hold === null ? "" : `  ${cli} held until ${hold.until}`}${(quota === undefined
+        ? []
+        : poolHolds(quota, now)
+      )
+        .map((held) => `  ${cli} ${held.pool} held until ${held.until}`)
+        .join("")}`;
     })
     .join("")}`;
 }

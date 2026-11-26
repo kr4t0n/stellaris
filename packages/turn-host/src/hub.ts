@@ -15,7 +15,8 @@ import {
   ProjectReleasedSchema,
   RUNNER_PROTOCOL,
   heldOn,
-  limitLapsed,
+  lapsedLimit,
+  quotaPool,
   runnerLimitHold,
   runnerPause,
   SOCIETY_SCOPE,
@@ -209,8 +210,9 @@ export class RunnerHub implements TurnRunner {
   /** When each runner was last asked to read a CLI's quota for a limit with no reset, by `runner/cli`. */
   private readonly limitReads = new Map<string, number>();
   /**
-   * The turn let through once a limit with no reset had held its half hour, by `runner/cli`: the
-   * report it tries, which `observedAt` names, and whether the turn has ended.
+   * The turn let through once a limit with no reset had held its half hour, by `runner/cli/key`,
+   * the key `lapsedLimit` gives (the login's, or a pool's): the report it tries, which `observedAt`
+   * names, and whether the turn has ended.
    */
   private readonly limitTries = new Map<
     string,
@@ -659,10 +661,11 @@ export class RunnerHub implements TurnRunner {
       return { refused: `${agent.name} has no CLI binding` };
     }
     const cli = agent.cli;
+    const pool = quotaPool(cli, agent.model);
     // A runner the user paused, or paused for this CLI, takes none of its turns until resumed, one
-    // whose CLI is limited none of that CLI's until the limit lifts, and one syncing its board copy
-    // none until the copy is up to date. It is still there and still has the CLI, so a project
-    // living on it and a citizen pinned to it wait.
+    // whose CLI is limited none of that CLI's until the limit lifts, or none of a pool's while that
+    // pool's limit holds, and one syncing its board copy none until the copy is up to date. It is
+    // still there and still has the CLI, so a project living on it and a citizen pinned to it wait.
     const runners = await this.board.listRunners();
     const now = this.now();
     const free = (seat: Seat): boolean =>
@@ -672,8 +675,8 @@ export class RunnerHub implements TurnRunner {
       !receiptOverdue(seat) &&
       seat.hello.clis.includes(cli) &&
       (seat.hello.slots === null || seat.inUse < seat.hello.slots) &&
-      !heldOn(runners, seat.name, cli, now) &&
-      !this.tryRunning(runners, seat.name, cli, now);
+      !heldOn(runners, seat.name, agent, now) &&
+      !this.tryRunning(runners, seat.name, cli, pool, now);
     let chosen: Seat | undefined;
     // The runner the turn waits for when none takes it, so a limit with no reset there is read.
     let waitsOn = agent.homeRunner;
@@ -715,7 +718,7 @@ export class RunnerHub implements TurnRunner {
     }
     if (chosen === undefined) {
       if (waitsOn !== undefined) {
-        this.readAfterLimit(runners, waitsOn, cli, now);
+        this.readAfterLimit(runners, waitsOn, cli, pool, now);
       }
       return null;
     }
@@ -737,20 +740,17 @@ export class RunnerHub implements TurnRunner {
       this.starting.set(dispatch.project, (this.starting.get(dispatch.project) ?? 0) + 1);
     }
     const runner = chosen.name;
-    const lapsed = runners.find((each) => each.name === runner)?.quotas?.[cli];
-    const tried = this.limitTries.get(`${runner}/${cli}`);
+    const quota = runners.find((each) => each.name === runner)?.quotas?.[cli];
+    const lapsed = quota === undefined ? null : lapsedLimit(quota, now, pool);
+    const tries = lapsed === null ? null : `${runner}/${cli}/${lapsed.key}`;
     if (
-      lapsed !== undefined &&
-      limitLapsed(lapsed, now) &&
-      tried?.observedAt !== lapsed.observedAt
+      lapsed !== null &&
+      tries !== null &&
+      this.limitTries.get(tries)?.observedAt !== lapsed.observedAt
     ) {
-      // The first turn after a limit with no reset ran out of its hold tries it for the rest; once
-      // it has ended with no newer report, the rest go.
-      this.limitTries.set(`${runner}/${cli}`, {
-        observedAt: lapsed.observedAt,
-        dispatch,
-        ended: false,
-      });
+      // The first turn after a limit with no reset ran out of its hold tries it for the rest of the
+      // turns it holds; once it has ended with no newer report, the rest go.
+      this.limitTries.set(tries, { observedAt: lapsed.observedAt, dispatch, ended: false });
     }
     return { runner };
   }
@@ -1533,29 +1533,43 @@ export class RunnerHub implements TurnRunner {
 
   /**
    * Whether a turn let through to try a limit with no reset, once its hold ran out, is still running
-   * on the runner, so the CLI's other turns there wait for what it reports: a refusal records a newer
-   * limit, which holds them another half hour, and a turn that ends without one lets them go.
+   * on the runner, so the other turns that limit held there, the CLI's or its pool's, wait for what
+   * it reports: a refusal records a newer limit, which holds them another half hour, and a turn that
+   * ends without one lets them go.
    */
-  private tryRunning(runners: readonly Runner[], name: Name, cli: CliKind, now: Date): boolean {
+  private tryRunning(
+    runners: readonly Runner[],
+    name: Name,
+    cli: CliKind,
+    pool: string | null,
+    now: Date,
+  ): boolean {
     const quota = runners.find((each) => each.name === name)?.quotas?.[cli];
-    const tried = this.limitTries.get(`${name}/${cli}`);
+    const lapsed = quota === undefined ? null : lapsedLimit(quota, now, pool);
+    const tried = lapsed === null ? undefined : this.limitTries.get(`${name}/${cli}/${lapsed.key}`);
     return (
-      quota !== undefined &&
+      lapsed !== null &&
       tried !== undefined &&
       !tried.ended &&
-      tried.observedAt === quota.observedAt &&
-      limitLapsed(quota, now)
+      tried.observedAt === lapsed.observedAt
     );
   }
 
   /**
-   * Asks a runner to read a CLI's quota again while a limit it gave no reset for holds a turn
-   * waiting for it there, at most once per `UNKNOWN_LIMIT_HOLD_MS` for each runner and CLI, so a
-   * reset the read names becomes the hold and a clear read lifts it. Not while the user's pause
-   * holds the CLI there too, nor on a runner from before quota reads; a read that fails changes
-   * nothing, and the hold runs out as it would have.
+   * Asks a runner to read a CLI's quota again while a limit it gave no reset for, the login's or the
+   * waiting turn's pool's, holds a turn waiting for it there, at most once per
+   * `UNKNOWN_LIMIT_HOLD_MS` for each runner and CLI, since a read names every pool, so a reset the
+   * read names becomes the hold and a clear read lifts it. Not while the user's pause holds the CLI
+   * there too, nor on a runner from before quota reads; a read that fails changes nothing, and the
+   * hold runs out as it would have.
    */
-  private readAfterLimit(runners: readonly Runner[], name: Name, cli: CliKind, now: Date): void {
+  private readAfterLimit(
+    runners: readonly Runner[],
+    name: Name,
+    cli: CliKind,
+    pool: string | null,
+    now: Date,
+  ): void {
     const record = runners.find((each) => each.name === name);
     const seat = this.seats.get(name);
     if (
@@ -1565,7 +1579,7 @@ export class RunnerHub implements TurnRunner {
       !seat.hello.quotaReads ||
       !seat.hello.clis.includes(cli) ||
       runnerPause(record, cli) !== undefined ||
-      runnerLimitHold(record, cli, now)?.known !== false
+      runnerLimitHold(record, cli, now, pool)?.known !== false
     ) {
       return;
     }

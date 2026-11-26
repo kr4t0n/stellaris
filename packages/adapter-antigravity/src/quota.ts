@@ -206,13 +206,25 @@ function commandData(raw: unknown, command: string): Record<string, unknown> | s
 }
 
 /**
+ * A pool's key from its bucket's id: the id's stem before its last `-`, as `gemini` of
+ * `gemini-weekly` and `3p` of `3p-5h`, which `quotaPool` keys a model's pool by; an id with no
+ * stem is its own key.
+ */
+function poolKeyOf(bucket: string): string {
+  const dash = bucket.lastIndexOf("-");
+  return dash > 0 ? bucket.slice(0, dash) : bucket;
+}
+
+/**
  * The quota `/usage` and `/credits` answer, from print mode's JSON results. Each group of models
  * shares its buckets, so a bucket is a window named by its id and labelled with its group, used as
- * `usedPercentOf` reads it; a `disabled` bucket meters nothing and is left out. One bucket spent
- * stops only its group's models, a warning; every bucket spent stops the login until the first of
- * them resets, since the groups are disjoint and that group's models can run again then. An API
- * key's login, which has no plan quota, reads as `none`; any other failure fails the read in agy's
- * words.
+ * `usedPercentOf` reads it; a `disabled` bucket meters nothing and is left out. Each group is a
+ * pool, keyed by its buckets' stem, and any one of its buckets spent stops its models until the
+ * last of its spent buckets resets, since each counts every model in it. One pool stopped is a
+ * warning for the login, with that pool limited; every pool stopped stops the login until the
+ * first of them frees, since the groups are disjoint and that group's models can run again then.
+ * An API key's login, which has no plan quota, reads as `none`; any other failure fails the read in
+ * agy's words.
  */
 export function quotaFromUsage(usage: unknown, credits: unknown, at: Date): CliQuota {
   const observedAt = at.toISOString();
@@ -223,10 +235,10 @@ export function quotaFromUsage(usage: unknown, credits: unknown, at: Date): CliQ
     }
     throw new Error(data);
   }
-  const windows = (Array.isArray(data["groups"]) ? data["groups"] : []).flatMap((group) => {
+  const groups = (Array.isArray(data["groups"]) ? data["groups"] : []).map((group) => {
     const label = isDict(group) ? str(group["name"]) : undefined;
     const buckets = isDict(group) && Array.isArray(group["buckets"]) ? group["buckets"] : [];
-    return buckets.flatMap((bucket) => {
+    const windows = buckets.flatMap((bucket) => {
       const key = isDict(bucket) ? str(bucket["id"]) : undefined;
       if (!isDict(bucket) || key === undefined || bucket["disabled"] === true) {
         return [];
@@ -242,13 +254,45 @@ export function quotaFromUsage(usage: unknown, credits: unknown, at: Date): CliQ
         },
       ];
     });
+    return { label, windows };
   });
-  const spent = windows.filter((window) => (window.usedPercent ?? 0) >= 100);
-  const limited = windows.length > 0 && spent.length === windows.length;
-  // The first reset frees its group's models. Resets are ISO times in one form, so their UTF-16 code
-  // units order them, never `localeCompare`, whose collation puts a symbol before a digit; a bucket
-  // with no reset known comes last.
-  const binding = spent.toSorted((a, b) => byReset(a.resetsAt, b.resetsAt))[0];
+  const windows = groups.flatMap((group) => group.windows);
+  // Groups whose buckets share a stem are one pool; a group with no bucket that meters is none.
+  const byKey = new Map<string, { label: string | undefined; windows: typeof windows }>();
+  for (const group of groups) {
+    const first = group.windows[0];
+    if (first === undefined) {
+      continue;
+    }
+    const key = poolKeyOf(first.key);
+    const known = byKey.get(key);
+    byKey.set(key, {
+      label: known?.label ?? group.label,
+      windows: [...(known?.windows ?? []), ...group.windows],
+    });
+  }
+  const pools = [...byKey].map(([key, pool]) => {
+    const spent = pool.windows.filter((window) => (window.usedPercent ?? 0) >= 100);
+    // The pool frees when the last of its spent buckets resets, so one with no reset known leaves
+    // the pool's unknown.
+    const binding =
+      spent.find((window) => window.resetsAt === null) ??
+      spent.toSorted((a, b) => byReset(b.resetsAt, a.resetsAt))[0];
+    return {
+      key: key.slice(0, 40),
+      ...(pool.label === undefined ? {} : { label: pool.label.slice(0, 80) }),
+      limited: binding !== undefined,
+      limitedUntil: binding?.resetsAt ?? null,
+      limitedBy: binding?.key ?? null,
+      observedAt,
+    };
+  });
+  const stopped = pools.filter((pool) => pool.limited);
+  const limited = pools.length > 0 && stopped.length === pools.length;
+  // The first pool to free lets its models run again. Resets are ISO times in one form, so their
+  // UTF-16 code units order them, never `localeCompare`, whose collation puts a symbol before a
+  // digit; a pool with no reset known comes last.
+  const first = stopped.toSorted((a, b) => byReset(a.limitedUntil, b.limitedUntil))[0];
   const balance = commandData(credits, "credits");
   const remaining =
     typeof balance === "string" || typeof balance["remaining_credits"] !== "number"
@@ -257,10 +301,11 @@ export function quotaFromUsage(usage: unknown, credits: unknown, at: Date): CliQ
   const parsed = CliQuotaSchema.safeParse({
     observedAt,
     source: "read",
-    status: limited ? "limited" : spent.length > 0 ? "warning" : "allowed",
-    limitedUntil: limited ? (binding?.resetsAt ?? null) : null,
-    limitedBy: limited ? (binding?.key ?? null) : null,
+    status: limited ? "limited" : stopped.length > 0 ? "warning" : "allowed",
+    limitedUntil: limited ? (first?.limitedUntil ?? null) : null,
+    limitedBy: limited ? (first?.limitedBy ?? null) : null,
     windows,
+    pools,
     credits:
       remaining === null
         ? null

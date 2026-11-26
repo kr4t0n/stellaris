@@ -1,4 +1,5 @@
 import {
+  poolHolds,
   runnerLimitHold,
   runnerPause,
   runnerSyncing,
@@ -76,18 +77,34 @@ export function suggestRunnerName(hostname: string, taken: readonly string[]): s
 }
 
 /**
- * The CLIs on a runner whose limits hold their turns now, each with when the hold lifts and whether
- * the user's pause holds it too, which leaves the limit's hold changing nothing.
+ * The CLIs on a runner whose limits hold their turns now, the whole CLI's or one pool's of its
+ * models (`pool`, with the CLI's name for it), each with when the hold lifts and whether the user's
+ * pause holds it too, which leaves the limit's hold changing nothing.
  */
 export function heldClis(
   runner: Runner,
   now: number,
-): { readonly cli: CliKind; readonly until: string; readonly paused: boolean }[] {
+): {
+  readonly cli: CliKind;
+  readonly pool: string | null;
+  readonly label: string | null;
+  readonly until: string;
+  readonly paused: boolean;
+}[] {
   return runner.clis.flatMap((cli) => {
+    const paused = runnerPause(runner, cli) !== undefined;
     const hold = runnerLimitHold(runner, cli, new Date(now));
-    return hold === null
-      ? []
-      : [{ cli, until: hold.until, paused: runnerPause(runner, cli) !== undefined }];
+    const quota = runner.quotas?.[cli];
+    return [
+      ...(hold === null ? [] : [{ cli, pool: null, label: null, until: hold.until, paused }]),
+      ...(quota === undefined ? [] : poolHolds(quota, new Date(now))).map((held) => ({
+        cli,
+        pool: held.pool,
+        label: held.label,
+        until: held.until,
+        paused,
+      })),
+    ];
   });
 }
 
@@ -140,9 +157,13 @@ export function runnerState(
         });
   const holds = heldClis(runner, now);
   const held = holds.map(
-    (hold) => `${hold.cli} held by its limit for ${until(Date.parse(hold.until) - now)}`,
+    (hold) =>
+      `${hold.pool === null ? hold.cli : `${hold.cli}'s ${hold.label ?? hold.pool}`} held by ${
+        hold.pool === null ? "its" : "their"
+      } limit for ${until(Date.parse(hold.until) - now)}`,
   );
-  const unpaused = holds.filter((hold) => !hold.paused).map((hold) => hold.cli);
+  // A CLI held whole or for one pool is named once in the label; the detail names the pool.
+  const unpaused = [...new Set(holds.filter((hold) => !hold.paused).map((hold) => hold.cli))];
   const heldLabel = unpaused.length === 0 ? [] : [`${unpaused.join(", ")} held`];
   if (runner.status !== "connected") {
     const away = `away${runner.lastSeen === undefined ? "" : `, last seen ${ago(runner.lastSeen, now)}`}`;

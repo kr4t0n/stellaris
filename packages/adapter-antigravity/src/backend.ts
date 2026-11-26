@@ -32,7 +32,7 @@ export interface AntigravityOptions {
   readonly spawn?: SpawnAgy | undefined;
   /** Runs `agy -p` to its end, for the quota read; injectable for tests. */
   readonly runPrint?: RunPrint | undefined;
-  /** The clock quota reports are stamped by; tests inject one. */
+  /** The clock quota reports, a read's or a refused turn's, are stamped by; tests inject one. */
   readonly now?: (() => Date) | undefined;
 }
 
@@ -98,6 +98,7 @@ export class AntigravityBackend implements AgentBackend {
       ...(options.env === undefined ? {} : { env: options.env }),
       ...(options.stderr === undefined ? {} : { stderr: options.stderr }),
       ...(options.recordDir === undefined ? {} : { recordDir: options.recordDir }),
+      ...(options.now === undefined ? {} : { now: options.now }),
     };
   }
 }

@@ -560,3 +560,147 @@ describe("holding a CLI while its limit lasts", () => {
     await scheduler.stop();
   });
 });
+
+describe("holding one pool of a CLI's models while its limit lasts", () => {
+  let dir: string;
+  let society: TestSociety | null = null;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), "stellaris-pool-test-"));
+  });
+
+  afterEach(async () => {
+    await society?.stop();
+    society = null;
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  /**
+   * A runner's login on 2026-11-26: a citizen's turn on a Claude model through Antigravity was
+   * refused for the third-party pool's quota, and its next turn, on a Gemini model, ran. Here a society on one
+   * clock in a project on pod has three Antigravity citizens (one on a Claude model, one on a Gemini
+   * model, one with none set), one on Claude Code with a model set, and one on Codex. An
+   * Antigravity turn on a Claude model is refused for the third-party pool while `refusing` says
+   * so, reporting what the adapter reports for agy's words.
+   */
+  it("holds the refused pool's turns until its reset while the other pool's and other CLIs' run", async () => {
+    let clock = Date.parse("2026-11-26T14:42:52.000Z");
+    const now = (): Date => new Date(clock);
+    const { board } = await Board.init(dir, { name: "pools" }, { now });
+    await addWorkRoles(board);
+    await board.addProject(USER, { slug: "lab" });
+    const citizens = [
+      { name: "eng-1", cli: "antigravity", model: "claude-sonnet-4-6" },
+      { name: "eng-2", cli: "antigravity", model: "gemini-4-neon" },
+      { name: "eng-3", cli: "antigravity" },
+      { name: "eng-4", cli: "claude", model: "opus" },
+      { name: "rev-1", cli: "codex" },
+    ] as const;
+    for (const citizen of citizens) {
+      await board.addAgent(USER, { ...citizen, role: "engineer", memberships: ["lab"] });
+    }
+    let refusing = false;
+    const ran: string[] = [];
+    const backend = (kind: CliKind): AgentBackend => ({
+      kind,
+      newSession: () => Promise.resolve(`session-${ran.length}`),
+      runTurn: (request) => {
+        ran.push(request.spec.agent);
+        if (kind === "antigravity" && refusing && request.spec.model === "claude-sonnet-4-6") {
+          const observedAt = now().toISOString();
+          return Promise.resolve({
+            events: [],
+            finalText: "",
+            usage: ZERO_USAGE,
+            costUsd: 0,
+            status: null,
+            exitReason: "error",
+            error:
+              "usage limit reached: Third-party quota reached. Please switch to Gemini models or upgrade your subscription to increase your limits. Resets in 3h49m54s.",
+            quota: CliQuotaSchema.parse({
+              observedAt,
+              source: "turn",
+              status: "warning",
+              pools: [
+                {
+                  key: "3p",
+                  limited: true,
+                  limitedUntil: new Date(clock + 13_794_000).toISOString(),
+                  observedAt,
+                },
+              ],
+            }),
+          });
+        }
+        return Promise.resolve({
+          events: [],
+          finalText: "done",
+          usage: ZERO_USAGE,
+          costUsd: 0,
+          status: {
+            summary: "done",
+            claimsHeld: [],
+            blockedOn: [],
+            needsUserDecision: false,
+            memoryUpdated: false,
+          },
+          exitReason: "completed",
+        });
+      },
+    });
+    society = await startTestSociety({
+      board,
+      runnerName: "pod",
+      backends: () => ({
+        claude: backend("claude"),
+        codex: backend("codex"),
+        antigravity: backend("antigravity"),
+      }),
+      now,
+      hubNow: now,
+    });
+    await board.placeProject("lab", "pod");
+    const scheduler = new Scheduler({
+      board,
+      runner: society.hub,
+      now,
+      timings: { debounceMs: 0, userDebounceMs: 0, heartbeatMs: 24 * 3_600_000 },
+      concurrency: 8,
+    });
+    const settle = async (): Promise<void> => {
+      await scheduler.tick();
+      await scheduler.drain();
+    };
+    const wakeAll = async (): Promise<void> => {
+      for (const { name } of citizens) {
+        await board.requestWake(USER, { agent: name, project: "lab", reason: "work" });
+      }
+    };
+    await settle();
+    expect(ran.toSorted()).toEqual(citizens.map(({ name }) => name).toSorted());
+    ran.length = 0;
+
+    refusing = true;
+    await board.requestWake(USER, { agent: "eng-1", project: "lab", reason: "work" });
+    await settle();
+    expect(ran).toEqual(["eng-1"]);
+    ran.length = 0;
+
+    // Seven minutes on, as the citizen's next turn was: every turn runs but the refused pool's.
+    clock += 7 * 60_000;
+    await wakeAll();
+    await settle();
+    expect(ran.toSorted()).toEqual(["eng-2", "eng-3", "eng-4", "rev-1"]);
+    ran.length = 0;
+
+    // At the reset the kept wake goes, as the wake it was.
+    refusing = false;
+    clock = Date.parse("2026-11-26T18:32:46.000Z") - 1;
+    await settle();
+    expect(ran).toEqual([]);
+    clock += 1;
+    await settle();
+    expect(ran).toEqual(["eng-1"]);
+    await scheduler.stop();
+  });
+});

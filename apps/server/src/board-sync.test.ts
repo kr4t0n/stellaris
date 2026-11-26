@@ -128,7 +128,7 @@ describe("a runner's board sync as it connects", () => {
     const syncing = await board.readRunner("pod");
     expect(syncing.sync).toMatchObject({ phase: "starting", files: 0, totalFiles: null });
     expect(runnerSyncing(syncing)).toBeDefined();
-    expect(heldOn([syncing], "pod", "claude", new Date())).toBe(true);
+    expect(heldOn([syncing], "pod", { cli: "claude" }, new Date())).toBe(true);
     expect(syncing.paused).toBeUndefined();
 
     await board.requestWake(USER, { agent: "eng-1", project: "lab", reason: "work" });
@@ -156,7 +156,7 @@ describe("a runner's board sync as it connects", () => {
     await scheduler.drain();
 
     const synced = await board.readRunner("pod");
-    expect(heldOn([synced], "pod", "claude", new Date())).toBe(false);
+    expect(heldOn([synced], "pod", { cli: "claude" }, new Date())).toBe(false);
     expect(synced.sync).toMatchObject({ phase: "done", attempt: 1 });
     expect(synced.sync?.files).toBe(synced.sync?.totalFiles);
     expect(copiedAtDone).toEqual(servedAtDone);
@@ -367,7 +367,7 @@ describe("a runner's board sync as it connects", () => {
     });
     await asked.promise;
     await board.placeProject("lab", "pod");
-    expect(heldOn(await board.listRunners(), "pod", "claude", new Date())).toBe(true);
+    expect(heldOn(await board.listRunners(), "pod", { cli: "claude" }, new Date())).toBe(true);
 
     // The server stops first, as on a SIGTERM, then the runner goes for good: the record still
     // says it is connected and syncing, so it holds the runner's turns, its holders' leases, and
@@ -388,7 +388,7 @@ describe("a runner's board sync as it connects", () => {
     const away = await board.readRunner("pod");
     expect(away.status).toBe("disconnected");
     expect(runnerSyncing(away)).toBeUndefined();
-    expect(heldOn(await board.listRunners(), "pod", "claude", new Date())).toBe(false);
+    expect(heldOn(await board.listRunners(), "pod", { cli: "claude" }, new Date())).toBe(false);
     expect((await board.readRunner("far")).status).toBe("connected");
   });
 

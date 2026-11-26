@@ -7516,8 +7516,8 @@ export class Board {
   }
 
   /**
-   * The lease a holder keeps while the user's pause, or its CLI's limit, holds its turns in the
-   * task's project (`heldOn`), when later than the one it has, else null. It is renewed for a full
+   * The lease a holder keeps while the user's pause, or the limit of its CLI or its model's pool,
+   * holds its turns in the task's project (`heldOn`), when later than the one it has, else null. It is renewed for a full
    * lease once less than half is left, as for a pending cron, so it never lapses while the holder
    * cannot take a turn there, and after the resume or the reset the holder has at least half a
    * lease to come back to it.
@@ -7532,7 +7532,7 @@ export class Board {
       return null;
     }
     const holder = await this.readAgent(task.claimedBy).catch(() => null);
-    if (holder === null || !heldOn(runners, runner, holder.cli, now)) {
+    if (holder === null || !heldOn(runners, runner, holder, now)) {
       return null;
     }
     const lease = Date.parse(task.leaseExpiresAt);

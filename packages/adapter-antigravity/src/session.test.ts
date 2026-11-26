@@ -4,7 +4,7 @@ import { turnStatusJsonSchema, type AgentEvent } from "@stellaris/shared";
 import { describe, expect, it, vi } from "vitest";
 import { AntigravityBackend } from "./backend.js";
 import type { SpawnAgy } from "./rpc.js";
-import { isTransient, warningOf } from "./session.js";
+import { isTransient, quotaRefusalOf, warningOf } from "./session.js";
 
 const SESSION = "6b98cecf-cf82-4a72-a2bc-28d4b3331028";
 
@@ -392,6 +392,123 @@ describe("AntigravityBackend", () => {
     expect(result.error).toBe("Authentication required");
     expect(result.transient).toBeUndefined();
     expect(prompts(fake.sent)).toHaveLength(1);
+  });
+
+  /**
+   * The service's sentences for a refusal of the plan's quota, as two citizens' turns on one login
+   * failed with them on 2026-11-26, one for each of Antigravity's pools.
+   */
+  describe("a refusal of the plan's quota", () => {
+    // When those turns were refused.
+    const AT = new Date("2026-11-26T15:50:19.000Z");
+    const THIRD_PARTY_AT = new Date("2026-11-26T14:42:52.000Z");
+    const INDIVIDUAL =
+      "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h42m21s.";
+    const THIRD_PARTY =
+      "Third-party quota reached. Please switch to Gemini models or upgrade your subscription to increase your limits. Resets in 3h49m54s.";
+
+    /** A turn agy ends with `words` as its warning, on a clock stopped at `at`. */
+    async function refusedWith(words: string, at: Date = AT) {
+      const fake = fakeAgy({
+        initialize: () => INITIALIZED,
+        "session/new": () => OPENED,
+        "session/prompt": (_, agent) => {
+          agent.update({
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: `\n\u26a0 ${words}\n` },
+          });
+          return ended();
+        },
+      });
+      return new AntigravityBackend({ spawn: fake.spawn, now: () => at }).runTurn(request());
+    }
+
+    it("limits the pool each sentence names until its countdown ends, as the plan's limit, never transient", async () => {
+      for (const [words, pool, at, until] of [
+        [INDIVIDUAL, "gemini", AT, "2026-11-26T17:32:40.000Z"],
+        [THIRD_PARTY, "3p", THIRD_PARTY_AT, "2026-11-26T18:32:46.000Z"],
+      ] as const) {
+        const result = await refusedWith(words, at);
+        expect(result.exitReason).toBe("error");
+        expect(result.error).toBe(`usage limit reached: ${words}`);
+        expect(result.transient).toBeUndefined();
+        expect(result.quota).toEqual({
+          observedAt: at.toISOString(),
+          source: "turn",
+          status: "warning",
+          limitedUntil: null,
+          limitedBy: null,
+          plan: null,
+          windows: [],
+          credits: null,
+          extraUsage: null,
+          pools: [
+            {
+              key: pool,
+              limited: true,
+              limitedUntil: until,
+              limitedBy: null,
+              observedAt: at.toISOString(),
+            },
+          ],
+        });
+      }
+    });
+
+    it("limits the pool with no reset when its countdown does not read, for the half-hour hold", async () => {
+      const result = await refusedWith(
+        "Individual quota reached. Please upgrade your subscription to increase your limits. Resets soon.",
+      );
+      expect(result.error).toMatch(/^usage limit reached: Individual quota reached\./);
+      expect(result.quota?.pools).toMatchObject([
+        { key: "gemini", limited: true, limitedUntil: null },
+      ]);
+    });
+
+    it("limits the whole login for a pool it does not know, and reads days in a countdown", async () => {
+      const result = await refusedWith("Team quota reached. Resets in 2d3h.");
+      expect(result.quota).toMatchObject({
+        status: "limited",
+        limitedUntil: "2026-11-28T18:50:19.000Z",
+      });
+      expect(result.quota?.pools).toBeUndefined();
+      expect(result.transient).toBeUndefined();
+    });
+
+    it("reads the sentence wherever agy puts it: in its executor's 429, or as its answer to the prompt", async () => {
+      const wrapped = await refusedWith(
+        `agent executor error: generating and executing: Error 429, Message: ${THIRD_PARTY}, Status: RESOURCE_EXHAUSTED, Details: []`,
+        THIRD_PARTY_AT,
+      );
+      expect(wrapped.transient).toBeUndefined();
+      expect(wrapped.quota?.pools).toMatchObject([
+        { key: "3p", limitedUntil: "2026-11-26T18:32:46.000Z" },
+      ]);
+      const fake = fakeAgy({
+        initialize: () => INITIALIZED,
+        "session/new": () => OPENED,
+        "session/prompt": () => ({ error: { code: -32000, message: INDIVIDUAL } }),
+      });
+      const answered = await new AntigravityBackend({ spawn: fake.spawn, now: () => AT }).runTurn(
+        request(),
+      );
+      expect(answered.error).toBe(`usage limit reached: ${INDIVIDUAL}`);
+      expect(answered.quota?.pools).toMatchObject([
+        { key: "gemini", limitedUntil: "2026-11-26T17:32:40.000Z" },
+      ]);
+    });
+
+    it("reads no other failure as a refusal of the quota", () => {
+      expect(
+        quotaRefusalOf("There was a network issue connecting to the server, please try again.", AT),
+      ).toBeUndefined();
+      expect(
+        quotaRefusalOf(
+          "agent executor error: generating and executing: Error 429, Message: stub refusal 429, Status: RESOURCE_EXHAUSTED, Details: []",
+          AT,
+        ),
+      ).toBeUndefined();
+    });
   });
 
   it("ends a turn whose agy exits mid-prompt with its last words", async () => {

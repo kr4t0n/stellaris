@@ -1,4 +1,4 @@
-import { RunnerSchema } from "@stellaris/shared";
+import { CliQuotaSchema, RunnerSchema } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
 import { runnerListLine } from "./runner-list.js";
 
@@ -23,6 +23,34 @@ describe("runnerListLine", () => {
     startedAt: "2026-10-13T11:58:00.000Z",
     updatedAt: "2026-10-13T11:59:59.000Z",
   };
+
+  it("names a pool of a CLI's models its limit holds, and until when", () => {
+    const pod = RunnerSchema.parse({
+      name: "pod",
+      os: "linux",
+      clis: ["antigravity"],
+      capabilities: [],
+      status: "connected",
+      quotas: {
+        antigravity: CliQuotaSchema.parse({
+          observedAt: "2026-10-13T11:50:00.000Z",
+          source: "turn",
+          status: "warning",
+          pools: [
+            {
+              key: "3p",
+              limited: true,
+              limitedUntil: "2026-10-13T15:40:00.000Z",
+              observedAt: "2026-10-13T11:50:00.000Z",
+            },
+          ],
+        }),
+      },
+    });
+    expect(runnerListLine(pod, NOW)).toBe(
+      "pod  connected  linux  antigravity  antigravity 3p held until 2026-10-13T15:40:00.000Z",
+    );
+  });
 
   it("says a runner syncs its board copy, how far it has come, and after a failed try why and when the next is", () => {
     expect(runnerListLine(studio, NOW)).toBe("studio  connected  darwin  v0.5.0  claude  gpu");

@@ -2588,8 +2588,14 @@ export class Scheduler {
           }
           if (named.length > 0) {
             this.settleTasksOwed(key, named, carried, ended);
-            // Saved now, since a stop waits for turns but runs no pass after them.
-            await this.save();
+            // Saved now, since a stop waits for turns but runs no pass after them; a save that
+            // fails is left to the next pass's.
+            await this.save().catch((error: unknown) => {
+              this.log.error(
+                { agent: dispatch.agent, project: dispatch.project, error: String(error) },
+                "could not save the tasks a turn named",
+              );
+            });
           }
         }
       })();

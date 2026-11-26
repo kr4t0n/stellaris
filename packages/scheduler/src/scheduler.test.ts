@@ -15,7 +15,7 @@ import {
   type Ulid,
   type WorkspaceConversation,
 } from "@stellaris/shared";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
   parseTimings,
@@ -712,6 +712,33 @@ describe("Scheduler", () => {
         ["task_done", "rev-1", second, [second]],
         ["manual", "user", undefined, [second]],
         ["task_done", undefined, second, [second]],
+      ]);
+    });
+
+    it("logs a save that fails as a turn naming a task done ends, and the next pass saves it", async () => {
+      const { board, runner } = await setup({ timings });
+      const errors: string[] = [];
+      const log = {
+        info() {},
+        warn() {},
+        error: (_: object, message: string) => errors.push(message),
+      };
+      const scheduler = new Scheduler({ board, runner, now, timings, log });
+      runner.hold = true;
+      const first = await finish(board, scheduler, "first");
+      advance(timings.debounceMs);
+      await scheduler.tick();
+      vi.spyOn(board, "writeState").mockRejectedValueOnce(new Error("disk full"));
+      runner.hold = false;
+      runner.releaseHeld();
+      await scheduler.drain();
+      expect(errors).toEqual(["could not save the tasks a turn named"]);
+      await scheduler.tick();
+      const restarted = new Scheduler({ board, runner, now, timings });
+      await wakeLater(board, restarted);
+      expect(homeTurns(runner)).toEqual([
+        ["task_done", "rev-1", first, [first]],
+        ["manual", "user", undefined, undefined],
       ]);
     });
 

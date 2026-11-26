@@ -6,7 +6,8 @@ import { useTranscript } from "../lib/session.js";
 
 /**
  * A finished turn from its stored transcript, read only when an entry with one is given, and why it
- * could not be read: never a transcript the board does not have, which is a turn that kept none.
+ * could not be read while there is none to show: never a transcript the board does not have, which
+ * is a turn that kept none, nor a read again that failed once the steps had come, which keeps them.
  */
 export function useStoredTurn(
   name: string,
@@ -23,6 +24,6 @@ export function useStoredTurn(
   return {
     turn,
     loading: entry?.turnId !== undefined && transcript.isPending,
-    error: namesNothing(transcript.error) ? null : transcript.error,
+    error: turn !== undefined || namesNothing(transcript.error) ? null : transcript.error,
   };
 }

@@ -106,7 +106,9 @@ export function ProjectView() {
   if (project === undefined) {
     return (
       <PaneNote>
-        {projects.data === undefined ? "Reading the project…" : `There is no project ${slug}.`}
+        {projects.data === undefined
+          ? readNote("the project", projects.error)
+          : `There is no project ${slug}.`}
       </PaneNote>
     );
   }

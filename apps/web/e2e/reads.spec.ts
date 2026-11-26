@@ -193,3 +193,75 @@ test("a turn the board kept no steps of still says so", async ({ page }) => {
   await page.goto(`/citizen/desk?tab=turns&turn=${DESK_TURN}`);
   await expect(viewOf(page)).toContainText("No steps were kept for this turn.");
 });
+
+test("an opened turn keeps its steps when its read again after a resumed stream fails", async ({
+  page,
+}) => {
+  await fakeBoard(page);
+  // The stream ends once the steps show, and its next connection opens and ends at once: a resume,
+  // after which the interface reads every query again. Later connections stay open, as the fake's do.
+  const release = Promise.withResolvers<void>();
+  let streams = 0;
+  await page.route(
+    (url) => url.pathname === "/api/events/stream",
+    async (route) => {
+      streams += 1;
+      if (streams === 1) {
+        await release.promise;
+      }
+      if (streams <= 2) {
+        await route.fulfill({ contentType: "text/event-stream", body: "" });
+      }
+    },
+  );
+  let failing = false;
+  await page.route(
+    (url) => url.pathname === `/api/agents/desk/turns/${DESK_TURN}`,
+    (route) => (failing ? refuse(route) : route.fallback()),
+  );
+  const view = viewOf(page);
+  await page.goto(`/citizen/desk?tab=turns&turn=${DESK_TURN}`);
+  await expect(view).toContainText("Looking at the request.");
+
+  // The read again and its one retry both fail; once both answers are in and the page has drawn
+  // twice, the steps are still there.
+  failing = true;
+  const refused = (response: { url: () => string; status: () => number }) =>
+    response.url().includes(`/api/agents/desk/turns/${DESK_TURN}`) && response.status() === 500;
+  const first = page.waitForResponse(refused);
+  release.resolve();
+  await (await first).finished();
+  await (await page.waitForResponse(refused)).finished();
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+  await expect(view).toContainText("Looking at the request.");
+  await expect(view).not.toContainText("Could not read");
+});
+
+test("an answer the schemas refuse says its first issue, never Zod's whole list", async ({
+  page,
+}) => {
+  await fakeBoard(page);
+  await page.route(
+    (url) => url.pathname === `/api/tasks/${STAGE_TASK}`,
+    (route) => route.fulfill({ json: { id: "x" } }),
+  );
+  await page.goto(`/task/${STAGE_TASK}`);
+  await expect(viewOf(page)).toContainText("Could not read the task: id: expected a ULID");
+});
+
+test("the metrics say why their read failed, whatever the failure", async ({ page }) => {
+  await fakeBoard(page);
+  await page.route(
+    (url) => url.pathname === "/api/metrics",
+    (route) => route.fulfill({ json: {} }),
+  );
+  await page.goto("/metrics");
+  await expect(viewOf(page)).toContainText(
+    'window: Invalid option: expected one of "24h"|"7d"|"all"',
+  );
+});

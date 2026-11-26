@@ -2,7 +2,7 @@ import type { CitizenTokens, Member, MetricsWindow, Runner } from "@stellaris/sh
 import { Link, useSearch } from "@tanstack/react-router";
 import { useId } from "react";
 import { CliIcon } from "../components/CliIcon.js";
-import { pairsOf } from "../lib/api.js";
+import { pairsOf, readNote } from "../lib/api.js";
 import { ago } from "../lib/format.js";
 import {
   useMembers,
@@ -177,7 +177,7 @@ export function CitizensView() {
   const switcherLabel = useId();
   const retiredHeading = useId();
   if (members.data === undefined) {
-    return <PaneNote>Reading the roster…</PaneNote>;
+    return <PaneNote>{readNote("the roster", members.error)}</PaneNote>;
   }
   // The user takes no turns and has no CLI; it is not a citizen here.
   const citizens = members.data.filter((member) => member.cli !== null);

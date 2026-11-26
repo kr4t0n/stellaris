@@ -129,7 +129,9 @@ function CitizenPage({
   if (member === undefined) {
     return (
       <PaneNote>
-        {members.data === undefined ? "Reading the roster…" : `There is no citizen ${name}.`}
+        {members.data === undefined
+          ? readNote("the roster", members.error)
+          : `There is no citizen ${name}.`}
       </PaneNote>
     );
   }

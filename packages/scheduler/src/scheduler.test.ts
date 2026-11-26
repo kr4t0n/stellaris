@@ -184,6 +184,26 @@ const cronTurns = (runner: FakeRunner) =>
     .filter((d) => (d.crons ?? []).length > 0)
     .map((d) => [d.agent, d.project, d.channel ?? null, d.trigger.kind, d.crons]);
 
+/** eng-1 creates a task in demo, which `by` takes and finishes, with a tick to read the events. */
+async function finish(
+  board: Board,
+  scheduler: Scheduler,
+  title: string,
+  by: Actor = REV,
+): Promise<Ulid> {
+  const task = await board.createTask(ENG, { project: "demo", title });
+  await board.claimTask(by, { task_id: task.id });
+  await board.advanceTask(by, { task_id: task.id });
+  await scheduler.tick();
+  return task.id;
+}
+
+/** eng-1's turns in its home conversation: each trigger's kind, sender, and task, and the tasks done. */
+const homeTurns = (runner: FakeRunner) =>
+  runner.dispatches
+    .filter((d) => d.agent === "eng-1" && d.thread === undefined)
+    .map((d) => [d.trigger.kind, d.trigger.from, d.trigger.taskId, d.tasksDone]);
+
 describe("Scheduler", () => {
   let dir: string;
   let clock: Date;
@@ -474,6 +494,69 @@ describe("Scheduler", () => {
     expect(runner.dispatches.at(-1)).toMatchObject({
       agent: "eng-1",
       trigger: { kind: "task_done", taskId: task.id },
+    });
+  });
+
+  describe("a wake for finished tasks", () => {
+    const timings = { debounceMs: 30_000 };
+
+    /** Waits out the debounce, then runs what is due. */
+    const settle = async (scheduler: Scheduler): Promise<void> => {
+      advance(timings.debounceMs);
+      await scheduler.tick();
+      await scheduler.drain();
+    };
+
+    it("names every task done within the debounce in its one turn", async () => {
+      const { board, runner, scheduler } = await setup({ timings });
+      const first = await finish(board, scheduler, "first");
+      advance(9_000);
+      const second = await finish(board, scheduler, "second");
+      await settle(scheduler);
+      expect(homeTurns(runner)).toEqual([["task_done", "rev-1", first, [first, second]]]);
+      expect(runner.dispatches.at(-1)?.trigger.reason).toBe(
+        `tasks ${first}, ${second} you created are done`,
+      );
+
+      // Finished by rev-1 and by the user, the turn names neither as the sender.
+      runner.dispatches.length = 0;
+      const third = await finish(board, scheduler, "third");
+      advance(9_000);
+      const fourth = await finish(board, scheduler, "fourth", USER);
+      await settle(scheduler);
+      expect(homeTurns(runner)).toEqual([["task_done", undefined, third, [third, fourth]]]);
+      expect(runner.dispatches.at(-1)?.trigger.reason).toBe(
+        `tasks ${third}, ${fourth} you created are done`,
+      );
+    });
+
+    it("keeps a finished task under a mention it merges with, either way round", async () => {
+      const { board, runner, scheduler } = await setup({ timings });
+      // A task done, then the user's mention, which runs at once on its higher priority.
+      const first = await finish(board, scheduler, "first");
+      await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 a question" });
+      await scheduler.tick();
+      await scheduler.drain();
+      expect(homeTurns(runner)).toEqual([["mention", "user", undefined, [first]]]);
+
+      // A citizen's mention, then a task done: the first wake's trigger stays.
+      runner.dispatches.length = 0;
+      await board.postMessage(REV, { channel: "demo/general", body: "@eng-1 when you can" });
+      await scheduler.tick();
+      advance(9_000);
+      const second = await finish(board, scheduler, "second");
+      await settle(scheduler);
+      expect(homeTurns(runner)).toEqual([["mention", "rev-1", undefined, [second]]]);
+    });
+
+    it("keeps the tasks done of a queued wake across a restart", async () => {
+      const { board, runner, scheduler } = await setup({ timings });
+      const first = await finish(board, scheduler, "first");
+      advance(9_000);
+      const second = await finish(board, scheduler, "second");
+      const restarted = new Scheduler({ board, runner, now, timings });
+      await settle(restarted);
+      expect(homeTurns(runner)).toEqual([["task_done", "rev-1", first, [first, second]]]);
     });
   });
 

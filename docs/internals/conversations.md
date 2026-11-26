@@ -60,6 +60,8 @@ A turn whose conversation's last turn ended with `error` or `timeout` is told so
 
 Onboarding, manual, heartbeat, and reflection wakes dispatch immediately. Tests that assume otherwise deadlock on a pending onboarding turn.
 
+A wake for a conversation that already has one queued merges into it (`enqueue` in the scheduler), so a burst gives the conversation one turn: the merged wake is due at the earlier of the two times and keeps one trigger, the higher priority's, the first on a tie. A merged mention's or post's message reaches the turn in its digest, but what the digest won't show rides on the dispatch beside the trigger, whichever trigger the merge keeps: every cron that came due (`crons`, see [crons](board.md#crons)) and every task the citizen created that finished (`tasksDone`), both kept with the queued dispatch across a restart. The prompt names each finished task, and a kept `task_done` trigger's reason lists them, naming its sender only when one finished them all. A merge once dropped every finished task but the kept trigger's: a citizen whose two tasks finished nine seconds apart got one turn naming the first, and the second went unreported until a reflection found it over an hour later.
+
 ## Ending a conversation
 
 ### A conversation does not end under someone else's turn

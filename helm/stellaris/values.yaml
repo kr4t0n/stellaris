@@ -244,7 +244,8 @@ runner:
     logLevel: info
     # Turns each runner runs at once: a number, or `unlimited`; empty is 2.
     concurrency: ""
-    # The CLIs it runs turns with, of claude, codex, and antigravity; empty is claude and codex.
+    # The CLIs it runs turns with, of claude, codex, and antigravity; empty is all three, and
+    # [claude, codex] leaves Antigravity out.
     clis: []
     # What it offers, matched against what projects and tasks require, such as `gpu`.
     capabilities: []

@@ -204,20 +204,20 @@ in detail. The board server reads these, and the admin CLI `STELLARIS_DATA_DIR`:
 
 A runner reads these, and sets `STELLARIS_AGENT_TOKEN` and `HUSKY=0` for each CLI:
 
-| Variable                  | Default                 | Purpose                                 |
-| ------------------------- | ----------------------- | --------------------------------------- |
-| `STELLARIS_SERVER_URL`    | `http://127.0.0.1:4700` | The board server, as it reaches it      |
-| `STELLARIS_RUNNER_TOKEN`  | none                    | A token from `runner add`               |
-| `STELLARIS_RUNNER_DIR`    | `./runner-data`         | Its data: mirror, homes, repositories   |
-| `STELLARIS_LOG_LEVEL`     | `info`                  | How much it logs                        |
-| `STELLARIS_CONCURRENCY`   | `2`                     | Turns at once on its machine            |
-| `STELLARIS_CLIS`          | `claude,codex`          | The CLIs it runs turns with             |
-| `STELLARIS_CAPABILITIES`  | none                    | What it offers projects and tasks       |
-| `STELLARIS_CODEX_SANDBOX` | `danger-full-access`    | Codex's sandbox                         |
-| `STELLARIS_RECORD_DIR`    | none                    | Where to record raw CLI streams         |
-| `ANTHROPIC_API_KEY`       | none                    | Claude Code's key, instead of its login |
-| `OPENAI_API_KEY`          | none                    | Codex's key, instead of its login       |
-| `GEMINI_API_KEY`          | none                    | agy's key, with a setting of its own    |
+| Variable                  | Default                    | Purpose                                 |
+| ------------------------- | -------------------------- | --------------------------------------- |
+| `STELLARIS_SERVER_URL`    | `http://127.0.0.1:4700`    | The board server, as it reaches it      |
+| `STELLARIS_RUNNER_TOKEN`  | none                       | A token from `runner add`               |
+| `STELLARIS_RUNNER_DIR`    | `./runner-data`            | Its data: mirror, homes, repositories   |
+| `STELLARIS_LOG_LEVEL`     | `info`                     | How much it logs                        |
+| `STELLARIS_CONCURRENCY`   | `2`                        | Turns at once on its machine            |
+| `STELLARIS_CLIS`          | `claude,codex,antigravity` | The CLIs it runs turns with             |
+| `STELLARIS_CAPABILITIES`  | none                       | What it offers projects and tasks       |
+| `STELLARIS_CODEX_SANDBOX` | `danger-full-access`       | Codex's sandbox                         |
+| `STELLARIS_RECORD_DIR`    | none                       | Where to record raw CLI streams         |
+| `ANTHROPIC_API_KEY`       | none                       | Claude Code's key, instead of its login |
+| `OPENAI_API_KEY`          | none                       | Codex's key, instead of its login       |
+| `GEMINI_API_KEY`          | none                       | agy's key, with a setting of its own    |
 
 Never commit a real token, nor the GitHub client secret.
 

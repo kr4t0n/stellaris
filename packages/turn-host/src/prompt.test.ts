@@ -108,6 +108,22 @@ function donePrompt(trigger: object, tasksDone?: string[]): string {
   });
 }
 
+/** eng-1's prompt for a wake with this trigger and these proposals decided merged into it. */
+function decidedPrompt(trigger: object, proposalsDecided?: string[]): string {
+  return buildTurnPrompt({
+    dispatch: {
+      ...cronlessDispatch,
+      trigger: TriggerSchema.parse(trigger),
+      priority: 1,
+      ...(proposalsDecided === undefined ? {} : { proposalsDecided }),
+    },
+    messages: [],
+    heldClaims: [],
+    lastTurn: null,
+    onboarding: null,
+  });
+}
+
 describe("buildTurnPrompt", () => {
   it("tells the time in the society's zone, and quotes each cron that woke the turn", () => {
     const cron = {
@@ -733,6 +749,50 @@ describe("buildTurnPrompt", () => {
       `Tasks you created are done: ${first}, ${second}. Tell whoever asked for each, if anyone did.`,
     );
     expect(donePrompt(mention)).not.toContain("you created");
+  });
+
+  it("points at every proposal decided that merged into the wake, whichever trigger it kept", () => {
+    const [first, second] = ["01ARZ3NDEKTSV4RRFFQ69G5FAV", "01ARZ3NDEKTSV4RRFFQ69G5FAW"];
+    const rest =
+      "A decision wakes you in the conversation you filed the proposal from, or at home once that has ended.";
+    const decided = {
+      kind: "proposal_decided",
+      from: "user",
+      fromUser: true,
+      proposalId: first,
+      reason: `your channel proposal ${first} was approved by user`,
+    };
+
+    // One decision reads as before the board carried them, which a wake it queued then has none of.
+    for (const one of [decidedPrompt(decided, [first]), decidedPrompt(decided)]) {
+      expect(one).toContain(
+        `A proposal you made was decided; the decision is the last post in the proposal's thread. ${rest}`,
+      );
+    }
+
+    const both = decidedPrompt(
+      {
+        ...decided,
+        reason: `your channel proposal ${first} was approved by user; your channel proposal ${second} was rejected by user`,
+      },
+      [first, second],
+    );
+    expect(both).toContain(
+      `Trigger: proposal_decided from user. your channel proposal ${first} was approved by user; your channel proposal ${second} was rejected by user`,
+    );
+    expect(both).toContain(
+      `Proposals you made were decided: ${first}, ${second}; each decision is the last post in that proposal's thread. ${rest}`,
+    );
+    expect(both).not.toContain("A proposal you made");
+
+    const mention = { kind: "mention", from: "user", fromUser: true, reason: "mentioned by user" };
+    expect(decidedPrompt(mention, [first])).toContain(
+      `A proposal you made was decided too: ${first}; the decision is the last post in its thread. ${rest}`,
+    );
+    expect(decidedPrompt(mention, [first, second])).toContain(
+      `Proposals you made were decided: ${first}, ${second};`,
+    );
+    expect(decidedPrompt(mention)).not.toContain("you made");
   });
 
   it("frames a turn triggered by operations signals as a decision about proposing", () => {

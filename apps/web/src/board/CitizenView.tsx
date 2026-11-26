@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Button } from "../components/Button.js";
 import { CliIcon } from "../components/CliIcon.js";
 import { useEntities } from "../components/Entities.js";
-import { pairsOf } from "../lib/api.js";
+import { pairsOf, readNote } from "../lib/api.js";
 import { ago } from "../lib/format.js";
 import {
   conversationOf,
@@ -394,8 +394,8 @@ function NowTab({
           <PaneNote>
             {state === "working"
               ? "The turn has not reported a step yet."
-              : stored.loading
-                ? "Reading the last turn…"
+              : stored.loading || stored.error !== null
+                ? readNote("the last turn", stored.error)
                 : lastTurnAt === undefined
                   ? `${name} has not taken a turn yet.`
                   : `${name}'s last turn kept no steps.`}

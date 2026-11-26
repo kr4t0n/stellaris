@@ -1,6 +1,7 @@
 import { currentStage, type Member, type Task } from "@stellaris/shared";
 import { Link, useParams } from "@tanstack/react-router";
 import { useState } from "react";
+import { readNote } from "../lib/api.js";
 import { ago } from "../lib/format.js";
 import { useMembers, useNow, useProjects, useTasks } from "../lib/session.js";
 import { Citizen } from "./Avatar.js";
@@ -82,7 +83,7 @@ export function TasksView() {
       />
       <div className="flex-1 overflow-y-auto px-2 py-2">
         {tasks.data === undefined ? (
-          <PaneNote>Reading the tasks…</PaneNote>
+          <PaneNote>{readNote("the tasks", tasks.error)}</PaneNote>
         ) : groups.length === 0 ? (
           <PaneNote>No tasks in this project yet.</PaneNote>
         ) : (

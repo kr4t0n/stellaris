@@ -1,5 +1,6 @@
 import { signalWakes } from "@stellaris/shared";
 import { Link } from "@tanstack/react-router";
+import { readNote } from "../lib/api.js";
 import { ago } from "../lib/format.js";
 import { useNow, useScheduler, useSignals } from "../lib/session.js";
 import { holdingNow, SIGNAL_LABEL, signalFacts } from "../lib/signals.js";
@@ -28,7 +29,9 @@ export function LogsView() {
       />
       {records.length === 0 ? (
         <PaneNote>
-          {signals.data === undefined ? "Reading the log…" : "Nothing measured yet."}
+          {signals.data === undefined
+            ? readNote("the log", signals.error)
+            : "Nothing measured yet."}
         </PaneNote>
       ) : (
         <ol className="flex-1 overflow-y-auto">

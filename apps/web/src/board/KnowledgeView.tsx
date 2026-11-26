@@ -5,6 +5,7 @@ import { useState } from "react";
 import { BackLink } from "../components/BackLink.js";
 import { Button } from "../components/Button.js";
 import { Markdown } from "../components/Markdown.js";
+import { readNote } from "../lib/api.js";
 import { ago } from "../lib/format.js";
 import { useKnowledge, useNow, useProjects, useSession } from "../lib/session.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
@@ -51,7 +52,9 @@ export function KnowledgeView() {
   if (entry === undefined) {
     return (
       <PaneNote>
-        {knowledge.data === undefined ? "Reading…" : `${owner} has no topic ${topic}.`}
+        {knowledge.data === undefined
+          ? readNote("the topic", knowledge.error, "Reading…")
+          : `${owner} has no topic ${topic}.`}
       </PaneNote>
     );
   }

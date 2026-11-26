@@ -5,7 +5,7 @@ import { useId, useState, type ReactNode } from "react";
 import { BackLink } from "../components/BackLink.js";
 import { LinkedText } from "../components/Entities.js";
 import { Markdown } from "../components/Markdown.js";
-import { namesNothing } from "../lib/api.js";
+import { namesNothing, readNote } from "../lib/api.js";
 import { ago, firstParagraph } from "../lib/format.js";
 import { useMembers, useNow, useProjects, useSession, useTask, useThread } from "../lib/session.js";
 import { Citizen, useDisplayName } from "./Avatar.js";
@@ -431,7 +431,9 @@ export function TaskView() {
   if (task.data === undefined) {
     return (
       <PaneNote>
-        {namesNothing(task.error) ? `There is no task ${taskId}.` : "Reading the task…"}
+        {namesNothing(task.error)
+          ? `There is no task ${taskId}.`
+          : readNote("the task", task.error)}
       </PaneNote>
     );
   }

@@ -101,6 +101,16 @@ export function namesNothing(error: unknown): boolean {
   return error instanceof ApiError && (error.status === 404 || error.code === "VALIDATION");
 }
 
+/**
+ * What a view says while a read has given it nothing: that the read is under way, or once it has
+ * failed, that it could not read what, with the failure's words. A read asked again starts over
+ * with no error, so one that polls says it is reading while it asks, and the note goes with the
+ * first answer. A caller says first what a read that names nothing means.
+ */
+export function readNote(what: string, error: Error | null, reading = `Reading ${what}…`): string {
+  return error === null ? reading : `Could not read ${what}: ${error.message}`;
+}
+
 const ActorSchema = z.object({
   name: NameSchema,
   role: NameSchema,

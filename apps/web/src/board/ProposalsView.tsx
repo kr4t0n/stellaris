@@ -1,6 +1,7 @@
 import type { Proposal, ProposalStatus } from "@stellaris/shared";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
+import { readNote } from "../lib/api.js";
 import { ago } from "../lib/format.js";
 import { useNow, useProposals } from "../lib/session.js";
 import { useDisplayName } from "./Avatar.js";
@@ -73,7 +74,7 @@ export function ProposalsView() {
       />
       <div className="flex-1 overflow-y-auto px-2 py-2">
         {proposals.data === undefined ? (
-          <PaneNote>Reading the proposals…</PaneNote>
+          <PaneNote>{readNote("the proposals", proposals.error)}</PaneNote>
         ) : groups.length === 0 ? (
           <PaneNote>No proposals yet.</PaneNote>
         ) : (

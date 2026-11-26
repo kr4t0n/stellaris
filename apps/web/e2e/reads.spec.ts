@@ -265,3 +265,195 @@ test("the metrics say why their read failed, whatever the failure", async ({ pag
     'window: Invalid option: expected one of "24h"|"7d"|"all"',
   );
 });
+
+/** An answer no schema takes: an object of one field no read's answer has. */
+const UNREADABLE = { nothing: true };
+
+/**
+ * The app's one line while its first reads of the citizens, the projects, and the scheduler have
+ * not all answered: a failure the board answered with, or an answer the schemas refuse, in its own
+ * words, and only no answer at all, or a gateway's in its place, as the server not answering.
+ */
+const OPENING_LINES: ReadonlyArray<{
+  readonly read: string;
+  readonly answer: string;
+  readonly fulfill: (route: Route) => Promise<void>;
+  readonly line: string;
+}> = [
+  {
+    read: "/api/scheduler",
+    answer: "a 500",
+    fulfill: refuse,
+    line: "Could not read the board: disk full",
+  },
+  {
+    read: "/api/members",
+    answer: "a 500",
+    fulfill: refuse,
+    line: "Could not read the board: disk full",
+  },
+  {
+    read: "/api/projects",
+    answer: "a 500",
+    fulfill: refuse,
+    line: "Could not read the board: disk full",
+  },
+  {
+    read: "/api/members",
+    answer: "an answer the schemas refuse",
+    fulfill: (route) => route.fulfill({ json: UNREADABLE }),
+    line: "Could not read the board: Invalid input: expected array, received object",
+  },
+  {
+    read: "/api/projects",
+    answer: "an answer the schemas refuse",
+    fulfill: (route) => route.fulfill({ json: UNREADABLE }),
+    line: "Could not read the board: Invalid input: expected array, received object",
+  },
+  {
+    read: "/api/scheduler",
+    answer: "an answer the schemas refuse",
+    fulfill: (route) => route.fulfill({ json: UNREADABLE }),
+    line: "Could not read the board: paused: Invalid input: expected boolean, received undefined",
+  },
+  {
+    read: "/api/scheduler",
+    answer: "no answer",
+    fulfill: (route) => route.abort("connectionrefused"),
+    line: "The board server is not answering. Retrying…",
+  },
+  {
+    read: "/api/members",
+    answer: "a gateway's 502",
+    fulfill: (route) => route.fulfill({ status: 502, contentType: "text/plain", body: "" }),
+    line: "The board server is not answering. Retrying…",
+  },
+];
+
+for (const { read, answer, fulfill, line } of OPENING_LINES) {
+  test(`the opening line, given ${answer} to ${read}, says "${line}"`, async ({ page }) => {
+    await fakeBoard(page);
+    await page.route((url) => url.pathname === read, fulfill);
+    await page.goto("/");
+    await expect(page.getByRole("main")).toHaveText(line);
+  });
+}
+
+/**
+ * Notes that say a failed read's words, alone or after their own, each given an answer its schema
+ * refuses: where each is, its read, and the first issue it says, never Zod's whole list.
+ */
+const REFUSED_ANSWERS: ReadonlyArray<{
+  readonly view: string;
+  readonly address: string;
+  readonly read: string;
+  readonly open?: (view: ReturnType<typeof viewOf>) => Promise<void>;
+  readonly within?: (view: ReturnType<typeof viewOf>) => ReturnType<typeof viewOf>;
+  readonly words: string;
+}> = [
+  {
+    view: "the crons",
+    address: "/crons",
+    read: "/api/crons",
+    words: "Could not read the crons: Invalid input: expected array, received object",
+  },
+  {
+    view: "a task's Files row",
+    address: `/task/${STAGE_TASK}`,
+    read: `/api/tasks/${STAGE_TASK}/changes`,
+    within: (view) => view.getByRole("button", { name: /^Files/ }),
+    words: "head: Invalid input: expected object, received undefined",
+  },
+  {
+    view: "a task's files",
+    address: `/task/${STAGE_TASK}`,
+    read: `/api/tasks/${STAGE_TASK}/changes`,
+    open: (view) => view.getByRole("button", { name: /^Files/ }).click(),
+    within: (view) => view.getByRole("region", { name: "Files" }),
+    words: "head: Invalid input: expected object, received undefined",
+  },
+  {
+    view: "a file's change on a task's branch",
+    address: `/task/${STAGE_TASK}`,
+    read: `/api/tasks/${STAGE_TASK}/diff/results.csv`,
+    open: async (view) => {
+      await view.getByRole("button", { name: /^Files/ }).click();
+      await view.getByRole("button", { name: /^results\.csv/ }).click();
+    },
+    within: (view) => view.getByRole("region", { name: "Files" }),
+    words: "head: Invalid input: expected object, received undefined",
+  },
+  {
+    view: "a project's files",
+    address: "/p/lab",
+    read: "/api/projects/lab/files",
+    within: (view) =>
+      view.locator("section").filter({ has: view.page().getByRole("heading", { name: /^Files/ }) }),
+    words: "kind: Invalid discriminator value. Expected 'file' | 'dir'",
+  },
+  {
+    view: "a project's folder",
+    address: "/p/lab",
+    read: "/api/projects/lab/files/docs",
+    open: (view) => view.getByRole("button", { name: "docs/" }).click(),
+    within: (view) =>
+      view.locator("section").filter({ has: view.page().getByRole("heading", { name: /^Files/ }) }),
+    words: "kind: Invalid discriminator value. Expected 'file' | 'dir'",
+  },
+  {
+    view: "a file on a task's branch",
+    address: `/task/${STAGE_TASK}/files/draft.md`,
+    read: `/api/tasks/${STAGE_TASK}/files/draft.md`,
+    words: "kind: Invalid discriminator value. Expected 'file' | 'dir'",
+  },
+  {
+    view: "a citizen's models",
+    address: "/citizen/desk",
+    read: "/api/agents/desk/models",
+    open: (view) => view.getByRole("button", { name: "Model…" }).click(),
+    within: (view) => view.getByRole("form", { name: "Model of desk" }),
+    words:
+      "claude did not list its models: runner: Invalid input: expected string, received undefined",
+  },
+  {
+    view: "a runner's quota",
+    address: "/runners",
+    read: "/api/runners/pod/quota/claude",
+    open: (view) => view.getByRole("button", { name: "Read again" }).click(),
+    within: (view) => view.getByRole("region", { name: "Plan quota" }),
+    words: "the last read failed: observedAt: Invalid input: expected string, received undefined",
+  },
+];
+
+for (const { view: name, address, read, open, within, words } of REFUSED_ANSWERS) {
+  test(`${name}, given an answer the schemas refuse, says its first issue`, async ({ page }) => {
+    await fakeBoard(page);
+    await page.route(
+      (url) => url.pathname === read,
+      (route) => route.fulfill({ json: UNREADABLE }),
+    );
+    await page.goto(address);
+    const view = viewOf(page);
+    await open?.(view);
+    const shown = within?.(view) ?? view;
+    await expect(shown).toContainText(words);
+    await expect(shown).not.toContainText('"code"');
+  });
+}
+
+test("the citizens' tokens, given an answer the schemas refuse, say its first issue on hover", async ({
+  page,
+}) => {
+  await fakeBoard(page);
+  await page.route(
+    (url) => url.pathname === "/api/tokens",
+    (route) => route.fulfill({ json: UNREADABLE }),
+  );
+  await page.goto("/citizens");
+  const view = viewOf(page);
+  await expect(view).toContainText("tokens unknown");
+  await expect(view.locator("[title]", { hasText: "tokens unknown" }).first()).toHaveAttribute(
+    "title",
+    'window: Invalid option: expected one of "24h"|"7d"|"all"',
+  );
+});

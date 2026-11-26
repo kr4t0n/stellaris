@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "../components/Button.js";
 import { Picker, type Choice } from "../components/Picker.js";
-import { ApiError } from "../lib/api.js";
+import { failureOf } from "../lib/api.js";
 import { useAgentModels, useSession } from "../lib/session.js";
 import { Failure } from "./ThreadForms.js";
 
@@ -137,10 +137,7 @@ export function ModelForm({
           <p className="min-w-0 flex-1 truncate text-meta">Asking {cli} for its models…</p>
         ) : models.error !== null ? (
           <p role="alert" className="min-w-0 flex-1 truncate text-xs text-red-400">
-            {cli} did not list its models:{" "}
-            {models.error instanceof ApiError
-              ? models.error.message
-              : "the board server did not answer"}
+            {cli} did not list its models: {failureOf(models.error)}
           </p>
         ) : (
           <>

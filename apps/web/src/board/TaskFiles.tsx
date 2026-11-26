@@ -2,7 +2,7 @@ import type { BranchFileChange, Task } from "@stellaris/shared";
 import { Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { FileLink } from "../components/BranchFile.js";
-import { ApiError } from "../lib/api.js";
+import { ApiError, failureOf } from "../lib/api.js";
 import {
   changeLabel,
   fileTree,
@@ -98,7 +98,7 @@ function FileDiff({ taskId, change }: { taskId: string; change: BranchFileChange
       </p>
     );
   } else if (diff.error !== null) {
-    body = <p className="mt-1 text-meta">{diff.error.message}</p>;
+    body = <p className="mt-1 text-meta">{failureOf(diff.error)}</p>;
   } else {
     body = <p className="mt-1 text-meta">Reading the change…</p>;
   }
@@ -264,7 +264,7 @@ export function useFilesSummary(task: Task, now: number): string {
     const project = projects.data?.find((each) => each.slug === task.project);
     return `${project?.runner ?? "The runner"} is not connected`;
   }
-  return changes.error === null ? "Reading the branch…" : changes.error.message;
+  return changes.error === null ? "Reading the branch…" : failureOf(changes.error);
 }
 
 /**
@@ -306,7 +306,7 @@ export function TaskFileTree({ task, now }: { task: Task; now: number }) {
       </p>
     );
   } else if (changes.error !== null) {
-    body = <p className="text-meta">{changes.error.message}</p>;
+    body = <p className="text-meta">{failureOf(changes.error)}</p>;
   } else {
     body = <p className="text-meta">Reading the task's branch…</p>;
   }

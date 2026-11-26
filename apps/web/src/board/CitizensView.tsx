@@ -2,7 +2,7 @@ import type { CitizenTokens, Member, MetricsWindow, Runner } from "@stellaris/sh
 import { Link, useSearch } from "@tanstack/react-router";
 import { useId } from "react";
 import { CliIcon } from "../components/CliIcon.js";
-import { pairsOf, readNote } from "../lib/api.js";
+import { failureOf, pairsOf, readNote } from "../lib/api.js";
 import { ago } from "../lib/format.js";
 import {
   useMembers,
@@ -226,7 +226,7 @@ export function CitizensView() {
     }
     return tokenUse.error === null
       ? { label: "counting…", counts: null, detail: undefined, spoken: null }
-      : { label: "tokens unknown", counts: null, detail: tokenUse.error.message, spoken: null };
+      : { label: "tokens unknown", counts: null, detail: failureOf(tokenUse.error), spoken: null };
   };
 
   // Every out count the list shows, so each row's is drawn as wide as the widest.

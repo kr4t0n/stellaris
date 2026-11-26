@@ -13,7 +13,7 @@ import { Hud } from "./components/Hud.js";
 import { Island, ISLAND_SURFACE } from "./components/Island.js";
 import { ResizeHandle } from "./components/ResizeHandle.js";
 import { TaskCard } from "./components/TaskCard.js";
-import { ApiError } from "./lib/api.js";
+import { ApiError, readNote, unanswered } from "./lib/api.js";
 import { entityIndex } from "./lib/entities.js";
 import { followBoardEvents, refreshFor } from "./lib/events.js";
 import {
@@ -338,11 +338,25 @@ export function Playground() {
   );
 
   if (model === null) {
-    const unreachable = [members, projects, scheduler].some((query) => query.error !== null);
+    const errors = [members, projects, scheduler].flatMap((query) =>
+      query.error === null ? [] : [query.error],
+    );
+    // An answer the board gave, or one the schemas refuse, says what failed; while none came, the
+    // server is not answering, and a refused token goes to sign-in.
+    const failure =
+      errors.find(
+        (error) => !unanswered(error) && !(error instanceof ApiError && error.status === 401),
+      ) ?? null;
     return (
       <main className="grid h-full place-items-center">
         <p className="text-meta" aria-live="polite">
-          {unreachable ? "The board server is not answering. Retrying…" : "Reading the board…"}
+          {readNote(
+            "the board",
+            failure,
+            errors.length === 0
+              ? "Reading the board…"
+              : "The board server is not answering. Retrying…",
+          )}
         </p>
       </main>
     );

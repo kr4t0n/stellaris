@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "../components/Button.js";
 import { CliIcon } from "../components/CliIcon.js";
+import { failureOf } from "../lib/api.js";
 import { ago } from "../lib/format.js";
 import { useSession } from "../lib/session.js";
 import { turnRunners } from "./citizen.js";
@@ -151,7 +152,7 @@ export function PlanQuota({ runners, now }: { runners: readonly Runner[]; now: n
       });
     },
     onError: (error, { runner, cli }) => {
-      setFailed((previous) => new Map(previous).set(`${runner}/${cli}`, error.message));
+      setFailed((previous) => new Map(previous).set(`${runner}/${cli}`, failureOf(error)));
     },
     onSettled: (_quota, _error, { runner, cli }) => {
       setReading((previous) => {

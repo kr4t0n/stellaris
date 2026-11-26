@@ -50,6 +50,7 @@ import { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
 import {
+  JOB_ARRIVAL_WAIT,
   RECONNECT_WAIT,
   startTestSociety,
   TURN_START_WAIT,
@@ -4424,7 +4425,7 @@ describe("turns on a runner over the runner protocol", () => {
       priority: 2,
     };
     const first = run(dispatch);
-    await vi.waitFor(() => expect(lost).toHaveLength(1));
+    await vi.waitFor(() => expect(lost).toHaveLength(1), JOB_ARRIVAL_WAIT);
     const job = lost[0]?.type === "turn" ? lost[0].job : null;
     expect(job).not.toBeNull();
     const turnId = job?.turnId ?? "";
@@ -4457,7 +4458,7 @@ describe("turns on a runner over the runner protocol", () => {
     // A job that never arrived on a runner that then stays away is said to have never reached it,
     // and since nothing ran, the same wake may go again.
     const second = run(dispatch);
-    await vi.waitFor(() => expect(delivered).toHaveLength(2));
+    await vi.waitFor(() => expect(delivered).toHaveLength(2), JOB_ARRIVAL_WAIT);
     await detach();
     expect(await second).toMatchObject({
       exitReason: "error",
@@ -4530,7 +4531,7 @@ describe("turns on a runner over the runner protocol", () => {
     down = true;
     boardDown = true;
     const failed = run(dispatch);
-    await vi.waitFor(() => expect(runner.turns).toHaveLength(1));
+    await vi.waitFor(() => expect(runner.turns).toHaveLength(1), JOB_ARRIVAL_WAIT);
     const [turnId] = runner.turns;
     await new Promise((resolve) => setTimeout(resolve, 600));
     expect(hub.unacknowledged("pod")).toEqual([turnId]);
@@ -4605,7 +4606,7 @@ describe("turns on a runner over the runner protocol", () => {
     // 0.4.0 gave up on it.
     down = true;
     const long = run(manual("eng-1", "demo"));
-    await vi.waitFor(() => expect(runner.turns).toHaveLength(1));
+    await vi.waitFor(() => expect(runner.turns).toHaveLength(1), JOB_ARRIVAL_WAIT);
     const [turnId] = runner.turns;
     await new Promise((resolve) => setTimeout(resolve, 600));
     expect(await hub.assign({ ...manual("eng-2", "demo"), onboarding: false })).toBeNull();
@@ -4686,7 +4687,7 @@ describe("turns on a runner over the runner protocol", () => {
     // The conversation's next turn arrives while the stopped CLI winds down, and starts in the
     // workspace only once that CLI has ended.
     const next = run(manual("eng-1", "demo"));
-    await vi.waitFor(() => expect(runner.turns).toHaveLength(2));
+    await vi.waitFor(() => expect(runner.turns).toHaveLength(2), JOB_ARRIVAL_WAIT);
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(backend.log).toEqual(["start 1", "stop 1"]);
     backend.end(1);
@@ -4806,7 +4807,7 @@ describe("turns on a runner over the runner protocol", () => {
     // of the conversation means the board no longer holds the first, by whatever path it ended:
     // the runner stops it, and starts the second in the workspace only once its CLI has ended.
     const next = run(manual("eng-1", "demo"));
-    await vi.waitFor(() => expect(runner.turns).toHaveLength(2));
+    await vi.waitFor(() => expect(runner.turns).toHaveLength(2), JOB_ARRIVAL_WAIT);
     await vi.waitFor(() => expect(backend.log).toEqual(["start 1", "stop 1"]));
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(backend.log).toEqual(["start 1", "stop 1"]);
@@ -4903,7 +4904,7 @@ describe("turns on a runner over the runner protocol", () => {
     const first = run(manual("eng-1", "demo"));
     await vi.waitFor(() => expect(backend.log).toEqual(["start 1"]), TURN_START_WAIT);
     const next = run(manual("eng-1", "demo"));
-    await vi.waitFor(() => expect(runner.turns).toHaveLength(2));
+    await vi.waitFor(() => expect(runner.turns).toHaveLength(2), JOB_ARRIVAL_WAIT);
     await vi.waitFor(() => expect(backend.log).toEqual(["start 1", "stop 1"]));
     const waiting = runner.turns[1] ?? "";
 
@@ -5030,7 +5031,7 @@ describe("turns on a runner over the runner protocol", () => {
 
     // A step of the turn shows its job arrived, so the next turn goes there while it runs.
     const first = run(manual("eng-1", "demo"));
-    await vi.waitFor(() => expect(delivered).toHaveLength(1));
+    await vi.waitFor(() => expect(delivered).toHaveLength(1), JOB_ARRIVAL_WAIT);
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(await hub.assign({ ...manual("eng-2", "demo"), onboarding: false })).toBeNull();
     await hub.turnEvents("quiet", delivered[0] ?? "", [
@@ -5038,7 +5039,7 @@ describe("turns on a runner over the runner protocol", () => {
     ]);
     expect(hub.unacknowledged("quiet")).toEqual([]);
     const second = run(manual("eng-2", "demo"));
-    await vi.waitFor(() => expect(delivered).toHaveLength(2));
+    await vi.waitFor(() => expect(delivered).toHaveLength(2), JOB_ARRIVAL_WAIT);
     await hub.turnOutcome("quiet", delivered[0] ?? "", outcome);
     expect(await first).toMatchObject({ exitReason: "completed" });
 
@@ -5049,7 +5050,7 @@ describe("turns on a runner over the runner protocol", () => {
     expect(await second).toMatchObject({ exitReason: "completed" });
     expect(hub.unacknowledged("quiet")).toEqual([]);
     const third = run(manual("eng-1", "demo"));
-    await vi.waitFor(() => expect(delivered).toHaveLength(3));
+    await vi.waitFor(() => expect(delivered).toHaveLength(3), JOB_ARRIVAL_WAIT);
     await hub.turnOutcome("quiet", delivered[2] ?? "", outcome);
     expect(await third).toMatchObject({ exitReason: "completed" });
   });
@@ -5095,7 +5096,7 @@ describe("turns on a runner over the runner protocol", () => {
 
     // A runner that registers again without a turn it took: that turn ends as failed.
     const running = run(dispatch);
-    await vi.waitFor(() => expect(runner.turns).toHaveLength(1));
+    await vi.waitFor(() => expect(runner.turns).toHaveLength(1), JOB_ARRIVAL_WAIT);
     await vi.waitFor(() => expect(hub.unacknowledged("pod")).toEqual([]));
     await hub.register("pod", {
       protocol: RUNNER_PROTOCOL,

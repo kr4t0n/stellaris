@@ -102,6 +102,18 @@ export function namesNothing(error: unknown): boolean {
 }
 
 /**
+ * Whether a read failed for want of an answer from the board server: none came, or a gateway in
+ * front of it, as Vite's proxy while the board is down, answered 502, 503, or 504 without the
+ * board's own reason, which every refusal of the board's carries.
+ */
+export function unanswered(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    (error.status === 0 || (error.code === null && [502, 503, 504].includes(error.status)))
+  );
+}
+
+/**
  * A failed read's words for a note: the board's own, or for an answer the schemas refuse, its
  * first issue and where it is, since Zod's own message is every issue as indented JSON.
  */

@@ -10,7 +10,7 @@ import {
 } from "react";
 import { Button } from "../components/Button.js";
 import { CliIcon } from "../components/CliIcon.js";
-import { ApiError, type Api } from "../lib/api.js";
+import { ApiError, failureOf, type Api } from "../lib/api.js";
 import { newIdempotencyKey, withMessage } from "../lib/messages.js";
 import { useMembers, useSession, useUploadedImage } from "../lib/session.js";
 import { askTitle } from "./asks.js";
@@ -740,7 +740,10 @@ function ImageGlyph() {
 function KeptThumbnail({ id, alt }: { id: string; alt: string }) {
   const image = useUploadedImage(id);
   return image.data === undefined ? (
-    <span title={image.error?.message} className="block size-full" />
+    <span
+      title={image.error === null ? undefined : failureOf(image.error)}
+      className="block size-full"
+    />
   ) : (
     <img src={image.data} alt={alt} className="size-full object-cover" />
   );

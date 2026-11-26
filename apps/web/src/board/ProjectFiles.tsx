@@ -1,7 +1,7 @@
 import type { BranchFile, Project } from "@stellaris/shared";
 import { useState } from "react";
 import { FileLink } from "../components/BranchFile.js";
-import { ApiError } from "../lib/api.js";
+import { ApiError, failureOf } from "../lib/api.js";
 import { entriesInOrder, runnerOf, sizeLabel, type FileSource } from "../lib/files.js";
 import { ago } from "../lib/format.js";
 import { useBranchFile } from "../lib/session.js";
@@ -93,7 +93,7 @@ function Folder({
   } else if (folder.error instanceof ApiError && folder.error.status === 503) {
     state = `${runnerOf(project)}, is not connected.`;
   } else if (folder.error !== null) {
-    state = folder.error.message;
+    state = failureOf(folder.error);
   } else {
     state = "Reading…";
   }
@@ -154,7 +154,7 @@ export function ProjectFiles({ project, now }: { project: Project; now: number }
       </p>
     );
   } else if (root.error !== null) {
-    body = <p className="text-meta">{root.error.message}</p>;
+    body = <p className="text-meta">{failureOf(root.error)}</p>;
   } else {
     body = <p className="text-meta">Reading {branch}…</p>;
   }

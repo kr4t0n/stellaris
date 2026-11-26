@@ -14,14 +14,16 @@ function member(
   model: string | null = null,
   runner: string | null = "pod",
   effort: string | null = null,
+  cli = "claude",
 ) {
   return {
     name,
     role: charter,
-    cli: "claude",
+    cli,
     ...(model === null ? {} : { model }),
     ...(effort === null ? {} : { effort }),
-    lastModel: "claude-opus-5-5",
+    // The board reports the model a citizen's last turn ran only while it is on that turn's CLI.
+    ...(cli === "claude" ? { lastModel: "claude-opus-5-5" } : {}),
     ...(runner === null ? {} : { homeRunner: runner }),
     status: "active",
     resident: false,
@@ -320,6 +322,33 @@ const HANDOVER = {
   ts: CREATED,
   mentions: [],
   body: `Survey done: twelve methods in SURVEY.md, with sources. The write-up is [report.md](/home/tiger/runner-data/worktrees/ada/.tasks/${STAGE_TASK}/docs/report.md); my scratch notes are in [notes](/tmp/ada-notes.md). The [table's citation](/home/tiger/runner-data/worktrees/ada/.tasks/${STAGE_TASK}/docs/report.md:7) points at the numbers.`,
+};
+
+/** A second study, its sign-off waiting on the user too, which `linked` lists in lab. */
+export const LINKED_TASK = "01M3Q2AAAAAAAAAAAAAAAAAAA2";
+const LINKED = { ...TASK, id: LINKED_TASK, title: "Profile the shortest-path solvers" };
+const LINKED_THREAD = {
+  ...TASK_THREAD,
+  id: LINKED_TASK,
+  title: LINKED.title,
+  subject: { kind: "task", id: LINKED_TASK },
+};
+
+/** A post in each study's thread that names the other, whose link opens it in the same view. */
+const TO_LINKED = {
+  id: "01M3Q2AAAAAAAAAAAAAAAAAAC1",
+  author: "ada",
+  channel: "lab/general",
+  thread: STAGE_TASK,
+  ts: CREATED,
+  mentions: [],
+  body: `The profile is task ${LINKED_TASK}.`,
+};
+const TO_STUDY = {
+  ...TO_LINKED,
+  id: "01M3Q2AAAAAAAAAAAAAAAAAAC2",
+  thread: LINKED_TASK,
+  body: `It profiles what task ${STAGE_TASK} compared.`,
 };
 
 /** An image ada uploaded to the board, and an id that names none. */
@@ -1118,8 +1147,10 @@ export interface FakeBoard {
   stored(body: string): number;
   /** The threads opened with this title. */
   opened(title: string): number;
-  /** Gives studio's record this board sync, as its runner reported it, or none. */
-  setSync(sync: Record<string, unknown> | null): void;
+  /** Gives a runner's record, studio's unless named, this board sync, as its runner reported it, or none. */
+  setSync(sync: Record<string, unknown> | null, runner?: "pod" | "studio"): void;
+  /** Gives pod these capabilities and these projects living on it, as a busy runner has. */
+  setPodHoldings(capabilities: readonly string[], projects: readonly string[]): void;
 }
 
 /** The citizens `setWorking` puts in turns, in order. */
@@ -1274,6 +1305,20 @@ const CLAUDE_MODELS = [
   },
 ];
 
+const CODEX_MODELS = [
+  {
+    id: "gpt-5.5",
+    name: "GPT-5.5",
+    description: "Frontier agentic coding.",
+    isDefault: true,
+    efforts: [
+      { id: "medium", description: "Balanced" },
+      { id: "xhigh", description: "Extra high reasoning" },
+    ],
+    defaultEffort: "medium",
+  },
+];
+
 /**
  * A society of the user, a concierge, and a steward, with one skill proposal waiting on the user.
  * Decisions and the pause switch change the fake's state the way the board would. With `archived`,
@@ -1311,6 +1356,8 @@ export async function fakeBoard(
     earlyApproval?: boolean;
     /** The same, with the check a stage the user does rather than a gate. */
     ungated?: boolean;
+    /** Lists a second study waiting on the user, and links each study from the other's thread. */
+    linked?: boolean;
     /** Adds ada, a researcher retired after two counted turns. */
     retired?: boolean;
     /** Adds ren, a researcher in lab with heartbeat turns, two of them in a task's thread. */
@@ -1330,6 +1377,8 @@ export async function fakeBoard(
      * society's with none. Opens twelve topics in governance too, a count of two digits.
      */
     unread?: boolean;
+    /** Refuses a switch of desk's CLI, as the board does when a runner its turns need lacks it. */
+    refuseCli?: boolean;
   } = {},
 ): Promise<FakeBoard> {
   let inFlight = options.inFlight === true;
@@ -1371,19 +1420,27 @@ export async function fakeBoard(
   // Each runner's name now, by the name it started with; a rename moves its pauses with it.
   const runnerNames = new Map<string, string>();
   const named = (runner: string): string => runnerNames.get(runner) ?? runner;
-  // studio's board sync, as its runner last reported it; the view reads it while it holds studio.
-  let studioSync: Record<string, unknown> | null = null;
+  // Each runner's board sync, as its runner last reported it; the view reads it while it holds one.
+  const syncs = new Map<string, Record<string, unknown>>();
+  const syncOf = (runner: string): Record<string, unknown> => {
+    const sync = syncs.get(runner);
+    return sync === undefined ? {} : { sync };
+  };
+  // pod's capabilities, and the projects living on it beside lab.
+  let podCapabilities: readonly string[] = [];
+  let podProjects: Array<Record<string, unknown>> = [];
   const everyRunner = (): Array<Record<string, unknown>> => [
     {
       name: named("pod"),
       os: "linux",
       clis: ["claude", "codex"],
-      capabilities: [],
+      capabilities: podCapabilities,
       version: "0.3.11",
       gitIdentityMissing: ["email"],
       status: "connected",
       quotas: podQuotas,
       ...pausesOf(named("pod")),
+      ...syncOf("pod"),
     },
     {
       name: named("studio"),
@@ -1395,7 +1452,7 @@ export async function fakeBoard(
       status: "connected",
       quotas: studioQuotas,
       ...pausesOf(named("studio")),
-      ...(studioSync === null ? {} : { sync: studioSync }),
+      ...syncOf("studio"),
     },
     {
       name: named("laptop"),
@@ -1417,6 +1474,7 @@ export async function fakeBoard(
   let deskModel: string | null = crowded ? "opus" : null;
   let deskRunner: string | null = crowded ? "stellaris-runner-0" : "pod";
   let deskEffort: string | null = crowded ? "xhigh" : null;
+  let deskCli = "claude";
   // Removing a society topic or skill takes it off the list, as the board does.
   let societyTopics = [SOCIETY_TOPIC];
   let societySkills = [SOCIETY_SKILL];
@@ -1442,8 +1500,10 @@ export async function fakeBoard(
   let waitingAsk = options.asked === true;
   const screenshot =
     options.uploads === true ? png(SCREENSHOT_SIZE.width, SCREENSHOT_SIZE.height) : Buffer.alloc(0);
+  const linked = options.linked === true;
   const threadMessages: Array<Record<string, unknown>> = [
     HANDOVER,
+    ...(linked ? [TO_LINKED] : []),
     ...(options.uploads === true ? [SCREENSHOTS, IMAGE_EDGES] : []),
     ...(waitingAsk ? [ASK] : []),
   ];
@@ -1718,11 +1778,30 @@ export async function fakeBoard(
           return decide(route, "approved", body);
         case "/api/verbs/reject":
           return decide(route, "rejected", body);
+        case "/api/agents/desk/cli":
+          if (options.refuseCli === true) {
+            return json(
+              route,
+              {
+                error: "INVALID_STATE",
+                message:
+                  "desk cannot switch to codex: its work outside projects runs on runner pod, which offers only claude",
+              },
+              409,
+            );
+          }
+          deskCli = typeof body["cli"] === "string" ? body["cli"] : deskCli;
+          deskModel = typeof body["model"] === "string" ? body["model"] : null;
+          deskEffort = typeof body["effort"] === "string" ? body["effort"] : null;
+          return json(
+            route,
+            member("desk", "concierge", deskProjects, deskModel, deskRunner, deskEffort, deskCli),
+          );
         case "/api/agents/desk/model":
           deskModel = typeof body["model"] === "string" ? body["model"] : null;
           return json(
             route,
-            member("desk", "concierge", deskProjects, deskModel, deskRunner, deskEffort),
+            member("desk", "concierge", deskProjects, deskModel, deskRunner, deskEffort, deskCli),
           );
         case "/api/verbs/advance_task":
           task = {
@@ -1836,7 +1915,7 @@ export async function fakeBoard(
           deskEffort = typeof body["effort"] === "string" ? body["effort"] : null;
           return json(
             route,
-            member("desk", "concierge", deskProjects, deskModel, deskRunner, deskEffort),
+            member("desk", "concierge", deskProjects, deskModel, deskRunner, deskEffort, deskCli),
           );
         case "/api/projects/lab/runner": {
           // laptop, where lab lives, is away: nothing travels unless the user says to go without it.
@@ -1866,7 +1945,7 @@ export async function fakeBoard(
           deskRunner = typeof body["runner"] === "string" ? body["runner"] : null;
           return json(
             route,
-            member("desk", "concierge", deskProjects, deskModel, deskRunner, deskEffort),
+            member("desk", "concierge", deskProjects, deskModel, deskRunner, deskEffort, deskCli),
           );
         case "/api/wake":
           return json(route, {
@@ -2050,6 +2129,23 @@ export async function fakeBoard(
     if (labChannels.some((each) => pathname === `/api/channels/lab/${each.name}`)) {
       return json(route, []);
     }
+    // The board parses a task's, a thread's, or a proposal's id and a channel's reference before
+    // it reads a file, and refuses one that isn't, as a typed address can hold.
+    const id = /^\/api\/(?:tasks|threads|proposals)\/([^/]+)(?:\/thread)?$/.exec(pathname)?.[1];
+    const ref = /^\/api\/channels\/(.+)$/.exec(pathname)?.[1];
+    if (id !== undefined && !/^[0-9A-HJKMNP-TV-Z]{26}$/.test(decodeURIComponent(id))) {
+      return json(route, { error: "VALIDATION", message: "expected a ULID" }, 400);
+    }
+    if (
+      ref !== undefined &&
+      !/^(?:[a-z0-9][a-z0-9-]{0,31}\/)?[a-z0-9][a-z0-9-]{0,31}$/.test(decodeURIComponent(ref))
+    ) {
+      return json(
+        route,
+        { error: "VALIDATION", message: "expected <channel> or <project>/<channel>" },
+        400,
+      );
+    }
     const ask = asks.get(pathname.slice("/api/threads/".length));
     if (pathname.startsWith("/api/threads/") && ask !== undefined) {
       return json(route, { thread: ask.thread, messages: ask.messages });
@@ -2084,7 +2180,7 @@ export async function fakeBoard(
         return json(route, crons);
       case "/api/members":
         return json(route, [
-          member("desk", "concierge", deskProjects, deskModel, deskRunner, deskEffort),
+          member("desk", "concierge", deskProjects, deskModel, deskRunner, deskEffort, deskCli),
           member("stew", "steward", [], null, crowded ? "stellaris-runner-0" : null),
           ...(crowded ? [member("hal", "investigator", [], null, "stellaris-runner-1")] : []),
           ...(options.retired === true
@@ -2096,8 +2192,14 @@ export async function fakeBoard(
         return json(route, { version: "0.3.11" });
       case "/api/runners":
         return json(route, runnerRecords());
-      case "/api/agents/desk/models":
-        return json(route, { runner: "pod", cli: "claude", models: CLAUDE_MODELS });
+      case "/api/agents/desk/models": {
+        const cli = searchParams.get("cli") ?? deskCli;
+        return json(route, {
+          runner: "pod",
+          cli,
+          models: cli === "codex" ? CODEX_MODELS : CLAUDE_MODELS,
+        });
+      }
       case "/api/agents/desk/turns":
         return json(route, options.longReport === true ? [DESK_TURN, DESK_LONG_TURN] : [DESK_TURN]);
       case `/api/agents/desk/turns/${DESK_TURN_ID}`:
@@ -2143,11 +2245,15 @@ export async function fakeBoard(
           role("steward", ["ops_event"]),
         ]);
       case "/api/projects":
-        return json(route, archived ? [lab, ARCHIVED_PROJECT] : [lab]);
+        return json(route, [lab, ...(archived ? [ARCHIVED_PROJECT] : []), ...podProjects]);
       case "/api/projects/lab/tasks":
-        return json(route, [task]);
+        return json(route, linked ? [task, LINKED] : [task]);
       case `/api/tasks/${STAGE_TASK}`:
         return json(route, task);
+      case `/api/tasks/${LINKED_TASK}`:
+        return json(route, LINKED);
+      case `/api/threads/${LINKED_TASK}`:
+        return json(route, { thread: LINKED_THREAD, messages: [TO_STUDY] });
       case `/api/tasks/${STAGE_TASK}/changes`:
         return json(route, TASK_CHANGES);
       case "/api/projects/iphone/tasks":
@@ -2293,8 +2399,22 @@ export async function fakeBoard(
         (each) => each["body"] === text,
       ).length,
     opened: (title) => [...asks.values()].filter((each) => each.thread["title"] === title).length,
-    setSync: (sync) => {
-      studioSync = sync;
+    setPodHoldings: (capabilities, projects) => {
+      podCapabilities = capabilities;
+      podProjects = projects.map((slug) => ({
+        ...PROJECT,
+        slug,
+        name: slug,
+        members: [],
+        runner: named("pod"),
+      }));
+    },
+    setSync: (sync, runner = "studio") => {
+      if (sync === null) {
+        syncs.delete(runner);
+      } else {
+        syncs.set(runner, sync);
+      }
     },
   };
 }

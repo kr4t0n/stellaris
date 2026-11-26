@@ -14,6 +14,24 @@ function event(type: BoardEvent["type"], payload: Record<string, unknown>, id: s
   return { id, ts: "2026-09-29T10:00:00.000Z", type, actor: "ada", payload };
 }
 
+/** A fetch whose first connection sends `frames` and stays open, as do the ones after it. */
+function stubStream(frames: readonly object[]): string[] {
+  const urls: string[] = [];
+  const text = frames.map((each) => `event: message\ndata: ${JSON.stringify(each)}\n\n`).join("");
+  vi.stubGlobal("fetch", (url: string) => {
+    urls.push(url);
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        if (urls.length === 1) {
+          controller.enqueue(new TextEncoder().encode(text));
+        }
+      },
+    });
+    return Promise.resolve(new Response(body, { status: 200 }));
+  });
+  return urls;
+}
+
 describe("board events", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -161,6 +179,48 @@ describe("board events", () => {
     expect(urls).toEqual([
       "/api/events/stream?since=latest",
       `/api/events/stream?since=${second.id}`,
+    ]);
+    expect(resumed).toBe(1);
+  });
+
+  it("skips an event of a type this page doesn't know, on the same connection", async () => {
+    const first = event("turn.started", { turnId: "t-1" }, "01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    const newer = { ...first, id: "01ARZ3NDEKTSV4RRFFQ69G5FAW", type: "garden.watered" };
+    const second = event("turn.completed", { turnId: "t-1" }, "01ARZ3NDEKTSV4RRFFQ69G5FAX");
+    const urls = stubStream([first, newer, second]);
+    const seen: BoardEvent[] = [];
+    let resumed = 0;
+    const stop = followBoardEvents("stl_token", {
+      onEvent: (each) => seen.push(each),
+      onResume: () => {
+        resumed += 1;
+      },
+    });
+    await vi.waitFor(() => expect(seen).toHaveLength(2), { timeout: 3_000 });
+    stop();
+    expect(seen).toEqual([first, second]);
+    expect(urls).toEqual(["/api/events/stream?since=latest"]);
+    expect(resumed).toBe(0);
+  });
+
+  it("drops the connection on a malformed event of a type it knows, resuming after the last read", async () => {
+    const first = event("turn.started", { turnId: "t-1" }, "01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    const unpaid = { id: "01ARZ3NDEKTSV4RRFFQ69G5FAW", ts: first.ts, type: "turn.completed" };
+    const urls = stubStream([first, unpaid]);
+    const seen: BoardEvent[] = [];
+    let resumed = 0;
+    const stop = followBoardEvents("stl_token", {
+      onEvent: (each) => seen.push(each),
+      onResume: () => {
+        resumed += 1;
+      },
+    });
+    await vi.waitFor(() => expect(urls).toHaveLength(2), { timeout: 3_000 });
+    stop();
+    expect(seen).toEqual([first]);
+    expect(urls).toEqual([
+      "/api/events/stream?since=latest",
+      `/api/events/stream?since=${first.id}`,
     ]);
     expect(resumed).toBe(1);
   });

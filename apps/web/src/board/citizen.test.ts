@@ -1,8 +1,9 @@
-import { MemberSchema, type TurnHistoryEntry } from "@stellaris/shared";
+import { MemberSchema, RunnerSchema, type TurnHistoryEntry } from "@stellaris/shared";
 import { describe, expect, it } from "vitest";
 import {
   endingOf,
   historyTotals,
+  offeredClis,
   runnersOf,
   tokenCounts,
   tokensDetail,
@@ -28,6 +29,10 @@ function entry(overrides: Partial<TurnHistoryEntry> = {}): TurnHistoryEntry {
     error: null,
     ...overrides,
   };
+}
+
+function runner(name: string, clis: string[]) {
+  return RunnerSchema.parse({ name, os: "linux", clis, capabilities: [], status: "connected" });
 }
 
 describe("citizen", () => {
@@ -171,6 +176,18 @@ describe("citizen", () => {
   it("drops a leading heading that repeats the section's title", () => {
     expect(withoutTitle("# Core memory\n\n- one", "Core memory")).toBe("- one");
     expect(withoutTitle("# Notes\n\n- one", "Core memory")).toBe("# Notes\n\n- one");
+  });
+
+  it("offers the CLIs some runner has, and the citizen's own, in the board's order", () => {
+    const claudeOnly = [runner("mini", ["claude"]), runner("laptop", [])];
+    expect(offeredClis("claude", claudeOnly)).toEqual(["claude"]);
+    // The CLI a citizen runs on stays offered when no runner reports it.
+    expect(offeredClis("codex", claudeOnly)).toEqual(["claude", "codex"]);
+    expect(offeredClis("claude", [...claudeOnly, runner("pod", ["codex", "claude"])])).toEqual([
+      "claude",
+      "codex",
+    ]);
+    expect(offeredClis("codex", [])).toEqual(["codex"]);
   });
 
   it("names the runners a citizen's turns run on, its pin and its projects' places", () => {

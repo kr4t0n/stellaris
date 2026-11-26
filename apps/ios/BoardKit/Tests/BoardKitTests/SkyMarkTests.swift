@@ -29,7 +29,9 @@ import Testing
 
   @Test func theMarksAreTheWebs() throws {
     let marks = try SkyMarkTests.web("lib/marks.ts")
-    for (cli, mark) in [("claude", CliMark.claude), ("codex", CliMark.codex)] {
+    for (cli, mark) in [
+      ("claude", CliMark.claude), ("codex", CliMark.codex), ("antigravity", CliMark.antigravity),
+    ] {
       let block = "  \(cli): {"
       #expect(try SkyMarkTests.value("label", in: marks, after: block) == mark.label)
       #expect(try SkyMarkTests.value("path", in: marks, after: block) == mark.path)
@@ -58,20 +60,47 @@ import Testing
     }
   }
 
-  /// Each mark reads to its end, inside its 24-unit grid, in the subpaths its data draws.
+  /// Each mark reads to its end, drawn inside its 24-unit grid, in the subpaths its data draws.
+  /// A curve's control points may lie outside the grid, as Antigravity's do, so its drawn points
+  /// are sampled.
   @Test func theMarksReadWhole() {
-    for (mark, subpaths) in [(CliMark.claude, 3), (CliMark.codex, 3)] {
+    for (mark, subpaths) in [(CliMark.claude, 3), (CliMark.codex, 3), (CliMark.antigravity, 1)] {
       let elements = skyPath(mark.path)
       #expect(elements.filter { $0 == .close }.count == subpaths, "\(mark.label)")
-      let points = elements.flatMap { element -> [SkyPoint] in
+      var points: [SkyPoint] = []
+      var current = SkyPoint(x: 0, y: 0)
+      var start = current
+      for element in elements {
         switch element {
-        case .move(let point), .line(let point): [point]
-        case .curve(let first, let second, let end): [first, second, end]
-        case .close: []
+        case .move(let point):
+          start = point
+          current = point
+          points.append(point)
+        case .line(let point):
+          current = point
+          points.append(point)
+        case .curve(let first, let second, let end):
+          let from = current
+          for step in 1...20 {
+            let t = Double(step) / 20
+            let u = 1 - t
+            func along(_ a: Double, _ b: Double, _ c: Double, _ d: Double) -> Double {
+              u * u * u * a + 3 * u * u * t * b + 3 * u * t * t * c + t * t * t * d
+            }
+            points.append(
+              SkyPoint(
+                x: along(from.x, first.x, second.x, end.x),
+                y: along(from.y, first.y, second.y, end.y)))
+          }
+          current = end
+        case .close:
+          current = start
         }
       }
-      #expect(points.allSatisfy { (-0.5...24.5).contains($0.x) && (-0.5...24.5).contains($0.y) })
-      #expect(points.contains { $0.x > 20 } && points.contains { $0.x < 4 })
+      #expect(
+        points.allSatisfy { (-0.5...24.5).contains($0.x) && (-0.5...24.5).contains($0.y) },
+        "\(mark.label)")
+      #expect(points.contains { $0.x > 20 } && points.contains { $0.x < 4 }, "\(mark.label)")
     }
     #expect(skyPath(CliMark.of(.unknown("gemini")).path).filter { $0 == .close }.count == 2)
   }

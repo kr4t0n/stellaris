@@ -1,0 +1,21 @@
+{
+  "name": "@stellaris/adapter-antigravity",
+  "version": "0.0.0",
+  "private": true,
+  "description": "AgentBackend for Google's Antigravity CLI over the Agent Client Protocol",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@stellaris/runner-core": "workspace:*",
+    "@stellaris/shared": "workspace:*",
+    "execa": "10.0.1"
+  }
+}

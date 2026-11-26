@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -306,6 +306,25 @@ describe("Scheduler", () => {
     await scheduler.tick();
     await scheduler.drain();
     expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind])).toEqual([["rev-1", "mention"]]);
+  });
+
+  it("reads on past an event of a type this board doesn't know, as after a rollback", async () => {
+    const { board, runner, scheduler } = await setup();
+    const last = (await board.latestEventId()) ?? "";
+    // A newer board's event, in the millisecond of the last one, before the next one's.
+    const newer = {
+      id: `${last.slice(0, 10)}${"Z".repeat(16)}`,
+      ts: clock.toISOString(),
+      type: "garden.watered",
+      actor: "user",
+      payload: {},
+    };
+    await appendFile(path.join(dir, "events", "log.jsonl"), `${JSON.stringify(newer)}\n`, "utf8");
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 please start" });
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => [d.agent, d.trigger.kind])).toEqual([["eng-1", "mention"]]);
   });
 
   it("holds dispatches while paused and releases them on resume", async () => {
@@ -2588,7 +2607,7 @@ describe("Scheduler", () => {
     expect(where()).toEqual([["concierge-1", "society", "lab", "closing"]]);
   });
 
-  it("wakes the front desk, a society role, on every user post, outside projects", async () => {
+  it("wakes the front desk, a society role, on a user post naming nobody, outside projects", async () => {
     const { board, runner, scheduler } = await setup({
       timings: { waitingStageMs: 3_600_000, heartbeatMs: 3_600_000 },
     });
@@ -2609,7 +2628,7 @@ describe("Scheduler", () => {
     ]);
     expect(runner.dispatches[0]?.trigger.reason).toBe("the user posted in demo/general");
 
-    // A citizen's post does not; the user's mention wakes both the citizen and the desk.
+    // A citizen's post does not; the user's mention wakes the citizen alone.
     runner.dispatches.length = 0;
     await board.postMessage(ENG, { channel: "demo/general", body: "on it" });
     await scheduler.tick();
@@ -2618,14 +2637,10 @@ describe("Scheduler", () => {
     await board.postMessage(USER, { channel: "demo/general", body: "@rev-1 please review" });
     await scheduler.tick();
     await scheduler.drain();
-    expect(
-      runner.dispatches
-        .map((d) => `${d.agent}:${d.trigger.kind}`)
-        .toSorted((a, b) => a.localeCompare(b)),
-    ).toEqual(["desk:user_post", "rev-1:mention"]);
+    expect(runner.dispatches.map((d) => `${d.agent}:${d.trigger.kind}`)).toEqual(["rev-1:mention"]);
 
-    // The front desk is a society role: it never joins a project, and answers every post,
-    // in a society channel or a project's, outside projects.
+    // The front desk is a society role: it never joins a project, and answers a post naming
+    // nobody, in a society channel or a project's, outside projects.
     runner.dispatches.length = 0;
     await expect(board.joinProject(USER, { project: "demo", agent: "desk" })).rejects.toMatchObject(
       {
@@ -2655,6 +2670,202 @@ describe("Scheduler", () => {
     await scheduler.tick();
     await scheduler.drain();
     expect(runner.dispatches.map((d) => d.trigger.kind)).not.toContain("user_post");
+  });
+
+  it("leaves a user post to the citizens it names, and to the front desk when none of them wakes", async () => {
+    const { board, runner, scheduler } = await setup({
+      timings: { waitingStageMs: 3_600_000, heartbeatMs: 3_600_000 },
+    });
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    await board.addAgent(USER, { name: "ghost", role: "reviewer", cli: null });
+    await board.addAgent(USER, { name: "old", role: "reviewer", cli: "claude" });
+    await board.retireAgent(USER, { name: "old", reason: "test" });
+    await scheduler.tick();
+    await scheduler.drain();
+    runner.dispatches.length = 0;
+    const woken = async (body: string): Promise<string[]> => {
+      await board.postMessage(USER, { channel: "demo/general", body });
+      await scheduler.tick();
+      await scheduler.drain();
+      const wakes = runner.dispatches.map((d) => `${d.agent}:${d.trigger.kind}`);
+      runner.dispatches.length = 0;
+      return wakes.toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    };
+
+    // A citizen who wakes for the post takes it alone, beside a name that wakes nobody too.
+    expect(await woken("@eng-1 can you add a health check?")).toEqual(["eng-1:mention"]);
+    expect(await woken("@klin and @rev-1, a look?")).toEqual(["rev-1:mention"]);
+    // Naming the desk wakes it once, as the mention.
+    expect(await woken("@desk who should take this?")).toEqual(["desk:mention"]);
+    expect(await woken("@desk and @eng-1, this one")).toEqual(["desk:mention", "eng-1:mention"]);
+    // A post whose names wake nobody is the desk's: a typo, a retired or CLI-less citizen, the
+    // user, a name in code, a package's scope, an address.
+    const bodies = [
+      "@klin can you add a health check?",
+      "@old, still around?",
+      "@ghost please review",
+      "@user note to self",
+      "Run `@eng-1 --fix`",
+      "bump @types/node and mail ops@example.com",
+      "and the build?",
+    ];
+    const each: Array<[string, string[]]> = [];
+    for (const body of bodies) {
+      each.push([body, await woken(body)]);
+    }
+    expect(each).toEqual(bodies.map((body) => [body, ["desk:user_post"]]));
+
+    // The user's note on a step that names a citizen still wakes no front desk.
+    const task = await board.createTask(USER, {
+      project: "demo",
+      title: "sign off",
+      stages: [{ name: "draft", agent: "user" }, { name: "check" }],
+    });
+    await board.claimTask(USER, { task_id: task.id });
+    await board.advanceTask(USER, { task_id: task.id, note: "Drafted; @klin, over to you." });
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(runner.dispatches.map((d) => d.trigger.kind)).not.toContain("user_post");
+  });
+
+  it("wakes the front desk at once for a user post naming it, as for one naming nobody", async () => {
+    const { board, runner, scheduler } = await setup({
+      timings: { userDebounceMs: 5_000, waitingStageMs: 3_600_000, heartbeatMs: 3_600_000 },
+    });
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    await scheduler.tick();
+    await scheduler.drain();
+    runner.dispatches.length = 0;
+    const wakes = () => runner.dispatches.map((d) => `${d.agent}:${d.trigger.kind}`);
+
+    // The user's mention of the desk is its own wake, and the post is the desk's too: no debounce.
+    await board.postMessage(USER, { channel: "demo/general", body: "@desk who takes this?" });
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(wakes()).toEqual(["desk:mention"]);
+
+    // A mention of anyone else waits out the user's debounce, and the desk sleeps through it.
+    runner.dispatches.length = 0;
+    await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 can you?" });
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(wakes()).toEqual([]);
+    advance(5_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(wakes()).toEqual(["eng-1:mention"]);
+  });
+
+  it("wakes the front desk on heartbeat for a user post naming nobody who wakes, not one naming the worker", async () => {
+    const { board, runner, scheduler } = await setup({ timings: { waitingStageMs: 3_600_000 } });
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    const DESK: Actor = { name: "desk", role: "concierge" };
+    const desk = () =>
+      runner.dispatches.filter((d) => d.agent === "desk").map((d) => d.trigger.kind);
+    const beat = async (): Promise<void> => {
+      advance(10_000);
+      await scheduler.tick();
+      await scheduler.drain();
+    };
+    const task = await board.createTask(DESK, {
+      project: "demo",
+      title: "build",
+      stages: [{ name: "build", agent: "eng-1" }],
+    });
+    await board.claimTask({ ...ENG, scope: "demo", thread: task.id }, { task_id: task.id });
+    await beat();
+    runner.dispatches.length = 0;
+
+    // The user answers the worker in the task's thread: the desk, its creator, sleeps through.
+    await board.postMessage(USER, { thread_id: task.id, body: "@eng-1 yes, go ahead" });
+    await beat();
+    await beat();
+    expect(desk()).toEqual([]);
+    expect(runner.dispatches.map((d) => d.agent)).toContain("eng-1");
+
+    // A name that wakes nobody leaves the post to the desk, at once and on heartbeat until read.
+    runner.dispatches.length = 0;
+    await board.postMessage(USER, { thread_id: task.id, body: "@klin and the tests?" });
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(desk()).toEqual(["user_post"]);
+    runner.dispatches.length = 0;
+    await beat();
+    expect(desk()).toEqual(["heartbeat"]);
+  });
+
+  it("wakes the front desk for an ask whatever it names, beside whom it names, and leaves a reply to them", async () => {
+    const { board, runner, scheduler } = await setup({
+      timings: { waitingStageMs: 3_600_000, heartbeatMs: 3_600_000 },
+    });
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    await scheduler.tick();
+    await scheduler.drain();
+    runner.dispatches.length = 0;
+    const woken = async (where: Ulid): Promise<string[]> => {
+      await scheduler.tick();
+      await scheduler.drain();
+      const wakes = runner.dispatches.map(
+        (d) => `${d.agent}:${d.trigger.kind}${d.thread?.id === where ? "" : " elsewhere"}`,
+      );
+      runner.dispatches.length = 0;
+      return wakes.toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    };
+    const ask = async (body: string): Promise<Ulid> => {
+      const thread = await board.openThread(USER, { channel: "asks", title: body });
+      await board.postMessage(USER, { thread_id: thread.id, body });
+      return thread.id;
+    };
+
+    // An ask naming a citizen who wakes wakes them and the desk, each in the ask's thread.
+    const health = await ask("@eng-1 can you add a health check?");
+    expect(await woken(health)).toEqual(["desk:user_post", "eng-1:mention"]);
+    // A reply in its thread naming them is theirs alone, as anywhere.
+    await board.postMessage(USER, { thread_id: health, body: "@eng-1 and the docs" });
+    expect(await woken(health)).toEqual(["eng-1:mention"]);
+    // An ask naming nobody, or naming the desk, wakes the desk once.
+    expect(await woken(await ask("what runs where?"))).toEqual(["desk:user_post"]);
+    expect(await woken(await ask("@desk and @eng-1, this one"))).toEqual([
+      "desk:mention",
+      "eng-1:mention",
+    ]);
+    // The first post of a thread on another channel naming a citizen who wakes is theirs.
+    const topic = await board.openThread(USER, { channel: "general", title: "the logo" });
+    await board.postMessage(USER, { thread_id: topic.id, body: "@rev-1 which one?" });
+    expect(await woken(topic.id)).toEqual(["rev-1:mention"]);
+  });
+
+  it("wakes the front desk on heartbeat for an ask naming a worker, not a thread elsewhere opened so", async () => {
+    const { board, runner, scheduler } = await setup({ timings: { waitingStageMs: 3_600_000 } });
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    const desk = () =>
+      runner.dispatches.filter((d) => d.agent === "desk").map((d) => d.trigger.kind);
+    const beat = async (): Promise<void> => {
+      advance(10_000);
+      await scheduler.tick();
+      await scheduler.drain();
+    };
+    await beat();
+    runner.dispatches.length = 0;
+
+    // A thread on general opened naming the worker is the worker's: the desk sleeps through.
+    const topic = await board.openThread(USER, { channel: "general", title: "health check" });
+    await board.postMessage(USER, { thread_id: topic.id, body: "@eng-1 can you add one?" });
+    await beat();
+    await beat();
+    expect(desk()).toEqual([]);
+    expect(runner.dispatches.map((d) => d.agent)).toContain("eng-1");
+
+    // The same ask on asks is the desk's too, at once and on heartbeat until read.
+    runner.dispatches.length = 0;
+    const asked = await board.openThread(USER, { channel: "asks", title: "health check" });
+    await board.postMessage(USER, { thread_id: asked.id, body: "@eng-1 can you add one?" });
+    await scheduler.tick();
+    await scheduler.drain();
+    expect(desk()).toEqual(["user_post"]);
+    runner.dispatches.length = 0;
+    await beat();
+    expect(desk()).toEqual(["heartbeat"]);
   });
 
   it("wakes a proposal's proposer when it is decided, and the decision wakes no front desk", async () => {

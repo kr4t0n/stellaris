@@ -1,4 +1,4 @@
-import { BoardEventSchema, SOCIETY_SCOPE, type BoardEvent } from "@stellaris/shared";
+import { readBoardEvent, SOCIETY_SCOPE, type BoardEvent } from "@stellaris/shared";
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import { followStream } from "./sse.js";
 
@@ -8,14 +8,21 @@ interface FollowOptions {
   readonly onResume: () => void;
 }
 
-/** Follows the board's event stream from the end of the log, resuming after the last event seen. */
+/**
+ * Follows the board's event stream from the end of the log, resuming after the last event seen. An
+ * event of a type this page doesn't know, from a board newer than the page, is skipped; a known
+ * type's malformed event drops the connection, which resumes after the last event read.
+ */
 export function followBoardEvents(token: string, options: FollowOptions): () => void {
   let since = "latest";
   return followStream({
     token,
     url: () => `/api/events/stream?since=${since}`,
     onData: (data) => {
-      const event = BoardEventSchema.parse(JSON.parse(data));
+      const event = readBoardEvent(JSON.parse(data));
+      if (event === null) {
+        return;
+      }
       since = event.id;
       options.onEvent(event);
     },

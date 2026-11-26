@@ -109,14 +109,19 @@ export function runnerRoutes(
         ending.abort();
         wake?.();
       };
+      const flush = async (): Promise<void> => {
+        for (let message = queue.shift(); message !== undefined; message = queue.shift()) {
+          await stream.writeSSE({ event: message.type, data: JSON.stringify(message) });
+        }
+      };
       const detach = await hub.attach(runner, send, end);
       try {
-        // Headers go out with the first write, so the runner knows it is attached once this arrives.
+        // The headers went out as the answer started, a chunked answer's before any write, and the
+        // runner counted the stream open on them, so it may have stopped while `attach` wrote its
+        // record; `RunnerHub.close` waits for that write.
         await stream.write(": attached\n\n");
         while (!stream.aborted && !stream.closed && !ending.signal.aborted) {
-          for (let message = queue.shift(); message !== undefined; message = queue.shift()) {
-            await stream.writeSSE({ event: message.type, data: JSON.stringify(message) });
-          }
+          await flush();
           await Promise.race([
             new Promise<void>((resolve) => {
               wake = resolve;
@@ -127,6 +132,10 @@ export function runnerRoutes(
           if (queue.length === 0 && !stream.aborted) {
             await stream.write(": ping\n\n");
           }
+        }
+        // What the hub sent before it ended the stream, as a removal's `removed`, still goes out.
+        if (!stream.aborted && !stream.closed) {
+          await flush();
         }
       } finally {
         await detach();

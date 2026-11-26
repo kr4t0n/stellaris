@@ -153,8 +153,8 @@ export class TurnCounters {
   private readonly wakes: WakeLatency;
 
   /**
-   * `cliOf` names a citizen's CLI for an end logged before ends named theirs: a turn runs on the
-   * CLI its citizen's record names, which nothing changes after the citizen is added.
+   * `cliOf` names a citizen's CLI for an end logged before ends named theirs: the CLI it had
+   * before its first switch, since every switch came after ends named their CLI.
    * `actionsOf` gives the board actions of a turn whose end was logged before ends carried them,
    * read from its transcript, and null or nothing for a turn that kept none. `citizens` are those
    * a mention can name, read as each post is counted, so a map kept current names one added since.

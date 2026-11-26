@@ -25,6 +25,25 @@ import { USER } from "./scripted-backend.js";
 
 export type TestApp = ReturnType<typeof createApp>;
 
+/**
+ * How long a test waits for a turn on a test society's runner to reach its CLI, as `vi.waitFor`'s
+ * or `expect.poll`'s options. Before the CLI starts, the runner pulls the board's copy, clones or
+ * fetches the citizen's home from this process's server, and prepares the project's repository and
+ * worktree, all git processes that a loaded machine slows past Vitest's 1 s default (testing.md,
+ * "A wait for a turn to start takes `TURN_START_WAIT`").
+ */
+export const TURN_START_WAIT = { timeout: 10_000 } as const;
+
+/**
+ * How long a test waits for a runner of a test board's server to connect again, whatever ended
+ * its stream (a rename, its network's return, its own check of a stream gone quiet), as
+ * `vi.waitFor`'s or `expect.poll`'s options. The runner waits out its retry delay, which doubles
+ * with each try that fails while its network is down, and its hello and stream then write the
+ * runner's record on the board, which a loaded machine's disk slows past Vitest's 1 s default
+ * (testing.md, "A wait for a runner to connect again takes `RECONNECT_WAIT`").
+ */
+export const RECONNECT_WAIT = { timeout: 10_000 } as const;
+
 export interface TestSocietyOptions {
   readonly board: Board;
   /** The runner's adapters, built once the app exists, since scripted ones call its verbs. */
@@ -179,6 +198,8 @@ export async function startTestSociety(options: TestSocietyOptions): Promise<Tes
   });
   // As the server does before it answers: a society stopped before has no runner attached.
   await hub.markAllAway();
+  // As the server does once it answers: the reads of threads, channels, and messages are indexed.
+  await board.indexReads();
   board.watchTurns(() => host.inFlight());
   board.readImagesWith((actor, file) => hub.readTurnImage(actor, file));
   board.openImagesWith((actor, image) => hub.writeTurnImage(actor, image));

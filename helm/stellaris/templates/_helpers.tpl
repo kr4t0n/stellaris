@@ -216,8 +216,8 @@ plain words by these checks. Runners are refused what they would read wrong or e
 {{- if not (has .role (list "concierge" "steward")) -}}
 {{- fail (printf "society.citizens: %s's role %q does not exist on first start; only concierge and steward do" .name (toString .role)) -}}
 {{- end -}}
-{{- if and .cli (not (has .cli (list "claude" "codex"))) -}}
-{{- fail (printf "society.citizens: %s's cli must be claude or codex, not %q" .name (toString .cli)) -}}
+{{- if and .cli (not (has .cli (list "claude" "codex" "antigravity"))) -}}
+{{- fail (printf "society.citizens: %s's cli must be claude, codex, or antigravity, not %q" .name (toString .cli)) -}}
 {{- end -}}
 {{- if and .model (not (regexMatch "^[A-Za-z0-9][A-Za-z0-9._:/@-]*$" (toString .model))) -}}
 {{- fail (printf "society.citizens: %s's model %q is not a model name" .name (toString .model)) -}}
@@ -245,8 +245,8 @@ plain words by these checks. Runners are refused what they would read wrong or e
 {{- $_ := set $tokens $token $at -}}
 {{- end -}}
 {{- range $values.config.clis -}}
-{{- if not (has . (list "claude" "codex")) -}}
-{{- fail (printf "%s.config.clis: %q is not claude or codex" $at (toString .)) -}}
+{{- if not (has . (list "claude" "codex" "antigravity")) -}}
+{{- fail (printf "%s.config.clis: %q is not claude, codex, or antigravity" $at (toString .)) -}}
 {{- end -}}
 {{- end -}}
 {{- range $values.extraVolumes -}}

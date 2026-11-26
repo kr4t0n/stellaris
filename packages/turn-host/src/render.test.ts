@@ -203,7 +203,7 @@ describe("config-home rendering", () => {
       ...places,
     });
     expect(text).toContain(
-      "In a task's thread, only the current stage's holder, or while nobody holds it whoever may take it, wakes for your post, and a post that asks the user also wakes the task's creator; mention anyone else you need, including the concierge for a plan change.",
+      "In a task's thread, only the current stage's holder, or while nobody holds it whoever may take it, wakes for your post, and a post that asks the user also wakes the task's creator; mention anyone else you need, including the concierge for a plan change, as when the user answered a stage that waits on them, handed you work at a gate you can't take, or asked you to file a task, since the user's post naming you wakes the concierge only when it opens an ask on the asks channel.",
     );
   });
 

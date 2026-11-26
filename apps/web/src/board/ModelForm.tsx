@@ -1,4 +1,4 @@
-import type { EffortOption, Member, ModelOption } from "@stellaris/shared";
+import type { CliKind, EffortOption, Member, ModelOption } from "@stellaris/shared";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "../components/Button.js";
@@ -55,20 +55,43 @@ function effortChoicesOf(model: ModelOption | undefined, unlisted: string | null
 }
 
 /**
- * Chooses the model a citizen's turns run with, from the models its CLI lists, or the CLI's own
+ * Chooses the model a citizen's turns run with on `cli`, from the models that CLI lists, or its own
  * default, and the reasoning effort, from the levels the chosen model lists, or the model's own
- * default. Both apply from the citizen's next turn.
+ * default. `cli` is the citizen's own, or another chosen from its mark to switch it to, which
+ * starts at both defaults, since a model and its levels belong to one CLI, and saves the three in
+ * one write. All apply from the citizen's next turn.
  */
-export function ModelForm({ member, onDone }: { member: Member; onDone: () => void }) {
+export function ModelForm({
+  member,
+  runsOn,
+  cli,
+  onDone,
+}: {
+  member: Member;
+  /** The CLI the citizen runs on now. */
+  runsOn: CliKind;
+  /** The CLI the form chooses a model on. */
+  cli: CliKind;
+  onDone: () => void;
+}) {
   const { api } = useSession();
   const client = useQueryClient();
-  const models = useAgentModels(member.name);
-  const current = member.model ?? CLI_DEFAULT;
-  const currentEffort = member.effort ?? MODEL_DEFAULT;
+  const models = useAgentModels(member.name, cli);
+  const switching = cli !== runsOn;
+  const current = switching ? CLI_DEFAULT : (member.model ?? CLI_DEFAULT);
+  const currentEffort = switching ? MODEL_DEFAULT : (member.effort ?? MODEL_DEFAULT);
   const [choice, setChoice] = useState(current);
   const [effort, setEffort] = useState(currentEffort);
   const save = useMutation({
     mutationFn: async () => {
+      if (switching) {
+        await api.setCli(member.name, {
+          cli,
+          model: choice === CLI_DEFAULT ? null : choice,
+          effort: effort === MODEL_DEFAULT ? null : effort,
+        });
+        return;
+      }
       if (choice !== current) {
         await api.setModel(member.name, choice === CLI_DEFAULT ? null : choice);
       }
@@ -82,7 +105,7 @@ export function ModelForm({ member, onDone }: { member: Member; onDone: () => vo
 
   const listed = models.data?.models ?? [];
   const unlisted =
-    member.model !== undefined && !listed.some((model) => model.id === member.model)
+    !switching && member.model !== undefined && !listed.some((model) => model.id === member.model)
       ? member.model
       : null;
   const modelOf = (value: string): ModelOption | undefined =>
@@ -98,7 +121,7 @@ export function ModelForm({ member, onDone }: { member: Member; onDone: () => vo
       setEffort(MODEL_DEFAULT);
     }
   };
-  const changed = choice !== current || effort !== currentEffort;
+  const changed = switching || choice !== current || effort !== currentEffort;
 
   return (
     <form
@@ -111,10 +134,10 @@ export function ModelForm({ member, onDone }: { member: Member; onDone: () => vo
     >
       <div className="flex items-center gap-2">
         {models.isPending ? (
-          <p className="min-w-0 flex-1 truncate text-meta">Asking {member.cli} for its models…</p>
+          <p className="min-w-0 flex-1 truncate text-meta">Asking {cli} for its models…</p>
         ) : models.error !== null ? (
           <p role="alert" className="min-w-0 flex-1 truncate text-xs text-red-400">
-            {member.cli} did not list its models:{" "}
+            {cli} did not list its models:{" "}
             {models.error instanceof ApiError
               ? models.error.message
               : "the board server did not answer"}
@@ -149,11 +172,6 @@ export function ModelForm({ member, onDone }: { member: Member; onDone: () => vo
           {save.isPending ? "Saving…" : "Save"}
         </Button>
       </div>
-      {models.data === undefined ? null : (
-        <p className="text-meta">
-          Listed by {models.data.cli} on {models.data.runner}
-        </p>
-      )}
       <Failure error={save.error} />
     </form>
   );

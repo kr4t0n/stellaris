@@ -5,17 +5,9 @@ import { useId, useState, type ReactNode } from "react";
 import { BackLink } from "../components/BackLink.js";
 import { LinkedText } from "../components/Entities.js";
 import { Markdown } from "../components/Markdown.js";
-import { ApiError } from "../lib/api.js";
+import { namesNothing } from "../lib/api.js";
 import { ago, firstParagraph } from "../lib/format.js";
-import {
-  useMembers,
-  useNow,
-  useProjects,
-  useSession,
-  useTask,
-  useThread,
-  useThreads,
-} from "../lib/session.js";
+import { useMembers, useNow, useProjects, useSession, useTask, useThread } from "../lib/session.js";
 import { Citizen, useDisplayName } from "./Avatar.js";
 import { ActionButton, Composer, type ComposerAction } from "./Composer.js";
 import { stageForYou } from "./governance.js";
@@ -150,7 +142,10 @@ function PullRequest({ task, now }: { task: Task; now: number }) {
   );
 }
 
-/** Approve alone, for a stage that waits on the user on a task with no open thread to write in. */
+/**
+ * Approve alone, for a stage that waits on the user on a task whose thread could not be read: one
+ * from before tasks had threads, or a read that failed.
+ */
 function ApproveAlone({ action }: { action: ComposerAction }) {
   const run = useMutation({ mutationFn: () => action.run("") });
   return (
@@ -406,6 +401,7 @@ function useApprove(task: Task | undefined): ComposerAction | undefined {
     label,
     title: `${label} ${stage.name}, with what the box holds as its note`,
     blocked: unlinked ? "No pull request linked yet." : null,
+    failure: "The stage was not finished.",
     run: async (text) => {
       await api.advanceTask({ task_id: task.id, ...(text === "" ? {} : { note: text }) });
       await client.invalidateQueries({ queryKey: ["task", task.id] });
@@ -424,30 +420,25 @@ export function TaskView() {
   const { taskId } = useParams({ from: "/task/$taskId" });
   const { message: target } = useSearch({ from: "/task/$taskId" });
   const task = useTask(taskId);
-  const threads = useThreads();
   const projects = useProjects();
   const members = useMembers();
   const now = useNow(30_000);
   const displayName = useDisplayName();
-  // A task's thread takes the task's id.
-  const messages = useThread(
-    threads.data?.some((candidate) => candidate.id === taskId) === true ? taskId : null,
-  );
+  // A task's thread takes the task's id, so it is read at once; "not found" means it has none.
+  const messages = useThread(taskId);
   const approve = useApprove(task.data);
 
   if (task.data === undefined) {
     return (
       <PaneNote>
-        {task.error instanceof ApiError && task.error.status === 404
-          ? `There is no task ${taskId}.`
-          : "Reading the task…"}
+        {namesNothing(task.error) ? `There is no task ${taskId}.` : "Reading the task…"}
       </PaneNote>
     );
   }
   const current = task.data;
   const phase = phaseOf(current);
   const project = projects.data?.find((candidate) => candidate.slug === current.project);
-  const thread = threads.data?.find((candidate) => candidate.id === current.id);
+  const thread = messages.data?.thread;
   return (
     <>
       <PaneHeader
@@ -490,11 +481,11 @@ export function TaskView() {
           className="px-4 pb-3"
         >
           <section aria-label="Thread">
-            {threads.data === undefined ? null : thread === undefined ? (
+            {namesNothing(messages.error) ? (
               <p className="mt-3 text-meta">No thread on this task.</p>
             ) : (
               <SubjectThread
-                thread={thread}
+                id={current.id}
                 now={now}
                 task={current}
                 target={target}
@@ -504,15 +495,24 @@ export function TaskView() {
           </section>
         </StickyList>
       </div>
+      {/* Keyed by its task, so a note typed for one never finishes the next one a link opens in
+          this view. The key is `box:<id>`, as the proposal's box's is, where the bare id was the
+          message list's key beside it and React kept the old list beside the new one; here the
+          box's siblings take no key, so the prefix only keeps a later move from repeating that. A
+          task's thread closes only with the task, so one with a stage for the user has an open
+          thread or none. Until the read answers, the foot waits; once it fails, as with a 404
+          for a task from before threads or a server's error, Approve stands alone, so the stage
+          can still be finished. */}
       {thread?.state === "open" ? (
         <Composer
+          key={`box:${current.id}`}
           target={{ threadId: current.id }}
           placeholder="Write in the task's thread"
-          action={approve}
+          actions={approve === undefined ? undefined : [approve]}
         />
-      ) : approve === undefined ? null : (
-        <ApproveAlone action={approve} />
-      )}
+      ) : messages.error !== null && approve !== undefined ? (
+        <ApproveAlone key={`box:${current.id}`} action={approve} />
+      ) : null}
     </>
   );
 }

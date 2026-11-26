@@ -10,6 +10,7 @@
     { "path": "../../packages/shared" },
     { "path": "../../packages/runner-core" },
     { "path": "../../packages/adapter-claude" },
-    { "path": "../../packages/adapter-codex" }
+    { "path": "../../packages/adapter-codex" },
+    { "path": "../../packages/adapter-antigravity" }
   ]
 }

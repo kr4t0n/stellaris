@@ -53,6 +53,7 @@ import {
   sameRepository,
   USER_NAME,
   USER_ROLE,
+  userPostWakesDesk,
   parseChannelRef,
   PROJECT_DEFAULT_CHANNELS,
   ProjectSchema,
@@ -166,7 +167,7 @@ import {
 } from "@stellaris/shared";
 import { MENTION_PATTERN } from "@stellaris/shared/mentions";
 import { BoardError } from "./errors.js";
-import { EventLog } from "./events.js";
+import { EventLog, type EventLogWarnings } from "./events.js";
 import { FileTree, type StreamedFile } from "./files.js";
 import { HomeRepos } from "./homes.js";
 import { withoutMetadata } from "@stellaris/shared/image-metadata";
@@ -183,6 +184,7 @@ import {
   listDirs,
   listFiles,
   parseLooseMarkdown,
+  parseMarkdown,
   readJson,
   readLooseMarkdown,
   readMarkdown,
@@ -191,6 +193,7 @@ import {
   writeMarkdown,
 } from "./fs.js";
 import { Mutex } from "./mutex.js";
+import { ReadIndex, type FoundThread, type ReadIndexWrite } from "./read-index.js";
 import { BoardPaths } from "./paths.js";
 import { readSkillFolder, skillFileText } from "./skill-folder.js";
 import { hashToken, mintToken } from "./tokens.js";
@@ -264,6 +267,8 @@ export interface BoardOptions {
   readonly leaseMs?: number | undefined;
   /** Clock, injectable for tests. */
   readonly now?: (() => Date) | undefined;
+  /** Where the board says what it reads past, as an event of a type it doesn't know; silent unset. */
+  readonly log?: EventLogWarnings | undefined;
 }
 
 export interface InitInput {
@@ -329,6 +334,13 @@ const SKIPPED_IN_HOME = new Set([".git", "turns", ".claude", ".codex"]);
 
 /** How many conversations' session records a runner's rename reads, or writes, at once. */
 const SESSION_BATCH = 64;
+
+/** What a switch of a citizen's CLI logs with `agent.configured`, as far as the counters read it. */
+const CliSwitchSchema = z.object({
+  agent: NameSchema,
+  cli: CliKindSchema,
+  previous: z.object({ cli: CliKindSchema }),
+});
 
 /** Runner token hashes by runner name, kept in the state directory rather than the projection. */
 const RunnerTokensSchema = z.object({
@@ -441,8 +453,8 @@ export interface UnreadConversation {
 /**
  * A message of a digest, with the conversation it is filed in: its scope and, but for the home,
  * its part, a thread's id, `#channel`, or `~project` as `conversationPart` gives. News is read by
- * any general conversation. `asked` marks a post that mentions the reader, or the user's post for
- * the front desk.
+ * any general conversation. `asked` marks a post that mentions the reader, or for the front desk
+ * the user's post that wakes it and the user's step note.
  */
 interface DigestEntry {
   scope: Name;
@@ -526,6 +538,21 @@ function cursorOf(cursors: Cursors, scope: string, part: string | null = null): 
 }
 
 /** Oldest message first. */
+function orNotFound(found: FoundThread | null, id: Ulid): FoundThread {
+  if (found === null) {
+    throw new BoardError("NOT_FOUND", `thread ${id} not found`);
+  }
+  return found;
+}
+
+/**
+ * The author of a message's file, `<id>-<author>.md`, read from its name. Compared whole, since a
+ * name may end another's: `rev-a`'s files end in `-a.md` too.
+ */
+function authorOfFile(file: string): Name {
+  return file.slice(27, -".md".length);
+}
+
 function byId(a: { message: Message }, b: { message: Message }): number {
   return a.message.id < b.message.id ? -1 : a.message.id > b.message.id ? 1 : 0;
 }
@@ -613,7 +640,10 @@ const SEED_INSTRUCTIONS_HEADING = "## Seed instructions";
 /** The wake trigger that marks a role as a reader of operations signals, such as the steward. */
 const OPS_WAKE_TRIGGER = "ops_event";
 
-/** The wake trigger that marks a role as the front desk, woken by every post of the user's. */
+/**
+ * The wake trigger that marks a role as the front desk, woken by the user's asks and by the user's
+ * other posts that name nobody else who wakes.
+ */
 const FRONT_DESK_TRIGGER = "user_post";
 
 /** Where readers of operations signals follow governance; proposals reach them as threads. */
@@ -817,6 +847,11 @@ export class Board {
   private readonly events: EventLog;
   private readonly actionCounts = new Map<string, number | null>();
   private metricsIndex: Promise<MetricsIndex> | null = null;
+  // The index the reads of threads, channels, and messages answer from once it is seeded, the seed
+  // under way, and the writes made while it runs, which it takes once it has read the files.
+  private reads: ReadIndex | null = null;
+  private readsSeed: Promise<void> | null = null;
+  private readsWaiting: ReadIndexWrite[] | null = null;
   // The citizens Prometheus's wake latency matches mentions with, once seeded, kept current by
   // every write of an agent's record.
   private mentionRoster: Map<string, MatchingCitizen> | null = null;
@@ -845,7 +880,7 @@ export class Board {
     this.moves = new MoveRepos(this.paths.moves());
     this.leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS;
     this.now = options.now ?? (() => new Date());
-    this.events = new EventLog(this.paths.eventLog(), () => this.newId(), this.now);
+    this.events = new EventLog(this.paths.eventLog(), () => this.newId(), this.now, options.log);
   }
 
   /** Creates a society: channels, seed roles, and the user. Returns the user token once. */
@@ -1253,6 +1288,13 @@ export class Board {
   }
 
   async findTask(id: Ulid): Promise<TaskLocation> {
+    // The read index knows which project's folder holds the task; the file says what it is.
+    const held = this.reads?.taskProject(id);
+    if (held !== undefined && (await exists(this.paths.task(held, id)))) {
+      const file = this.paths.task(held, id);
+      const doc = await readMarkdown(file, TaskFrontmatterSchema);
+      return { project: held, file, task: { ...doc.data, body: doc.body } };
+    }
     for (const project of await listDirs(this.paths.projects())) {
       const file = this.paths.task(project, id);
       if (await exists(file)) {
@@ -1439,13 +1481,12 @@ export class Board {
       ];
       for (const entry of entries) {
         const ref = channelRef(project, entry.name);
-        const files = await listFiles(this.paths.channelDir(ref));
-        const last = files.at(-1)?.slice(0, 26) ?? null;
+        const { count, last } = await this.folderSummary(this.paths.channelDir(ref));
         summaries.push({
           ref,
           project,
           name: entry.name,
-          messages: files.length,
+          messages: count,
           lastMessageId: last,
           lastAt: last === null ? null : new Date(decodeTime(last)).toISOString(),
           ...(entry.archived === undefined ? {} : { archived: entry.archived }),
@@ -1472,12 +1513,26 @@ export class Board {
     return (await this.findThread(id)).thread;
   }
 
+  /** Whether a message is the first of its thread, as an ask is (`isAsk`). */
+  async opensThread(message: { id: Ulid; thread?: Ulid | undefined }): Promise<boolean> {
+    return (
+      message.thread !== undefined && (await this.firstInThread(message.thread)) === message.id
+    );
+  }
+
   /**
    * Where each of the messages named is and who wrote it, for text that names them by id; an id
    * that names no message is left out. Message files start with their ids, so only the files
    * asked for are read.
    */
   async findMessages(ids: readonly Ulid[]): Promise<MessageRef[]> {
+    const reads = this.reads;
+    if (reads !== null) {
+      return [...new Set(ids)].toSorted().flatMap((id) => {
+        const message = reads.message(id);
+        return message === undefined ? [] : [MessageRefSchema.parse(message)];
+      });
+    }
     const wanted = new Set(ids);
     const found: MessageRef[] = [];
     for await (const dir of this.messageDirs()) {
@@ -1492,7 +1547,7 @@ export class Board {
         break;
       }
     }
-    return found;
+    return found.toSorted((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   }
 
   /**
@@ -1516,15 +1571,10 @@ export class Board {
       }
     }
     for (const threads of await this.threadScopes()) {
-      for (const file of await listFiles(threads)) {
-        if (!file.endsWith(".md")) {
+      for (const thread of await this.threadRecordsIn(threads)) {
+        if (thread.state !== "open") {
           continue;
         }
-        const doc = await readMarkdown(path.join(threads, file), ThreadFrontmatterSchema);
-        if (doc.data.state !== "open") {
-          continue;
-        }
-        const thread: Thread = { ...doc.data, body: doc.body };
         const messages = await this.readMessagesIn(
           this.paths.threadMessages(threads, thread.id),
           null,
@@ -1541,7 +1591,7 @@ export class Board {
 
   /** Whether `author` has mentioned `name` in any message posted at or after `since`, an ISO time. */
   async hasMentioned(author: Name, name: Name, since: string): Promise<boolean> {
-    for await (const message of this.iterateMessages(null)) {
+    for await (const message of this.messagesBetween(null)) {
       if (message.author === author && message.ts >= since && message.mentions.includes(name)) {
         return true;
       }
@@ -1553,21 +1603,45 @@ export class Board {
   async listThreads(): Promise<ThreadSummary[]> {
     const all: ThreadSummary[] = [];
     for (const threads of await this.threadScopes()) {
-      for (const file of await listFiles(threads)) {
-        const doc = await readMarkdown(path.join(threads, file), ThreadFrontmatterSchema);
-        const messages = await listFiles(this.paths.threadMessages(threads, doc.data.id));
-        // A message's file is `<id>-<author>.md`, so the newest one's author needs no read.
-        const last = messages.at(-1);
-        all.push({
-          ...doc.data,
-          body: doc.body,
-          messages: messages.length,
-          lastMessageId: last?.slice(0, 26) ?? null,
-          lastAuthor: last?.slice(27, -".md".length) ?? null,
-        });
+      for (const thread of await this.threadRecordsIn(threads)) {
+        const { count, last, lastAuthor } = await this.folderSummary(
+          this.paths.threadMessages(threads, thread.id),
+        );
+        all.push({ ...thread, messages: count, lastMessageId: last, lastAuthor });
       }
     }
     return all;
+  }
+
+  /** The thread records filed in one scope's folder of threads, in id order. */
+  private async threadRecordsIn(threads: string): Promise<Thread[]> {
+    if (this.reads !== null) {
+      return this.reads.threadsIn(threads);
+    }
+    const records: Thread[] = [];
+    for (const file of await listFiles(threads)) {
+      const doc = await readMarkdown(path.join(threads, file), ThreadFrontmatterSchema);
+      records.push({ ...doc.data, body: doc.body });
+    }
+    return records;
+  }
+
+  /** How many messages a folder holds, and its newest one's id and author. */
+  private async folderSummary(
+    dir: string,
+  ): Promise<{ count: number; last: Ulid | null; lastAuthor: Name | null }> {
+    if (this.reads !== null) {
+      const { count, newest } = this.reads.summary(dir);
+      return { count, last: newest?.id ?? null, lastAuthor: newest?.author ?? null };
+    }
+    // A message's file is `<id>-<author>.md`, so the newest one's author needs no read.
+    const files = await listFiles(dir);
+    const last = files.at(-1);
+    return {
+      count: files.length,
+      last: last?.slice(0, 26) ?? null,
+      lastAuthor: last === undefined ? null : authorOfFile(last),
+    };
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -2049,7 +2123,7 @@ export class Board {
   ): Promise<Message | null> {
     // A message's file is `<id>-<author>.md`, so the author's own are found by name.
     const own = (await listFiles(dir))
-      .filter((file) => file.slice(27, -".md".length) === author)
+      .filter((file) => authorOfFile(file) === author)
       .slice(-IDEMPOTENCY_LOOKBACK);
     // Read at once, and only a file whose text holds the key is parsed: under the write lock, the
     // look costs about what one read does.
@@ -2283,8 +2357,8 @@ export class Board {
   /**
    * The digest after each conversation's cursor, oldest first, with the scope and thread each
    * message is filed in: what mentions the member, sits in a channel it follows, or belongs to a
-   * thread it takes part in, and for the front desk, which every post by the user wakes, every post
-   * by the user wherever it is. With a conversation, only what is filed there: for a thread, every
+   * thread it takes part in, and for the front desk, every post by the user that wakes it
+   * (`userPostWakesDesk`) and every step note of the user's, wherever it is. With a conversation, only what is filed there: for a thread, every
    * message of the thread, since the conversation is about it; for a channel's, that channel's
    * top-level messages; for a project's in the society scope, the top-level messages of every
    * channel of a project the member is not in; for a scope's home, general's, since each thread,
@@ -2318,6 +2392,32 @@ export class Board {
     const charter = await this.readRole(agent.role);
     const subscribed = new Set(agent.subscriptions);
     const frontDesk = charter.wakeTriggers.includes(FRONT_DESK_TRIGGER);
+    // The records of the citizens the user's posts name, read once each.
+    const citizens = new Map<string, Agent | null>();
+    const namedIn = async (mentions: readonly string[]): Promise<Agent[]> => {
+      const found: Agent[] = [];
+      for (const name of mentions) {
+        if (!citizens.has(name)) {
+          citizens.set(name, await this.readAgent(name).catch(() => null));
+        }
+        const citizen = citizens.get(name);
+        if (citizen !== undefined && citizen !== null) {
+          found.push(citizen);
+        }
+      }
+      return found;
+    };
+    // The first message of each thread a post by the user is in, read once each.
+    const firsts = new Map<Ulid, Ulid | null>();
+    const opensThread = async (message: Message): Promise<boolean> => {
+      if (message.thread === undefined) {
+        return false;
+      }
+      if (!firsts.has(message.thread)) {
+        firsts.set(message.thread, await this.firstInThread(message.thread));
+      }
+      return firsts.get(message.thread) === message.id;
+    };
     const threadParticipation = new Map<Ulid, boolean>();
     const openChannels = new Map<ChannelRef, boolean>();
     const liveProjects = new Map<Name, boolean>();
@@ -2347,11 +2447,18 @@ export class Board {
         ? null
         : (known.toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0))[0] ?? null);
 
-    for await (const message of this.iterateMessages(since, undefined, upto)) {
+    for await (const message of this.messagesBetween(since, upto)) {
       const filedIn = wakeScope(agent, parseChannelRef(message.channel).project);
       const thread = message.thread ?? null;
       const asked =
-        message.mentions.includes(actor.name) || (frontDesk && message.author === USER_NAME);
+        message.mentions.includes(actor.name) ||
+        (frontDesk &&
+          message.author === USER_NAME &&
+          (message.step !== undefined ||
+            userPostWakesDesk(actor.name, await namedIn(message.mentions), {
+              channel: message.channel,
+              opensThread: await opensThread(message),
+            })));
       // News: a post outside the citizen's projects, in a channel it follows, asking nothing of it,
       // which only a general conversation carries.
       if (newsFrom !== undefined && thread === null && filedIn === SOCIETY_SCOPE && !asked) {
@@ -3061,7 +3168,7 @@ export class Board {
         : { scope: SOCIETY_SCOPE };
     }
     if (named.thread_id !== undefined) {
-      const { thread } = await this.findThread(named.thread_id);
+      const { thread } = await this.findThreadFile(named.thread_id);
       if (thread.state !== "open") {
         throw new BoardError("INVALID_STATE", `thread ${thread.id} is closed`);
       }
@@ -3308,7 +3415,7 @@ export class Board {
 
   /** The open thread of a proposal being decided, which `propose` opened with it. */
   private async proposalThreadUnlocked(proposal: Proposal): Promise<Thread> {
-    const found = await this.tryFindThread(proposal.id);
+    const found = await this.tryFindThreadFile(proposal.id);
     if (found?.thread.state !== "open") {
       throw new BoardError("INVALID_STATE", `proposal ${proposal.id} has no open thread`);
     }
@@ -3335,7 +3442,7 @@ export class Board {
    * with the task; an ended task's thread closed with it.
    */
   private async taskThreadUnlocked(task: Task): Promise<Thread> {
-    const found = await this.tryFindThread(task.id);
+    const found = await this.tryFindThreadFile(task.id);
     if (found?.thread.state === "open") {
       return found.thread;
     }
@@ -3441,7 +3548,7 @@ export class Board {
     const args = VerbInputs.close_thread.parse(input);
     await this.authorize(actor, "close_thread");
     return this.mutex.run(async () => {
-      const { thread, threads } = await this.findThread(args.thread_id);
+      const { thread, threads } = await this.findThreadFile(args.thread_id);
       if (thread.state !== "open") {
         throw new BoardError("INVALID_STATE", `thread ${thread.id} is not open`);
       }
@@ -4522,6 +4629,64 @@ export class Board {
     return this.metricsIndex;
   }
 
+  /**
+   * The read index, which answers the reads of threads, channels, and messages: every message, every
+   * thread record, and every task's project, seeded once from the files, as the server does at its
+   * start, then kept up by the writes of this process, each right after its file is written and
+   * still under the write lock. Until it is seeded, those reads read the files, as a process that
+   * never seeds, such as the admin CLI's, always does. Writes made while it is seeded wait in a list
+   * it takes once it has read the files, a message once by its id and a thread's record as last
+   * written. What another process writes, or a hand on the data directory, is read at the next seed.
+   * A seed that fails is tried again by the next call.
+   */
+  indexReads(): Promise<void> {
+    this.readsSeed ??= this.seedReads().catch((error: unknown) => {
+      this.readsSeed = null;
+      throw error;
+    });
+    return this.readsSeed;
+  }
+
+  private async seedReads(): Promise<void> {
+    const waiting: ReadIndexWrite[] = [];
+    this.readsWaiting = waiting;
+    try {
+      const index = new ReadIndex();
+      // The same folders and regular files the reads without an index list and read.
+      for await (const dir of this.messageDirs()) {
+        for (const message of await this.readMessageFiles(dir, null)) {
+          index.addMessage(dir, message);
+        }
+      }
+      for (const threads of await this.threadScopes()) {
+        for (const file of await listFiles(threads)) {
+          const doc = await readMarkdown(path.join(threads, file), ThreadFrontmatterSchema);
+          index.setThread(threads, { ...doc.data, body: doc.body }, true);
+        }
+      }
+      for (const project of await listDirs(this.paths.projects())) {
+        for (const file of await listFiles(this.paths.tasks(project))) {
+          index.setTask(file.slice(0, -".md".length), project, true);
+        }
+      }
+      for (const write of waiting) {
+        index.apply(write);
+      }
+      this.reads = index;
+    } finally {
+      this.readsWaiting = null;
+    }
+  }
+
+  /** Hands a write the reads answer from to the read index, or to its seed while that runs. */
+  private noteRead(write: ReadIndexWrite): void {
+    if (this.reads !== null) {
+      this.reads.apply(write);
+    } else {
+      this.readsWaiting?.push(write);
+    }
+  }
+
   private async seedMetrics(): Promise<MetricsIndex> {
     const actions = new Map<string, number | null>();
     const index = new MetricsIndex((turnId) => actions.get(turnId));
@@ -4629,8 +4794,19 @@ export class Board {
       }
     });
     const events = await this.events.readSince(null, Number.MAX_SAFE_INTEGER);
-    for (const agent of await this.listAgents()) {
-      clis.set(agent.name, agent.cli);
+    const agents = await this.listAgents();
+    // An end logged before ends named their CLI came before every switch of one, so it ran on the
+    // CLI its citizen had before its first switch, logged with that switch, or else on its record's.
+    const firstClis = new Map<string, CliKind>();
+    for (const event of [...events, ...waiting]) {
+      const switched =
+        event.type === "agent.configured" ? CliSwitchSchema.safeParse(event.payload) : null;
+      if (switched?.success === true && !firstClis.has(switched.data.agent)) {
+        firstClis.set(switched.data.agent, switched.data.previous.cli);
+      }
+    }
+    for (const agent of agents) {
+      clis.set(agent.name, firstClis.get(agent.name) ?? agent.cli);
       // A record written while the list was read is in the roster already, and newer.
       if (agent.cli !== null && !roster.has(agent.name)) {
         roster.set(agent.name, { name: agent.name, memberships: agent.memberships });
@@ -5012,7 +5188,7 @@ export class Board {
    */
   async postTaskNotice(taskId: Ulid, body: string): Promise<Message | null> {
     return this.mutex.run(async () => {
-      const found = await this.tryFindThread(taskId);
+      const found = await this.tryFindThreadFile(taskId);
       if (found === null || found.thread.state !== "open") {
         return null;
       }
@@ -5497,27 +5673,10 @@ export class Board {
           agents.push(agent.name);
         }
       }
-      // Read and written a batch at a time, as a rename does. Only the sessions' ids go, as when a
-      // session ends: a record that kept none, as a removal cut short leaves, counts no more.
-      let sessions = 0;
-      const files = await this.sessionFiles();
-      for (let at = 0; at < files.length; at += SESSION_BATCH) {
-        const cleared = await Promise.all(
-          files.slice(at, at + SESSION_BATCH).map(async (file) => {
-            const record = await readJson(file, SessionsFileSchema);
-            if (
-              record.runner !== parsed ||
-              (record.claude === undefined && record.codex === undefined)
-            ) {
-              return false;
-            }
-            const { claude: _claude, codex: _codex, ...kept } = record;
-            await writeJson(file, kept);
-            return true;
-          }),
-        );
-        sessions += cleared.filter((each) => each).length;
-      }
+      const sessions = await this.clearSessionIds(
+        await this.sessionFiles(),
+        (record) => record.runner === parsed,
+      );
       const { [parsed]: removed, ...others } = tokens;
       if (removed !== undefined) {
         await writeJson(this.runnerTokensFile(), { runners: others });
@@ -5538,10 +5697,43 @@ export class Board {
     });
   }
 
-  /** Every conversation's session record, each citizen's scopes and the threads, channels, and places beside them. */
-  private async sessionFiles(): Promise<string[]> {
+  /**
+   * Drops the session ids of the records `which` picks, keeping the rest of each, as when a session
+   * ends, read and written a batch at a time, as a rename does; returns how many held one. A record
+   * that kept none, as a removal cut short leaves, counts no more.
+   */
+  private async clearSessionIds(
+    files: readonly string[],
+    which: (record: SessionsFile) => boolean,
+  ): Promise<number> {
+    let cleared = 0;
+    for (let at = 0; at < files.length; at += SESSION_BATCH) {
+      const batch = await Promise.all(
+        files.slice(at, at + SESSION_BATCH).map(async (file) => {
+          const record = await readJson(file, SessionsFileSchema);
+          if (!which(record) || CliKindSchema.options.every((cli) => record[cli] === undefined)) {
+            return false;
+          }
+          const kept = { ...record };
+          for (const cli of CliKindSchema.options) {
+            delete kept[cli];
+          }
+          await writeJson(file, kept);
+          return true;
+        }),
+      );
+      cleared += batch.filter((each) => each).length;
+    }
+    return cleared;
+  }
+
+  /**
+   * Every conversation's session record, each citizen's scopes and the threads, channels, and
+   * places beside them, or one citizen's alone.
+   */
+  private async sessionFiles(only?: Name): Promise<string[]> {
     const dirs: string[] = [];
-    for (const agent of await listDirs(this.paths.agents())) {
+    for (const agent of only === undefined ? await listDirs(this.paths.agents()) : [only]) {
       for (const scope of await listDirs(this.paths.agentProjects(agent))) {
         const dir = this.paths.agentProject(agent, scope);
         dirs.push(dir);
@@ -5987,7 +6179,8 @@ export class Board {
         lastTurnOutcome = `${turn.trigger.kind} on ${scope}${turnConversation(turn)}: ${turn.exitReason ?? "running"}${
           turn.status === null ? "" : `, ${turn.status.summary.slice(0, 160)}`
         }`;
-        lastModel = turn.model ?? undefined;
+        // A model another CLI reported, before a switch, is not the citizen's CLI's.
+        lastModel = turn.cli === agent.cli ? (turn.model ?? undefined) : undefined;
       }
     }
     const member = MemberSchema.parse({
@@ -6081,6 +6274,107 @@ export class Board {
       });
       return next;
     });
+  }
+
+  /**
+   * Switches the CLI a citizen's turns run on, with the model and the effort it runs with there,
+   * each left unset for the new CLI's default when not given, since the old ones belong to the old
+   * CLI. It applies from the citizen's next turn: a turn in flight ends on the old CLI, and the
+   * stages it holds keep their leases. It is refused unless every runner its turns must run on
+   * offers the new CLI (`cliRefusal`). Every session id its conversations keep goes, of every CLI
+   * kind, with the runner each began on kept, so the next turn in each starts a session on the new
+   * CLI and none resumes one from before the switch, as a switch back would find of the CLI's
+   * earlier ones.
+   */
+  async setAgentCli(
+    actor: Actor,
+    name: Name,
+    input: { cli: CliKind; model?: string | null | undefined; effort?: string | null | undefined },
+  ): Promise<Agent> {
+    this.assertUser(actor, "only the user may switch a citizen's CLI");
+    const cli = CliKindSchema.parse(input.cli);
+    const model = input.model ?? null;
+    const effort = input.effort ?? null;
+    const chosenModel = model === null ? null : ModelNameSchema.parse(model);
+    const chosenEffort = effort === null ? null : EffortSchema.parse(effort);
+    return this.mutex.run(async () => {
+      const current = await this.readAgent(name);
+      if (current.status !== "active" || current.cli === null) {
+        throw new BoardError("INVALID_STATE", `${name} takes no turns, so it has no CLI to switch`);
+      }
+      if (current.cli === cli) {
+        throw new BoardError("INVALID_STATE", `${name} runs on ${cli} already`);
+      }
+      const refusal = await this.cliRefusal(current, cli);
+      if (refusal !== null) {
+        throw new BoardError("INVALID_STATE", `${name} cannot switch to ${cli}: ${refusal}`);
+      }
+      // The sessions go first, so a switch a failed write cut short leaves the CLI as it was, and
+      // the switch can be made again; one cut short after it starts its sessions afresh, no more.
+      const sessions = await this.clearSessionIds(await this.sessionFiles(name), () => true);
+      const { model: previousModel, effort: previousEffort, ...rest } = current;
+      const next = await this.updateAgent(name, () => ({
+        ...rest,
+        cli,
+        ...(chosenModel === null ? {} : { model: chosenModel }),
+        ...(chosenEffort === null ? {} : { effort: chosenEffort }),
+      }));
+      await this.refreshMember(name);
+      await this.events.append("agent.configured", actor.name, {
+        agent: name,
+        cli,
+        model: chosenModel,
+        effort: chosenEffort,
+        previous: {
+          cli: current.cli,
+          model: previousModel ?? null,
+          effort: previousEffort ?? null,
+        },
+        sessions,
+      });
+      return next;
+    });
+  }
+
+  /**
+   * Why a citizen's turns could not all run on `cli`, or null when they can: each runner they must
+   * run on offers it, as the runner last reported when it connected. Those are its pinned runner,
+   * and the runner each project it belongs to lives on; a project on none yet goes where the CLI is
+   * at its first turn. With no pin, its work outside projects goes to any runner with the CLI, so
+   * some runner must offer it.
+   */
+  private async cliRefusal(agent: Agent, cli: CliKind): Promise<string | null> {
+    const runners = new Map((await this.listRunners()).map((runner) => [runner.name, runner.clis]));
+    const offered = (runner: Name): string => {
+      const clis = runners.get(runner) ?? [];
+      return clis.length === 0 ? "has reported no CLI" : `offers only ${clis.join(" and ")}`;
+    };
+    const reasons: string[] = [];
+    if (agent.homeRunner !== undefined && !(runners.get(agent.homeRunner) ?? []).includes(cli)) {
+      reasons.push(
+        `its work outside projects runs on runner ${agent.homeRunner}, which ${offered(agent.homeRunner)}`,
+      );
+    }
+    const living = new Map<Name, Name[]>();
+    for (const slug of agent.memberships) {
+      const project = await this.readProject(slug).catch(() => null);
+      const runner = project?.archived === undefined ? project?.runner : undefined;
+      if (runner !== undefined && !(runners.get(runner) ?? []).includes(cli)) {
+        living.set(runner, [...(living.get(runner) ?? []), slug]);
+      }
+    }
+    for (const [runner, slugs] of living) {
+      reasons.push(
+        `${slugs.join(", ")} ${slugs.length === 1 ? "lives" : "live"} on runner ${runner}, which ${offered(runner)}`,
+      );
+    }
+    if (
+      agent.homeRunner === undefined &&
+      ![...runners.values()].some((clis) => clis.includes(cli))
+    ) {
+      reasons.push("no runner offers it");
+    }
+    return reasons.length === 0 ? null : reasons.join("; ");
   }
 
   private async updateAgent(name: Name, mutate: (agent: Agent) => Agent): Promise<Agent> {
@@ -6982,7 +7276,7 @@ export class Board {
       idempotencyKey?: string | undefined;
     } = {},
   ): Promise<Message> {
-    const { thread, threads } = await this.findThread(threadId);
+    const { thread, threads } = await this.findThreadFile(threadId);
     if (thread.state !== "open") {
       throw new BoardError("INVALID_STATE", `thread ${threadId} is closed`);
     }
@@ -7033,7 +7327,18 @@ export class Board {
       mentions: postMentions(body),
     });
     const { author } = head;
-    await writeMarkdown(this.paths.messageFile(dir, frontmatter.id, author), frontmatter, body);
+    const text = await writeMarkdown(
+      this.paths.messageFile(dir, frontmatter.id, author),
+      frontmatter,
+      body,
+    );
+    // Held as a read of the file gives it, before the event that makes readers read it again.
+    const written = parseMarkdown(text, MessageFrontmatterSchema);
+    this.noteRead({
+      kind: "message",
+      folder: dir,
+      message: { ...written.data, body: written.body },
+    });
     await this.events.append("message.posted", author, {
       id: frontmatter.id,
       channel: frontmatter.channel,
@@ -7247,6 +7552,7 @@ export class Board {
     );
     const data = TaskFrontmatterSchema.parse(clean);
     await writeMarkdown(this.paths.task(project, task.id), data, body);
+    this.noteRead({ kind: "task", project, id: task.id });
     this.metricsTasks.delete(task.id);
     this.taskWrites += 1;
     return { ...data, body };
@@ -7386,8 +7692,12 @@ export class Board {
     if (thread.openedBy === actor.name || (await this.involvedIn(actor, thread.subject))) {
       return true;
     }
-    const files = await listFiles(this.paths.threadMessages(threads, thread.id));
-    return files.some((file) => file.endsWith(`-${actor.name}.md`));
+    const folder = this.paths.threadMessages(threads, thread.id);
+    if (this.reads !== null) {
+      return this.reads.wroteIn(folder, actor.name);
+    }
+    const files = await listFiles(folder);
+    return files.some((file) => authorOfFile(file) === actor.name);
   }
 
   /**
@@ -7472,7 +7782,16 @@ export class Board {
     return [this.paths.societyThreads(), ...projects.map((slug) => this.paths.threads(slug))];
   }
 
-  private async tryFindThread(id: Ulid): Promise<{ thread: Thread; threads: string } | null> {
+  /** A thread as the reads find it: in the read index once it is seeded, else by its file. */
+  private async tryFindThread(id: Ulid): Promise<FoundThread | null> {
+    return this.reads === null ? this.tryFindThreadFile(id) : (this.reads.thread(id) ?? null);
+  }
+
+  /**
+   * A thread by its file, as every write finds the thread it writes to or checks, so a write never
+   * acts on a thread whose file is gone, whatever the read index holds.
+   */
+  private async tryFindThreadFile(id: Ulid): Promise<FoundThread | null> {
     for (const threads of await this.threadScopes()) {
       const file = this.paths.threadFile(threads, id);
       if (await exists(file)) {
@@ -7483,12 +7802,12 @@ export class Board {
     return null;
   }
 
-  private async findThread(id: Ulid): Promise<{ thread: Thread; threads: string }> {
-    const found = await this.tryFindThread(id);
-    if (found === null) {
-      throw new BoardError("NOT_FOUND", `thread ${id} not found`);
-    }
-    return found;
+  private async findThread(id: Ulid): Promise<FoundThread> {
+    return orNotFound(await this.tryFindThread(id), id);
+  }
+
+  private async findThreadFile(id: Ulid): Promise<FoundThread> {
+    return orNotFound(await this.tryFindThreadFile(id), id);
   }
 
   private async writeThread(threads: string, thread: Thread): Promise<Thread> {
@@ -7497,13 +7816,15 @@ export class Board {
       Object.entries(frontmatter).filter(([, value]) => value !== undefined),
     );
     const data = ThreadFrontmatterSchema.parse(clean);
-    await writeMarkdown(this.paths.threadFile(threads, thread.id), data, body);
+    const text = await writeMarkdown(this.paths.threadFile(threads, thread.id), data, body);
+    const written = parseMarkdown(text, ThreadFrontmatterSchema);
+    this.noteRead({ kind: "thread", threads, thread: { ...written.data, body: written.body } });
     return { ...data, body };
   }
 
   /** A thread with a subject closes, without a summary, when its subject ends. */
   private async endThreadOf(subjectId: Ulid, by: Name, ended: string): Promise<void> {
-    const found = await this.tryFindThread(subjectId);
+    const found = await this.tryFindThreadFile(subjectId);
     if (found === null || found.thread.state !== "open") {
       return;
     }
@@ -7525,8 +7846,29 @@ export class Board {
     );
   }
 
-  /** The messages in a folder after `since` and, when given, up to `upto`, read by name first. */
+  /**
+   * The messages in a folder after `since` and, when given, up to `upto`, oldest first: from the
+   * read index once it is seeded, else from the folder's files.
+   */
   private async readMessagesIn(dir: string, since: Ulid | null, upto?: Ulid): Promise<Message[]> {
+    return this.reads?.messagesIn(dir, since, upto) ?? this.readMessageFiles(dir, since, upto);
+  }
+
+  /** The id of a thread's first message: none while it has none or the board can't find it. */
+  private async firstInThread(id: Ulid): Promise<Ulid | null> {
+    const found = await this.tryFindThread(id);
+    if (found === null) {
+      return null;
+    }
+    const dir = this.paths.threadMessages(found.threads, id);
+    if (this.reads !== null) {
+      return this.reads.firstIn(dir)?.id ?? null;
+    }
+    return (await listFiles(dir))[0]?.slice(0, 26) ?? null;
+  }
+
+  /** `readMessagesIn` from the folder's files, read by name first. */
+  private async readMessageFiles(dir: string, since: Ulid | null, upto?: Ulid): Promise<Message[]> {
     const messages: Message[] = [];
     for (const file of await listFiles(dir)) {
       const id = file.slice(0, 26);
@@ -7540,8 +7882,20 @@ export class Board {
   }
 
   /**
+   * Every message newer than `since`, and no newer than `upto` when given: from the read index in
+   * id order once it is seeded, else from the files as `iterateMessages` reads them.
+   */
+  private async *messagesBetween(since: Ulid | null, upto?: Ulid): AsyncGenerator<Message> {
+    if (this.reads !== null) {
+      yield* this.reads.messagesBetween(since, upto);
+      return;
+    }
+    yield* this.iterateMessages(since, undefined, upto);
+  }
+
+  /**
    * Every message newer than `since`, and no newer than `upto` when given, across society
-   * channels, project channels, and threads.
+   * channels, project channels, and threads, read from their files folder by folder.
    */
   private async *iterateMessages(
     since: Ulid | null,
@@ -7550,14 +7904,14 @@ export class Board {
   ): AsyncGenerator<Message> {
     if (project === undefined) {
       for (const channel of await listDirs(this.paths.societyChannels())) {
-        yield* await this.readMessagesIn(this.paths.societyChannel(channel), since, upto);
+        yield* await this.readMessageFiles(this.paths.societyChannel(channel), since, upto);
       }
       yield* this.threadMessagesIn(this.paths.societyThreads(), since, upto);
     }
     const projects = project === undefined ? await listDirs(this.paths.projects()) : [project];
     for (const slug of projects) {
       for (const channel of await listDirs(this.paths.projectChannels(slug))) {
-        yield* await this.readMessagesIn(this.paths.projectChannel(slug, channel), since, upto);
+        yield* await this.readMessageFiles(this.paths.projectChannel(slug, channel), since, upto);
       }
       yield* this.threadMessagesIn(this.paths.threads(slug), since, upto);
     }
@@ -7587,7 +7941,7 @@ export class Board {
     upto?: Ulid,
   ): AsyncGenerator<Message> {
     for (const id of await listDirs(threads)) {
-      yield* await this.readMessagesIn(this.paths.threadMessages(threads, id), since, upto);
+      yield* await this.readMessageFiles(this.paths.threadMessages(threads, id), since, upto);
     }
   }
 }

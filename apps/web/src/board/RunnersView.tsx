@@ -6,7 +6,7 @@ import {
 } from "@stellaris/shared";
 import { useSearch } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "../components/Button.js";
 import { CliIcon } from "../components/CliIcon.js";
 import { ago } from "../lib/format.js";
@@ -20,7 +20,7 @@ import {
   useSession,
 } from "../lib/session.js";
 import { PaneHeader, PaneNote } from "./Pane.js";
-import { PlanQuota } from "./Quota.js";
+import { PlanQuota } from "./QuotaReadouts.js";
 import {
   heldClis,
   identityGap,
@@ -187,9 +187,10 @@ function RemoveMark() {
 const REMOVE_ARMS_MS = 500;
 
 /**
- * A runner's removal, in place of its row's controls: one red button, its title and description
- * naming what it changes (the citizens pinned there, who are pinned again on their next turn, the
- * archived projects that lived there, and its token, which stops working). It takes no press for
+ * A runner's removal, in place of its row's controls: one red button, and under the row, from the
+ * name's column on, a line naming what it changes (the citizens pinned there, who are pinned again
+ * on their next turn, the archived projects that lived there, and its token, which stops working),
+ * which is the button's description too. It takes no press for
  * its first moments, and Escape or the focus leaving it puts the controls back, or, when the focus
  * leaves while the board answers, the answer does. The board refuses while a project lives there,
  * anything runs there, or it is connected and not paused, saying what on a line under the row.
@@ -256,16 +257,17 @@ function RemoveRunner({
     "its token stops working",
   ].join(" · ");
   const described = `${changes.charAt(0).toUpperCase()}${changes.slice(1)}`;
+  const line = useId();
   const waiting = !armed || remove.isPending;
   return (
     <>
-      <span className="-mr-0.5 flex items-center justify-end @max-[25rem]:col-start-7 @max-[25rem]:row-start-1">
+      <span className="-mr-0.5 flex items-center justify-end @max-[25rem]:col-start-4 @max-[25rem]:row-start-1">
         {/* Never `disabled`, which would drop the keyboard's focus to the page. */}
         <button
           ref={button}
           type="button"
           aria-label={`Remove ${runner}`}
-          title={described}
+          aria-describedby={line}
           aria-disabled={waiting}
           onClick={() => {
             if (!waiting && !answering.current) {
@@ -306,6 +308,9 @@ function RemoveRunner({
           Remove
         </button>
       </span>
+      <p id={line} className="col-[2/-1] mt-0.5 mb-1 min-w-0 text-xs text-fg-secondary">
+        {described}
+      </p>
       {remove.error === null ? null : (
         <div className="col-span-full mt-1.5 mb-1">
           <Failure error={remove.error} />
@@ -548,17 +553,27 @@ export function RunnersView() {
         ) : registered.length === 0 ? (
           <p className="px-2 py-2 text-meta">No runners yet.</p>
         ) : null}
-        {/* Rows are subgrids of one grid, so each column is as wide as its widest cell. Under 25
-            root ems, which a 420 px island holds at a 16 px root font but not at a larger one, a
-            row takes two lines: the marks, the name, the state, and the controls, and under the
-            name the OS, the version, the capabilities, and the projects to the row's end. The
-            query counts the room the view's scrollbar takes, so the gaps are pixels, 12 as at a
-            16 px root, which leaves one line at a 20 px root room for it from 25 ems up. */}
+        {/* Rows are subgrids of one grid, so each column is as wide as its widest cell. The
+            capabilities give way to the rest, cut at their end, and the projects down to 2 root
+            ems, or 1.5 while a red Remove shows, which is 6 px wider than the marks at a 16 px
+            root; then a state of several parts.
+            Under 25 root ems, which a 420 px island holds at a 16 px root font but not at a larger
+            one, a row takes two lines: the marks, the name, the state, and the controls, and under
+            the name one cell of the OS, the version, the capabilities, and the projects, cut at
+            the row's end, so they hold no column the name's line shares: the name's column takes
+            only the name's own minimum (`minmax(auto, …)`), since that cell's whole text would
+            otherwise be its minimum. The query counts the room the view's scrollbar takes, so the
+            gaps are pixels, 12 as at a 16 px root, which leaves one line at a 20 px root room for
+            it from 25 ems up. */}
         <ul
           ref={control("list")}
           tabIndex={-1}
           aria-label="Registered"
-          className="focus-visible:outline-none grid grid-cols-[auto_auto_auto_auto_minmax(0,max-content)_minmax(2rem,1fr)_auto_auto] gap-x-[12px] @max-[25rem]:grid-cols-[auto_auto_auto_minmax(0,max-content)_minmax(0,1fr)_auto_auto]"
+          className={
+            opened?.form === "remove"
+              ? "focus-visible:outline-none grid grid-cols-[auto_auto_auto_auto_minmax(0,max-content)_minmax(1.5rem,1fr)_auto_auto] gap-x-[12px] @max-[25rem]:grid-cols-[auto_minmax(auto,1fr)_auto_auto]"
+              : "focus-visible:outline-none grid grid-cols-[auto_auto_auto_auto_minmax(0,max-content)_minmax(2rem,1fr)_auto_auto] gap-x-[12px] @max-[25rem]:grid-cols-[auto_minmax(auto,1fr)_auto_auto]"
+          }
         >
           {registered.map((runner) => {
             const clis = runner.clis.length === 0 ? "no CLI" : runner.clis.join(", ");
@@ -593,7 +608,7 @@ export function RunnersView() {
                   <span className="sr-only">{clis}</span>
                 </span>
                 {/* A gap in the account's git identity sits under the name, so it takes no column. */}
-                <span className="@max-[25rem]:col-[2/6] @max-[25rem]:row-start-1">
+                <span className="@max-[25rem]:col-start-2 @max-[25rem]:row-start-1">
                   <span className="block text-fg-primary">{runner.name}</span>
                   {gap === null ? null : (
                     <span className="block text-xs text-amber-300" title={gap.detail}>
@@ -601,37 +616,37 @@ export function RunnersView() {
                     </span>
                   )}
                 </span>
-                <span className="text-fg-secondary @max-[25rem]:col-start-2 @max-[25rem]:row-start-2">
-                  {runner.os}
-                </span>
-                {offVersion(runner, server) ? (
+                {/* Its own cells on one line; under 25 root ems one cell under the name. */}
+                <span className="contents @max-[25rem]:col-[2/-1] @max-[25rem]:row-start-2 @max-[25rem]:flex @max-[25rem]:min-w-0 @max-[25rem]:items-baseline @max-[25rem]:gap-x-[12px]">
+                  <span className="shrink-0 text-fg-secondary">{runner.os}</span>
+                  {offVersion(runner, server) ? (
+                    <span
+                      className="shrink-0 text-xs text-amber-300"
+                      title={`the server runs v${server}`}
+                    >
+                      v{runner.version}
+                      <span className="sr-only">, not the server's v{server}</span>
+                    </span>
+                  ) : (
+                    <span className="shrink-0 text-xs text-fg-muted">
+                      {runner.version === undefined ? "" : `v${runner.version}`}
+                    </span>
+                  )}
                   <span
-                    className="text-xs text-amber-300 @max-[25rem]:col-start-3 @max-[25rem]:row-start-2"
-                    title={`the server runs v${server}`}
+                    className="min-w-0 truncate text-xs text-fg-muted"
+                    title={runner.capabilities.join(", ")}
                   >
-                    v{runner.version}
-                    <span className="sr-only">, not the server's v{server}</span>
+                    {runner.capabilities.join(", ")}
                   </span>
-                ) : (
-                  <span className="text-xs text-fg-muted @max-[25rem]:col-start-3 @max-[25rem]:row-start-2">
-                    {runner.version === undefined ? "" : `v${runner.version}`}
+                  <span className="min-w-0 truncate text-xs text-fg-muted" title={lives}>
+                    {lives}
                   </span>
-                )}
-                <span
-                  className="truncate text-xs text-fg-muted @max-[25rem]:col-start-4 @max-[25rem]:row-start-2"
-                  title={runner.capabilities.join(", ")}
-                >
-                  {runner.capabilities.join(", ")}
                 </span>
+                {/* A state of several parts is cut where the row runs out of room, with the whole of
+                    it as its title; one word stays whole, so capabilities and projects give way
+                    before it. */}
                 <span
-                  className="truncate text-xs text-fg-muted @max-[25rem]:col-[5/-1] @max-[25rem]:row-start-2"
-                  title={lives}
-                >
-                  {lives}
-                </span>
-                {/* On one line, so the narrowest island cuts capabilities and projects before it. */}
-                <span
-                  className={`text-right text-xs whitespace-nowrap @max-[25rem]:col-start-6 @max-[25rem]:row-start-1 ${state.tone}`}
+                  className={`text-right text-xs ${state.label.includes(" · ") ? "truncate" : "whitespace-nowrap"} @max-[25rem]:col-start-3 @max-[25rem]:row-start-1 ${state.tone}`}
                   title={state.detail}
                 >
                   {state.label}
@@ -669,7 +684,7 @@ export function RunnersView() {
                     }}
                   />
                 ) : (
-                  <span className="-mr-0.5 flex items-center @max-[25rem]:col-start-7 @max-[25rem]:row-start-1">
+                  <span className="-mr-0.5 flex items-center @max-[25rem]:col-start-4 @max-[25rem]:row-start-1">
                     <button
                       type="button"
                       aria-label={`${runner.paused === undefined ? "Pause" : "Resume"} ${runner.name}`}

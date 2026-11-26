@@ -21,12 +21,14 @@ import {
   HINT_SIDE,
   askBoxPlacement,
   besidePanel,
-  besideSky,
+  bothLayoutsFit,
   contentWidth as widthFor,
   readBoardLayout,
   readChosenWidth,
   saveBoardLayout,
   saveChosenWidth,
+  shownLayout,
+  skyHolds,
   skyRoom,
   toggledWidth,
   widestContentWidth,
@@ -179,23 +181,26 @@ export function Playground() {
     }
   };
   // Where the board sits and the content's width are the user's, kept per browser; the sky
-  // centers in the room they leave.
+  // centers in the room they leave. A window too narrow for the board around the sky shows it
+  // beside the sky and keeps the choice, and the switch goes while only one layout fits.
   const [layout, setLayout] = useState<BoardLayout>(readBoardLayout);
-  const beside = layout === "beside";
+  const shown = shownLayout(layout, width);
+  const beside = shown === "beside";
   const chooseLayout = (next: BoardLayout): void => {
     setLayout(next);
     saveBoardLayout(next);
   };
+  const switchLayout = bothLayoutsFit(width) ? chooseLayout : undefined;
   const [chosenWidth, setChosenWidth] = useState<ChosenWidth>(readChosenWidth);
-  const contentWidth = widthFor(width, chosenWidth, layout);
+  const contentWidth = widthFor(width, chosenWidth, shown);
   const resizeContent = (next: number, done: boolean): void => {
-    const held = widthFor(width, next, layout);
+    const held = widthFor(width, next, shown);
     // A move the window leaves no room for keeps the choice as it was, so a handle that can't
     // move, as in a narrow window, never stores the widest for the next wide one.
     const chosen =
       held === contentWidth
         ? chosenWidth
-        : held >= widestContentWidth(width, layout)
+        : held >= widestContentWidth(width, shown)
           ? "widest"
           : held;
     setChosenWidth(chosen);
@@ -210,13 +215,13 @@ export function Playground() {
   // The handle's range: in the rail, the width the window holds, and otherwise the chosen width's.
   const shownWidth = folded ? panel.content : contentWidth;
   const narrowest = Math.min(CONTENT_MIN, shownWidth);
-  const widest = folded ? panel.content : widestContentWidth(width, layout);
+  const widest = folded ? panel.content : widestContentWidth(width, shown);
   // A toggle with no range to move in keeps the choice, as a move the window has no room for does.
   const toggleContentWidth = (): void => {
     if (widest <= narrowest) {
       return;
     }
-    const chosen = toggledWidth(width, chosenWidth, layout);
+    const chosen = toggledWidth(width, chosenWidth, shown);
     setChosenWidth(chosen);
     saveChosenWidth(chosen);
   };
@@ -228,12 +233,12 @@ export function Playground() {
   const channelsOpen = folded && channelsAt === href;
   const closeChannels = useCallback(() => setChannelsAt(null), []);
   const insets = useMemo<Insets>(
-    () => (boardOpen ? skyRoom(layout, contentWidth, width) : NO_INSETS),
-    [boardOpen, layout, contentWidth, width],
+    () => (boardOpen ? skyRoom(shown, contentWidth, width) : NO_INSETS),
+    [boardOpen, shown, contentWidth, width],
   );
-  // Beside the sky, a room too narrow for the hint leaves it out, and one too narrow for the
-  // camera's buttons hides them, since the panel would cover them.
-  const sky = beside && boardOpen ? besideSky(width, insets, rootFontSize()) : null;
+  // While the board is open, a room too narrow for the hint leaves it out, and one too narrow for
+  // the camera's buttons hides them, since an island would cover them.
+  const sky = boardOpen ? skyHolds(width, insets, rootFontSize(), shown) : null;
   // What the open route is about: a channel, directly or through a thread, or a project's tasks,
   // directly or through a task. The navigator highlights it and the sky focuses its project.
   const threadId = after(pathname, "/thread/");
@@ -358,7 +363,7 @@ export function Playground() {
       : activeChannel.includes("/")
         ? (activeChannel.split("/")[0] ?? null)
         : SOCIETY_SCOPE);
-  const askBox = askBoxPlacement(width, insets, layout);
+  const askBox = askBoxPlacement(width, insets, shown);
   const unread = asksOf(threads.data ?? []).filter((ask) => hasUnseenReply(ask, seen));
   const placeName = (scope: string): string =>
     scope === SOCIETY_SCOPE
@@ -445,8 +450,6 @@ export function Playground() {
                 >
                   {folded ? (
                     <NavigatorRail
-                      layout={layout}
-                      onLayout={chooseLayout}
                       open={channelsOpen}
                       onToggle={() => setChannelsAt(channelsOpen ? null : href)}
                       onClose={closeChannels}
@@ -454,8 +457,8 @@ export function Playground() {
                       {channelsOpen ? (
                         <Navigator
                           over
-                          layout={layout}
-                          onLayout={chooseLayout}
+                          layout={shown}
+                          onLayout={switchLayout}
                           activeChannel={activeChannel}
                           activeTasks={activeTasks}
                           activeCitizen={activeCitizen}
@@ -468,8 +471,8 @@ export function Playground() {
                     </NavigatorRail>
                   ) : (
                     <Navigator
-                      layout={layout}
-                      onLayout={chooseLayout}
+                      layout={shown}
+                      onLayout={switchLayout}
                       activeChannel={activeChannel}
                       activeTasks={activeTasks}
                       activeCitizen={activeCitizen}
@@ -501,8 +504,8 @@ export function Playground() {
               {askOpen ? (
                 <AskBox left={askBox.left} width={askBox.width} onClose={closeAsk} />
               ) : sky?.hint === false ? null : (
-                // Beside the sky, its sides keep the hint, however long an unread answer makes it,
-                // clear of the camera's buttons at the room's right foot.
+                // While the board is open, its sides keep the hint, however long an unread answer
+                // makes it, clear of the camera's buttons at the room's right foot.
                 <div
                   className={`pointer-events-none absolute bottom-5 flex justify-center ${sky === null ? "px-16" : ""}`}
                   style={{

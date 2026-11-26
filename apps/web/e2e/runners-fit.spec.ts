@@ -5,13 +5,16 @@ import { fakeBoard } from "./board.js";
 // room, and a container query counts the room it takes.
 test.use({ launchOptions: { ignoreDefaultArgs: ["--hide-scrollbars"] } });
 
-for (const root of [16, 20]) {
+/** The narrowest island in which, at each root font, a row keeps to one line: 25 root ems of list. */
+const ONE_LINE: Record<number, number> = { 16: 420, 20: 520, 24: 624 };
+
+for (const root of [16, 20, 24]) {
   for (const layout of ["around", "beside"] as const) {
-    test(`at a ${root} px root font no island width scrolls the runners list sideways, and every name and control stays in view (${layout} the sky)`, async ({
+    test(`at a ${root} px root font no island width scrolls the runners list sideways, and every name, state, and control stays in view, with the longest state (${layout} the sky)`, async ({
       page,
     }) => {
-      // 20 px is Chrome's Font size "Large": the app sets no root size, so the browser's scales
-      // every rem.
+      // 20 px is Chrome's Font size "Large", and 24 px its "Very large": the app sets no root
+      // size, so the browser's scales every rem.
       await page.addInitScript(
         ({ size, chosen }) => {
           document.addEventListener("DOMContentLoaded", () => {
@@ -22,10 +25,34 @@ for (const root of [16, 20]) {
         { size: root, chosen: layout },
       );
       await page.setViewportSize({ width: 1050, height: 1400 });
-      await fakeBoard(page);
+      // pod's Claude is held by its limit; with its Codex paused and its board syncing, its state
+      // is as long as a state gets, two CLIs' worth and the sync.
+      const board = await fakeBoard(page, { quotas: "limited" });
+      board.setSync(
+        {
+          phase: "copying",
+          files: 6_200,
+          totalFiles: 15_152,
+          bytes: 11_000_000,
+          totalBytes: 27_000_000,
+          attempt: 1,
+          startedAt: new Date(Date.now() - 90_000).toISOString(),
+          updatedAt: new Date(Date.now() - 1_000).toISOString(),
+        },
+        "pod",
+      );
+      // And pod's second line is as long as a busy runner's: five capabilities, five projects.
+      board.setPodHoldings(
+        ["python", "node", "go", "rust", "k8s"],
+        ["atlas", "handbook", "infrastructure", "nexus", "starlight"],
+      );
       await page.goto("/runners");
       const list = page.getByRole("list", { name: "Registered" });
       await expect(list.getByRole("listitem")).toHaveCount(3);
+      await list.getByRole("button", { name: "Pause codex on pod" }).click();
+      await expect(list.getByTitle(/^connected; codex paused /)).toHaveText(
+        "codex paused · claude held · syncing",
+      );
       const handle = page.getByRole("button", { name: /^Width of the board's content/ });
       for (const state of ["marks", "remove"] as const) {
         if (state === "remove") {
@@ -33,16 +60,12 @@ for (const root of [16, 20]) {
           await list.getByRole("button", { name: "Remove pod…" }).click();
           await expect(list.getByRole("button", { name: "Remove pod", exact: true })).toBeFocused();
         }
-        // The narrowest island and the widest default, and at a 20 px root the edges of the
-        // bands where one line didn't fit, under 503 px with the marks and 519 with the red
-        // Remove: a row takes two lines under 520, where the list holds less than 25 root ems.
-        // A window tall enough for the whole view, and at a 20 px root one short enough that it
-        // scrolls, with its scrollbar. At a 16 px root that scrollbar beside the red Remove scrolls
-        // a 420 to 425 px island 1 to 6 px sideways, as the row always has.
-        const heights = root === 16 ? [1400] : [1400, 500];
-        for (const [island, height] of [420, 421, 460, 502, 503, 518, 519, 520, 521, 680].flatMap(
-          (width) => heights.map((tall) => [width, tall] as const),
-        )) {
+        // The narrowest island and the widest default, the edges of the bands where dev's rows ran
+        // past the island, and of the two lines a row takes under 25 root ems. A window tall
+        // enough for the whole view, and one short enough that it scrolls, with its scrollbar.
+        for (const [island, height] of [
+          420, 425, 426, 440, 460, 503, 519, 520, 556, 572, 623, 624, 680,
+        ].flatMap((width) => [1400, 500].map((tall) => [width, tall] as const))) {
           // The default content is two fifths of the window.
           await page.setViewportSize({ width: Math.round(island * 2.5), height });
           await expect(handle).toHaveAccessibleName(
@@ -58,15 +81,20 @@ for (const root of [16, 20]) {
                 outer.left + (scroller?.clientLeft ?? 0) + (scroller?.clientWidth ?? outer.width),
             };
             const rows = [...ul.children];
-            // Each runner's name and every button in its row: the CLIs' marks, the pause, the
-            // pencil, the bin, and the red Remove.
-            const reached = rows.flatMap((row) => [
+            // Each row's cells, the OS, the version, the capabilities, and the projects out of their box.
+            const cells = rows.map((row) => [
+              ...row.querySelectorAll(":scope > :not(.contents), :scope > .contents > *"),
+            ]);
+            // Each runner's name, its state, and every button in its row: the CLIs' marks, the
+            // pause, the pencil, the bin, and the red Remove.
+            const reached = rows.flatMap((row, at) => [
               ...[...row.querySelectorAll("button")].map(
                 (button) => [button.getAttribute("aria-label") ?? "", button] as const,
               ),
               ...[...row.children[1]!.querySelectorAll(":scope > span:first-child")].map(
                 (name) => [`name ${name.textContent}`, name] as const,
               ),
+              [`state ${cells[at]![6]?.textContent}`, cells[at]![6]!] as const,
             ]);
             return {
               root: getComputedStyle(document.documentElement).fontSize,
@@ -79,13 +107,21 @@ for (const root of [16, 20]) {
               outside: reached
                 .filter(([, element]) => {
                   const box = element.getBoundingClientRect();
-                  return box.left < bounds.left || box.right > bounds.right;
+                  return box.left < bounds.left - 0.5 || box.right > bounds.right + 0.5;
                 })
                 .map(([label]) => label),
               reached: reached.length,
+              // Each row's projects' width, which on one line keeps 2 root ems, or 1.5 while the red
+              // Remove shows.
+              projects: cells.map((row) => row[5]?.getBoundingClientRect().width ?? Number.NaN),
+              // The states cut short: only one of several parts may be.
+              cut: cells
+                .map((row) => row[6])
+                .filter((cell) => cell !== undefined && cell.scrollWidth > cell.clientWidth)
+                .map((cell) => cell!.textContent),
               // Whether the OS sits on the line of the runner's state, or a line of its own.
-              oneLine: rows.map((row) => {
-                const [os, said] = [row.children[2], row.children[6]].map((cell) => {
+              oneLine: cells.map((row) => {
+                const [os, said] = [row[2], row[6]].map((cell) => {
                   const box = cell?.getBoundingClientRect();
                   return box === undefined ? Number.NaN : box.top + box.height / 2;
                 });
@@ -98,10 +134,18 @@ for (const root of [16, 20]) {
           expect(fit.scrollbar > 0, at).toBe(height === 500);
           expect(fit.sideways, at).toBe(0);
           expect(fit.outside, at).toEqual([]);
-          // Three names, four CLIs' marks, and each row's pause, pencil, and bin, or on pod's row
-          // the red Remove in their place.
-          expect(fit.reached).toBe(state === "marks" ? 3 + 4 + 9 : 3 + 4 + 6 + 1);
-          expect(fit.oneLine, at).toEqual(fit.oneLine.map(() => root === 16 || island >= 520));
+          // Three names and states, four CLIs' marks, and each row's pause, pencil, and bin, or
+          // on pod's row the red Remove in their place.
+          expect(fit.reached).toBe(state === "marks" ? 6 + 4 + 9 : 6 + 4 + 6 + 1);
+          // studio's `connected` and laptop's `away` stay whole; pod's long state alone is cut.
+          expect(fit.cut, at).toEqual(
+            fit.cut.filter((said) => said === "codex paused · claude held · syncing"),
+          );
+          expect(fit.oneLine, at).toEqual(fit.oneLine.map(() => island >= ONE_LINE[root]!));
+          if (island >= ONE_LINE[root]!) {
+            const least = (state === "marks" ? 2 : 1.5) * root - 0.5;
+            expect(Math.min(...fit.projects), at).toBeGreaterThanOrEqual(least);
+          }
         }
       }
     });

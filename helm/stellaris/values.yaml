@@ -22,7 +22,8 @@ imagePullSecrets: []
 society:
   name: stellaris
   # Only the seed roles, `concierge` and `steward`, exist at this point; work roles come later, by
-  # charter. `cli` is `claude` or `codex`; `model` is optional and the CLI's default otherwise.
+  # charter. `cli` is `claude`, `codex`, or `antigravity`; `model` is optional and the CLI's default
+  # otherwise.
   citizens:
     - name: desk
       role: concierge
@@ -243,7 +244,7 @@ runner:
     logLevel: info
     # Turns each runner runs at once: a number, or `unlimited`; empty is 2.
     concurrency: ""
-    # The CLIs it runs turns with; empty is claude and codex.
+    # The CLIs it runs turns with, of claude, codex, and antigravity; empty is claude and codex.
     clis: []
     # What it offers, matched against what projects and tasks require, such as `gpu`.
     capabilities: []

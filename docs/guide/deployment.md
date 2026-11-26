@@ -27,7 +27,7 @@ npm install --global @kubitnodes/stellaris-runner
 STELLARIS_SERVER_URL=http://<server>:4700 stellaris-runner
 ```
 
-The runner brings Claude Code's runtime with it, through the Claude Agent SDK, and uses Claude Code's login, from the `claude` CLI or `ANTHROPIC_API_KEY`; Codex is installed and signed in on its own.
+The runner brings Claude Code's runtime with it, through the Claude Agent SDK, and uses Claude Code's login, from the `claude` CLI or `ANTHROPIC_API_KEY`; Codex is installed and signed in on its own, and so is Google's Antigravity CLI, `agy`, for a runner whose `STELLARIS_CLIS` names `antigravity` ([signing agy in](#signing-agy-in)).
 
 ## The board server's image
 
@@ -44,13 +44,14 @@ Run the CLI's setup commands before the server starts, or act through the API wh
 
 ## The runner's image
 
-`kr4t0n/stellaris-runner`, with the same tags, is the runner on [climage](https://github.com/kr4t0n/climage)'s `full` variant, which brings Claude Code, Codex, Node with pnpm, Python with uv, Go, Rust, kubectl, helm with the helm-diff plugin, helmfile, and the command-line tools agents shell out to. Its account is `stellaris` (uid 1000, group `users`, gid 100), and its home holds everything: the runner's data directory at `/home/stellaris/stellaris-runner`, the CLIs' logins in `~/.claude` and `~/.codex`, the git identity agents commit with in `~/.gitconfig`, and whatever agents install. One volume at `/home/stellaris` keeps all of it across restarts:
+`kr4t0n/stellaris-runner`, with the same tags, is the runner on [climage](https://github.com/kr4t0n/climage)'s `full` variant, which brings Claude Code, Codex, Google's Antigravity CLI (`agy`, which never updates itself there), Node with pnpm, Python with uv, Go, Rust, kubectl, helm with the helm-diff plugin, helmfile, and the command-line tools agents shell out to. Its account is `stellaris` (uid 1000, group `users`, gid 100), and its home holds everything: the runner's data directory at `/home/stellaris/stellaris-runner`, the CLIs' logins in `~/.claude`, `~/.codex`, and `~/.gemini`, the git identity agents commit with in `~/.gitconfig`, and whatever agents install. One volume at `/home/stellaris` keeps all of it across restarts:
 
 ```bash
 IMAGE=kr4t0n/stellaris-runner
 docker volume create stellaris-runner-home
 docker run --rm -it -v stellaris-runner-home:/home/stellaris $IMAGE claude auth login
 docker run --rm -it -v stellaris-runner-home:/home/stellaris $IMAGE codex login --device-auth
+docker run --rm -it -v stellaris-runner-home:/home/stellaris $IMAGE agy acp --login --disable-telemetry
 docker run --rm -v stellaris-runner-home:/home/stellaris $IMAGE git config --global user.name "Your Name"
 docker run --rm -v stellaris-runner-home:/home/stellaris $IMAGE git config --global user.email you@example.com
 docker run -d --name stellaris-runner -v stellaris-runner-home:/home/stellaris \
@@ -59,6 +60,23 @@ docker logs stellaris-runner   # the enrollment code and link to approve on the 
 ```
 
 `ANTHROPIC_API_KEY` signs Claude Code in without a saved login; `CLAUDE_CODE_OAUTH_TOKEN` does not reach the CLI, since the runner drops every `CLAUDE_CODE_*` variable before starting it. Every [runner variable](#a-runner) applies. A pod of your own needs `fsGroup: 100` so the volume is writable by the image's user, and a termination grace period as long as the turn timeout, since a stopping runner drains its turns.
+
+The `agy` login is for a runner started with `-e STELLARIS_CLIS=claude,codex,antigravity`; [signing agy in](#signing-agy-in) says where it lands and what to turn off.
+
+## Signing agy in
+
+A runner offers Antigravity only where `STELLARIS_CLIS` names `antigravity`, and starts the `agy` on its `PATH`: the runner's image has one, and elsewhere it comes from [its releases](https://github.com/google-antigravity/antigravity-cli/releases). The tarball for the machine, checked against the release's sha256, holds one file, `antigravity`; install it as `agy`, as the image does (`install -m 0755 antigravity /usr/local/bin/agy`). A runner that finds no `agy` fails every Antigravity turn and model list with only "agy acp exited". Sign it in once as the runner's account, on the machine or, for the image, on its volume as above:
+
+```bash
+agy acp --login --disable-telemetry
+```
+
+It prints a Google sign-in link; open it, sign in, and paste the code back, and it exits.
+
+- **Where the sign-in lands.** In agy's state folder, `~/.gemini` in the runner account's home, which the runner's turns and its quota reads use too. With no D-Bus session, as in a container or on a server, agy keeps the sign-in in a file there, `antigravity-cli/antigravity-oauth-token`, readable by its account alone, rather than in a keyring. Every turn on that runner runs as that account, so every turn can read it, as it can Claude Code's and Codex's logins: a runner is one trust domain.
+- **Telemetry.** The runner starts every `agy acp` with `--disable-telemetry` and reads the quota through a proxy of its own that refuses Google's telemetry host. `agy` run by hand, its interactive CLI or `agy models`, sends telemetry until it is turned off: for a personal account, open `agy`, then `/config`, and switch **Enable Telemetry** off.
+- **Where Google offers it.** Antigravity is not offered in every location. agy refuses an account Google does not serve where the runner is with "Eligibility check failed: Your current account is not eligible for Antigravity, because it is not currently available in your location.", and a quota read refused so leaves the quota unknown.
+- **An API key** signs agy in instead: `GEMINI_API_KEY` in the runner's environment, with `{"modelProvider":"gemini"}` in `antigravity-cli/settings.json` under the state folder, without which agy asks for a sign-in. A key has no plan quota, so the board shows none.
 
 ## The Helm chart
 
@@ -103,15 +121,15 @@ With `STELLARIS_APPLE_APP_ID` set, the iOS app signs in on an `https` address of
 - `STELLARIS_RUNNER_DIR` (`./runner-data`): its own data directory: the board mirror, agent homes, repositories, and worktrees, and the `credentials.json` an enrollment saves. It is resolved from the folder the runner starts in, `apps/runner` under `pnpm --filter`, where git ignores nothing of it, so give an absolute path outside the checkout.
 - `STELLARIS_LOG_LEVEL` (`info`): the runner's log level; `debug` also logs the CLI's stderr.
 - `STELLARIS_CONCURRENCY` (`2`): turns at once on its machine; a number or `unlimited`.
-- `STELLARIS_CLIS` (`claude,codex`): the CLIs it runs turns with.
+- `STELLARIS_CLIS` (`claude,codex`): the CLIs it runs turns with, of `claude`, `codex`, and `antigravity`.
 - `STELLARIS_CAPABILITIES` (none): comma-separated capabilities it offers, matched against what projects and tasks require.
 - `STELLARIS_CODEX_SANDBOX` (`danger-full-access`): the default runs Codex without a sandbox or approvals; `read-only` or `workspace-write` keep its sandbox, which on Linux needs user namespaces.
 - `STELLARIS_RECORD_DIR` (none): when set, every turn's raw CLI stream is appended there as JSONL, for fixtures.
-- `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` (none): read by the agent CLIs on a runner; leave them empty to use the CLIs' own login state.
+- `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `GEMINI_API_KEY` (none): read by the agent CLIs on a runner; leave them empty to use the CLIs' own login state. agy takes its key only with the setting [above](#signing-agy-in).
 
 ### Set by the runner
 
-- `STELLARIS_AGENT_TOKEN`: set per turn in the agent CLI's environment by the runner, the only place the CLI gets its turn token; neither CLI's command line holds it.
+- `STELLARIS_AGENT_TOKEN`: set per turn in the agent CLI's environment by the runner, the only place the CLI gets its turn token but agy's, which reads no variable in the board's MCP header and gets the token in its session's header over stdin; no CLI's command line holds it.
 - `HUSKY` (`0`): set in every agent CLI's environment by the runner, so husky neither points the clone away from the default branch's guard nor runs its hooks.
 
 ### Tokens

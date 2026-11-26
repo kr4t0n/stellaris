@@ -39,6 +39,7 @@ import {
   RunnerModelsSchema,
   TurnDispatchSchema,
   type AgentEvent,
+  type CliKind,
   type GitIdentityPart,
   type RunnerHello,
   type RunnerMessage,
@@ -48,7 +49,12 @@ import {
 import { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
-import { startTestSociety, type TestSociety } from "./testing/harness.js";
+import {
+  RECONNECT_WAIT,
+  startTestSociety,
+  TURN_START_WAIT,
+  type TestSociety,
+} from "./testing/harness.js";
 import { PIXEL, pngOfSize } from "./testing/images.js";
 
 const USER = { name: "user", role: "user" } as const;
@@ -104,7 +110,6 @@ function completed(summary: string, memoryUpdated = false): TurnResult {
 
 /** A backend that hosts resident sessions and counts what the runner does with them. */
 class ResidentBackend implements AgentBackend {
-  readonly kind = "claude" as const;
   readonly starts: string[] = [];
   readonly models: Array<string | undefined> = [];
   readonly efforts: Array<string | undefined> = [];
@@ -116,8 +121,14 @@ class ResidentBackend implements AgentBackend {
   memoryUpdatedNext = false;
   coldMemoryUpdatedNext = false;
 
+  /** A CLI's backend, whose new sessions take `sessionId` as their id. */
+  constructor(
+    readonly kind: CliKind = "claude",
+    private readonly sessionId = "session-1",
+  ) {}
+
   newSession(): Promise<string> {
-    return Promise.resolve("session-1");
+    return Promise.resolve(this.sessionId);
   }
 
   runTurn(request: object): Promise<TurnResult> {
@@ -267,7 +278,6 @@ interface HandedTurn {
  * memory when told, as a turn that changes its memory does, and fails a turn when told.
  */
 class InstructionsBackend implements AgentBackend {
-  readonly kind = "claude" as const;
   readonly turns: HandedTurn[] = [];
   readonly starts: string[] = [];
   /** The memory the next turn leaves its citizen with. */
@@ -276,6 +286,8 @@ class InstructionsBackend implements AgentBackend {
   failNext = false;
   /** Whether the next turn is stopped, and whether a model call answered before the stop. */
   stopNext: "before a model call" | "after a model call" | null = null;
+
+  constructor(readonly kind: CliKind = "claude") {}
 
   newSession(): Promise<string> {
     return Promise.resolve("session-1");
@@ -399,6 +411,11 @@ const deskPost = {
   trigger: { kind: "user_post" as const, fromUser: true, reason: "posted" },
   priority: 2,
 };
+
+/** A turn's request, or a warm session's start, on a new session of the given id. */
+function onNewSession(session: string): unknown {
+  return expect.objectContaining({ session, newSession: true });
+}
 
 /** A signal reader's backend that keeps each prompt's signal lines, the runner's connection left out. */
 function signalReader(): { backend: AgentBackend; listed: string[][] } {
@@ -1818,7 +1835,7 @@ describe("turns on a runner over the runner protocol", () => {
     const { run, hub } = await start(board, backend);
     const inThread = { ...deskPost, thread: { id: thread.id, task: false } };
     const running = run(inThread);
-    await vi.waitFor(() => expect(asked).toBe(1));
+    await vi.waitFor(() => expect(asked).toBe(1), TURN_START_WAIT);
     const turnId = hub.liveTurns()[0]?.turnId ?? "";
     expect(await hub.stop(turnId, "user")).toBe(true);
     chosen.resolve();
@@ -2873,6 +2890,65 @@ describe("turns on a runner over the runner protocol", () => {
     expect(backend.models.at(-1)).toBe("sonnet");
   });
 
+  it("starts every conversation of a citizen switched to another CLI afresh there, warm or cold, and never resumes one from before the switch", async () => {
+    const { board } = await Board.init(dir, { name: "switch" });
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    const ask = await board.openThread(USER, { channel: "general", title: "a question" });
+    const claude = new ResidentBackend();
+    const codex = new ResidentBackend("codex", "thread-1");
+    society = await startTestSociety({
+      board,
+      backends: () => ({ claude, codex }),
+      residentIdleMs: 60_000,
+    });
+    const { run } = society;
+    // The home's turns are warm, the thread's cold.
+    const both = async (): Promise<void> => {
+      await run(deskPost);
+      await run({ ...deskPost, thread: { id: ask.id, task: false } });
+    };
+
+    await both();
+    expect(claude.starts).toEqual(["desk:session-1"]);
+    expect(claude.handed).toEqual([onNewSession("session-1"), onNewSession("session-1")]);
+    expect(await board.readSessions("desk", "society")).toEqual({
+      claude: "session-1",
+      runner: "pod",
+    });
+
+    await board.setAgentCli(USER, "desk", { cli: "codex" });
+    await both();
+    expect(claude.closes).toEqual(["desk:session-1"]);
+    expect(claude.handed).toHaveLength(2);
+    expect(codex.starts).toEqual(["desk:thread-1"]);
+    expect(codex.handed).toEqual([onNewSession("thread-1"), onNewSession("thread-1")]);
+    expect(codex.prompts[0]).toContain(
+      "## Your session started afresh\n\nYour CLI was switched from claude to codex since your last turn here",
+    );
+    expect(await board.readSessions("desk", "society")).toEqual({
+      codex: "thread-1",
+      runner: "pod",
+    });
+
+    // Back on claude, neither conversation resumes the session it had there before the switch.
+    await board.setAgentCli(USER, "desk", { cli: "claude" });
+    await both();
+    expect(codex.closes).toEqual(["desk:thread-1"]);
+    expect(claude.handed.slice(2)).toEqual([onNewSession("session-1"), onNewSession("session-1")]);
+    expect(claude.starts).toEqual(["desk:session-1", "desk:session-1"]);
+
+    // A warm session stays with its CLI even for a job that names its session.
+    await board.setAgentCli(USER, "desk", { cli: "codex" });
+    await board.writeSession("desk", "society", "codex", "session-1", "pod");
+    await run(deskPost);
+    expect(claude.closes).toEqual(["desk:session-1", "desk:session-1"]);
+    expect(claude.prompts).toHaveLength(2);
+    expect(codex.starts).toEqual(["desk:thread-1", "desk:session-1"]);
+    expect(codex.handed.at(-1)).toEqual(
+      expect.objectContaining({ session: "session-1", newSession: false }),
+    );
+  });
+
   it("keeps a resident role's session warm across turns, recycles it when memory changed, and lets it idle out", async () => {
     const { board } = await Board.init(dir, { name: "resident" });
     await board.addProject(USER, { slug: "demo" });
@@ -3090,6 +3166,40 @@ describe("turns on a runner over the runner protocol", () => {
     await board.finishTurn(before);
     expect(changedIn((await turn()).prompt).times).toBe(1);
     expect(changedIn((await turn()).prompt)).toEqual(UNCHANGED);
+  });
+
+  it("carries changed instructions into a resumed Claude Code or Codex session's prompt, and never into agy's, which takes them on every resume", async () => {
+    const { board } = await Board.init(dir, { name: "instructions" });
+    const backends = {
+      claude: new InstructionsBackend("claude"),
+      codex: new InstructionsBackend("codex"),
+      antigravity: new InstructionsBackend("antigravity"),
+    };
+    society = await startTestSociety({ board, backends: () => backends });
+    const { run } = society;
+    for (const cli of ["claude", "codex", "antigravity"] as const) {
+      const name = `steward-${cli}`;
+      await board.addAgent(USER, { name, role: "steward", cli });
+      const backend = backends[cli];
+      const turn = async (): Promise<HandedTurn> => {
+        await run(manual(name, "society"));
+        const handed = backend.turns.at(-1);
+        if (handed === undefined) {
+          throw new Error(`the turn reached no ${cli}`);
+        }
+        return handed;
+      };
+      expect((await turn()).newSession).toBe(true);
+      backend.remember = `- MARKER-${cli}`;
+      expect(changedIn((await turn()).prompt)).toEqual(UNCHANGED);
+      const changed = await turn();
+      expect(changed.newSession).toBe(false);
+      expect(changed.instructions).toContain(`- MARKER-${cli}`);
+      expect(changedIn(changed.prompt)).toEqual(
+        cli === "antigravity" ? UNCHANGED : { text: changed.instructions?.trimEnd(), times: 1 },
+      );
+      expect(changedIn((await turn()).prompt)).toEqual(UNCHANGED);
+    }
   });
 
   it("carries changed instructions into a warm session's prompt, and starts its process afresh on them", async () => {
@@ -4016,7 +4126,7 @@ describe("turns on a runner over the runner protocol", () => {
 
     // Back, the runner takes the next turn, which starts afresh, since the last ran elsewhere.
     network.up();
-    await vi.waitFor(() => expect(hub.connected).toEqual(["a", "b"]), { timeout: 10_000 });
+    await vi.waitFor(() => expect(hub.connected).toEqual(["a", "b"]), RECONNECT_WAIT);
     expect((await run(turn)).runner).toBe("b");
     expect(fresh["b"]).toEqual([true, true]);
     expect((await board.readAgent("stew")).homeRunner).toBe("b");
@@ -4064,7 +4174,7 @@ describe("turns on a runner over the runner protocol", () => {
 
     // Back within the grace period, it takes the turn.
     network.up();
-    await vi.waitFor(() => expect(hub.connected).toEqual(["a", "b"]), { timeout: 10_000 });
+    await vi.waitFor(() => expect(hub.connected).toEqual(["a", "b"]), RECONNECT_WAIT);
     expect((await run(turn)).runner).toBe("b");
     expect(ran).toEqual(["b"]);
     expect((await board.readAgent("stew")).homeRunner).toBe("b");
@@ -4554,7 +4664,7 @@ describe("turns on a runner over the runner protocol", () => {
     });
     const { run, hub, runner } = society;
     const first = run(manual("eng-1", "demo"));
-    await vi.waitFor(() => expect(backend.log).toEqual(["start 1"]));
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1"]), TURN_START_WAIT);
     await vi.waitFor(() => expect(hub.unacknowledged("pod")).toEqual([]));
 
     // The runner's network fails for longer than the grace period: the board ends the turn and
@@ -4571,9 +4681,7 @@ describe("turns on a runner over the runner protocol", () => {
 
     // Back, the runner lists the turn in its hello, and the server has it stop the CLI.
     network.up();
-    await vi.waitFor(() => expect(backend.log).toEqual(["start 1", "stop 1"]), {
-      timeout: 10_000,
-    });
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1", "stop 1"]), RECONNECT_WAIT);
 
     // The conversation's next turn arrives while the stopped CLI winds down, and starts in the
     // workspace only once that CLI has ended.
@@ -4582,7 +4690,10 @@ describe("turns on a runner over the runner protocol", () => {
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(backend.log).toEqual(["start 1", "stop 1"]);
     backend.end(1);
-    await vi.waitFor(() => expect(backend.log).toEqual(["start 1", "stop 1", "end 1", "start 2"]));
+    await vi.waitFor(
+      () => expect(backend.log).toEqual(["start 1", "stop 1", "end 1", "start 2"]),
+      TURN_START_WAIT,
+    );
     backend.end(2);
     expect(await next).toMatchObject({ exitReason: "completed" });
     await vi.waitFor(() => expect(runner.turns).toEqual([]));
@@ -4619,21 +4730,21 @@ describe("turns on a runner over the runner protocol", () => {
     expect(running()).toEqual([]);
 
     const completedTurn = run(manual("eng-1", "demo"));
-    await vi.waitFor(() => expect(backend.log).toEqual(["start 1"]));
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1"]), TURN_START_WAIT);
     expect(running()).toEqual([["demo", "eng-1", 1]]);
     backend.end(1);
     expect(await completedTurn).toMatchObject({ exitReason: "completed" });
     expect(running()).toEqual([["demo", "eng-1", 0]]);
 
     const failedTurn = run(manual("eng-1", "demo"));
-    await vi.waitFor(() => expect(backend.log).toContain("start 2"));
+    await vi.waitFor(() => expect(backend.log).toContain("start 2"), TURN_START_WAIT);
     expect(running()).toEqual([["demo", "eng-1", 1]]);
     backend.end(2, { ...completed("broke"), status: null, exitReason: "error", error: "broke" });
     expect(await failedTurn).toMatchObject({ exitReason: "error" });
     expect(running()).toEqual([["demo", "eng-1", 0]]);
 
     const stoppedTurn = run(manual("eng-1", "demo"));
-    await vi.waitFor(() => expect(backend.log).toContain("start 3"));
+    await vi.waitFor(() => expect(backend.log).toContain("start 3"), TURN_START_WAIT);
     expect(running()).toEqual([["demo", "eng-1", 1]]);
     expect(await hub.stop(hub.liveTurns()[0]?.turnId ?? "", "user")).toBe(true);
     await vi.waitFor(() => expect(backend.log).toContain("stop 3"));
@@ -4645,7 +4756,7 @@ describe("turns on a runner over the runner protocol", () => {
     // though no end is logged: the host lets the turn go before it records the end.
     const finish = vi.spyOn(board, "finishTurn").mockRejectedValueOnce(new Error("disk full"));
     const unrecordedTurn = run(manual("eng-1", "demo"));
-    await vi.waitFor(() => expect(backend.log).toContain("start 4"));
+    await vi.waitFor(() => expect(backend.log).toContain("start 4"), TURN_START_WAIT);
     expect(running()).toEqual([["demo", "eng-1", 1]]);
     backend.end(4);
     await expect(unrecordedTurn).rejects.toThrow("disk full");
@@ -4655,7 +4766,7 @@ describe("turns on a runner over the runner protocol", () => {
     // A runner away past the grace period never reports its turn's end: the board ends the turn as
     // failed, which takes it off the gauge while its CLI, cut off, works on.
     const awayTurn = run(manual("eng-1", "demo"));
-    await vi.waitFor(() => expect(backend.log).toContain("start 5"));
+    await vi.waitFor(() => expect(backend.log).toContain("start 5"), TURN_START_WAIT);
     await vi.waitFor(() => expect(hub.unacknowledged("pod")).toEqual([]));
     expect(running()).toEqual([["demo", "eng-1", 1]]);
     network.down();
@@ -4669,7 +4780,7 @@ describe("turns on a runner over the runner protocol", () => {
       { agent: "eng-1", outcome: "failed", trigger: "manual", turns: 2 },
     ]);
     network.up();
-    await vi.waitFor(() => expect(backend.log).toContain("stop 5"), { timeout: 10_000 });
+    await vi.waitFor(() => expect(backend.log).toContain("stop 5"), RECONNECT_WAIT);
     backend.end(5);
   });
 
@@ -4689,7 +4800,7 @@ describe("turns on a runner over the runner protocol", () => {
     society = await startTestSociety({ board, backends: () => ({ claude: backend }) });
     const { run, runner } = society;
     const first = run(manual("eng-1", "demo"));
-    await vi.waitFor(() => expect(backend.log).toEqual(["start 1"]));
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1"]), TURN_START_WAIT);
 
     // The server sends a conversation's next turn only once it has ended the last, so a second job
     // of the conversation means the board no longer holds the first, by whatever path it ended:
@@ -4702,13 +4813,18 @@ describe("turns on a runner over the runner protocol", () => {
 
     // Another citizen's turn, in a conversation of its own, does not wait.
     const other = run(manual("eng-2", "demo"));
-    await vi.waitFor(() => expect(backend.log).toEqual(["start 1", "stop 1", "start 2"]));
+    await vi.waitFor(
+      () => expect(backend.log).toEqual(["start 1", "stop 1", "start 2"]),
+      TURN_START_WAIT,
+    );
     backend.end(2);
     expect(await other).toMatchObject({ exitReason: "completed" });
 
     backend.end(1);
-    await vi.waitFor(() =>
-      expect(backend.log).toEqual(["start 1", "stop 1", "start 2", "end 2", "end 1", "start 3"]),
+    await vi.waitFor(
+      () =>
+        expect(backend.log).toEqual(["start 1", "stop 1", "start 2", "end 2", "end 1", "start 3"]),
+      TURN_START_WAIT,
     );
     backend.end(3);
     expect(await first).toMatchObject({ exitReason: "stopped" });
@@ -4747,7 +4863,7 @@ describe("turns on a runner over the runner protocol", () => {
     });
     const { run, hub, runner } = society;
     const first = run(manual("eng-1", "demo"));
-    await vi.waitFor(() => expect(backend.log).toEqual(["start 1"]));
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1"]), TURN_START_WAIT);
     await vi.waitFor(() => expect(hub.unacknowledged("pod")).toEqual([]));
     const said = hellos;
 
@@ -4757,8 +4873,8 @@ describe("turns on a runner over the runner protocol", () => {
     network.down();
     await new Promise((resolve) => setTimeout(resolve, 300));
     network.up();
-    await vi.waitFor(() => expect(hellos).toBeGreaterThan(said), { timeout: 5_000 });
-    await vi.waitFor(() => expect(hub.connected).toEqual(["pod"]));
+    await vi.waitFor(() => expect(hellos).toBeGreaterThan(said), RECONNECT_WAIT);
+    await vi.waitFor(() => expect(hub.connected).toEqual(["pod"]), RECONNECT_WAIT);
     expect(runner.turns).toHaveLength(1);
     await new Promise((resolve) => setTimeout(resolve, 3_000));
     expect(backend.log).toEqual(["start 1"]);
@@ -4785,7 +4901,7 @@ describe("turns on a runner over the runner protocol", () => {
     society = await startTestSociety({ board, backends: () => ({ claude: backend }) });
     const { run, hub, runner } = society;
     const first = run(manual("eng-1", "demo"));
-    await vi.waitFor(() => expect(backend.log).toEqual(["start 1"]));
+    await vi.waitFor(() => expect(backend.log).toEqual(["start 1"]), TURN_START_WAIT);
     const next = run(manual("eng-1", "demo"));
     await vi.waitFor(() => expect(runner.turns).toHaveLength(2));
     await vi.waitFor(() => expect(backend.log).toEqual(["start 1", "stop 1"]));
@@ -5007,7 +5123,8 @@ describe("turns on a runner over the runner protocol", () => {
     });
     gate.holding = false;
     gate.release?.();
-    await vi.waitFor(() => expect(runner.turns).toHaveLength(0));
+    // The runner may still be preparing the turn, so this waits for its CLI's start as well.
+    await vi.waitFor(() => expect(runner.turns).toHaveLength(0), TURN_START_WAIT);
     expect((await board.readProject("demo")).runner).toBe("pod");
 
     // With the project's runner gone, its turns wait rather than go anywhere else.
@@ -6247,7 +6364,7 @@ describe("turns on a runner over the runner protocol", () => {
     await laptop.start();
     expect((await board.readRunner("laptop")).gitIdentityMissing).toEqual(["email"]);
     // Each hello checks again, and the log speaks of a gap once, not on every reconnect.
-    await vi.waitFor(() => expect(checks).toBeGreaterThanOrEqual(3));
+    await vi.waitFor(() => expect(checks).toBeGreaterThanOrEqual(3), RECONNECT_WAIT);
     expect(about(identity)).toEqual([
       {
         level: "warn",
@@ -6258,15 +6375,17 @@ describe("turns on a runner over the runner protocol", () => {
 
     // Set on the machine, the gap clears at the next hello.
     missing = [];
-    await vi.waitFor(async () =>
-      expect((await board.readRunner("laptop")).gitIdentityMissing).toEqual([]),
+    await vi.waitFor(
+      async () => expect((await board.readRunner("laptop")).gitIdentityMissing).toEqual([]),
+      RECONNECT_WAIT,
     );
     expect(about(identity).map((entry) => entry.level)).toEqual(["warn", "info"]);
 
     // A check that fails sends nothing, which the board takes as not knowing.
     missing = new Error("git: not found");
-    await vi.waitFor(async () =>
-      expect((await board.readRunner("laptop")).gitIdentityMissing).toBeUndefined(),
+    await vi.waitFor(
+      async () => expect((await board.readRunner("laptop")).gitIdentityMissing).toBeUndefined(),
+      RECONNECT_WAIT,
     );
     expect(about(/could not check the git identity/)[0]?.context).toEqual({
       error: "Error: git: not found",
@@ -6417,5 +6536,52 @@ describe("turns on a runner over the runner protocol", () => {
       retryMs: 50,
     });
     await expect(stranger.start()).rejects.toMatchObject({ status: 401 });
+  });
+
+  it("records a connection under way before the hub closes, so nothing is written once it has", async () => {
+    const { board } = await Board.init(dir, { name: "attach" });
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-1"),
+      runTurn: () => Promise.resolve(completed("done")),
+    };
+    const { hub, url } = await start(board, backend);
+    // The record of studio's connection is written only once the test lets it go, as a slow disk
+    // holds it, and the order says which came first, that write or the hub's close.
+    const order: string[] = [];
+    const { promise: held, resolve: release } = Promise.withResolvers<void>();
+    const { promise: written, resolve: wrote } = Promise.withResolvers<void>();
+    const markRunner = board.markRunner.bind(board);
+    vi.spyOn(board, "markRunner").mockImplementation(async (name, patch) => {
+      if (name !== "studio" || patch.status !== "connected") {
+        return markRunner(name, patch);
+      }
+      await held;
+      const marked = await markRunner(name, patch);
+      order.push("connected");
+      wrote();
+      return marked;
+    });
+    const { token } = await board.addRunner(USER, "studio");
+    const studio = createRunner({
+      serverUrl: url,
+      token,
+      dataDir: path.join(dir, "studio"),
+      backends: { claude: backend },
+      version: "test",
+      slots: 1,
+      retryMs: 50,
+    });
+    // The runner counts its stream open on the headers, which leave while the write waits, so it
+    // starts and stops with the write still under way.
+    await studio.start();
+    await studio.stop();
+    const closed = hub.close().then(() => order.push("closed"));
+    // Nothing else is under way, so a close that left the write out has ended by the event loop's
+    // next turn.
+    await new Promise((resolve) => setImmediate(resolve));
+    release();
+    await Promise.all([closed, written]);
+    expect(order).toEqual(["connected", "closed"]);
   });
 });

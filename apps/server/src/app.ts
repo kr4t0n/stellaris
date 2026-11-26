@@ -2,6 +2,7 @@ import { BoardError, isBoardError, type Actor, type Board } from "@stellaris/boa
 import { handleMcpRequest } from "@stellaris/board-mcp";
 import {
   BranchPathSchema,
+  ChannelRefSchema,
   CliKindSchema,
   EffortSchema,
   IMAGE_MEDIA_TYPES,
@@ -29,6 +30,7 @@ import { compress } from "hono/compress";
 import { streamSSE } from "hono/streaming";
 import { z, ZodError } from "zod";
 import { API_BODY_LIMIT_BYTES, IMAGE_BODY_LIMIT_BYTES, limitBody } from "./body-limit.js";
+import { compressJson } from "./compression.js";
 import type { EnrollmentDesk } from "./enrollment.js";
 import {
   appleAppSiteAssociation,
@@ -112,6 +114,12 @@ const ProjectRunnerBodySchema = z.object({
 /** A model for a citizen, or null for its CLI's own default. */
 const ModelBodySchema = z.object({ model: ModelNameSchema.nullable() });
 const EffortBodySchema = z.object({ effort: EffortSchema.nullable() });
+/** A CLI to switch to, with the model and effort to run there, each its default when left out. */
+const CliBodySchema = z.object({
+  cli: CliKindSchema,
+  model: ModelNameSchema.nullable().optional(),
+  effort: EffortSchema.nullable().optional(),
+});
 /** How many commits of a home's history one request reads. */
 const HistoryLimitSchema = z.coerce.number().int().min(1).max(500);
 /** Message ids, comma-separated, as the interface asks for the ones its text names. */
@@ -177,6 +185,8 @@ export function createApp(deps: AppDependencies): Hono<Env> {
 
   const api = new Hono<Env>();
   api.use("*", authenticate);
+  // After the token check, so a request without a valid one costs no compression.
+  api.use("*", compressJson);
   // An image the user posts from a composer: the body is its bytes, whatever its content type says,
   // and `name` the file's name, which describes it in the markdown answered. It answers before the
   // cap every other write takes, below, so it is held to its own, the image limit. A citizen's
@@ -223,32 +233,43 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     c.json((await board.listAgents()).map(({ tokenHash: _hash, ...agent }) => agent)),
   );
   api.get("/members", async (c) => c.json(await board.listMembers()));
+  // A citizen's, a runner's, a skill's, or a role's name names a folder or a file of the board's,
+  // so it is parsed before anything reads one: a NUL or an encoded slash in it would reach the path.
+  const nameOf = (c: Context<Env>) => NameSchema.parse(c.req.param("name"));
+  // A task's, a thread's, a proposal's, or an image's id names a file of the board's too.
+  const idOf = (c: Context<Env>) => UlidSchema.parse(c.req.param("id"));
   // A member's finished turns from the event log and each one's steps, its memory core, its own
   // skills, the conflict copies in its home, and the home's history, read only.
-  api.get("/agents/:name/turns", async (c) =>
-    c.json(await board.listTurns(c.req.param("name"), Number(c.req.query("limit") ?? "50"))),
-  );
+  api.get("/agents/:name/turns", async (c) => {
+    const name = nameOf(c);
+    await board.readAgent(name);
+    return c.json(await board.listTurns(name, Number(c.req.query("limit") ?? "50")));
+  });
   api.get("/agents/:name/turns/:turnId", async (c) =>
-    c.json(await board.readTranscript(c.req.param("name"), c.req.param("turnId"))),
+    c.json(await board.readTranscript(nameOf(c), c.req.param("turnId"))),
   );
   api.get("/agents/:name/memory", async (c) => {
-    await board.readAgent(c.req.param("name"));
-    return c.json({ body: await board.readMemoryCore(c.req.param("name")) });
+    const name = nameOf(c);
+    await board.readAgent(name);
+    return c.json({ body: await board.readMemoryCore(name) });
   });
   api.get("/agents/:name/skills", async (c) => {
-    await board.readAgent(c.req.param("name"));
-    return c.json(await board.listAgentSkills(c.req.param("name")));
+    const name = nameOf(c);
+    await board.readAgent(name);
+    return c.json(await board.listAgentSkills(name));
   });
   api.get("/agents/:name/conflicts", async (c) => {
-    await board.readAgent(c.req.param("name"));
-    return c.json(await board.listHomeConflicts(c.req.param("name")));
+    const name = nameOf(c);
+    await board.readAgent(name);
+    return c.json(await board.listHomeConflicts(name));
   });
   api.get("/agents/:name/history", async (c) => {
+    const name = nameOf(c);
     const limit = HistoryLimitSchema.parse(c.req.query("limit") ?? "30");
-    return c.json(await board.homeHistory(c.req.param("name"), limit));
+    return c.json(await board.homeHistory(name, limit));
   });
   api.get("/agents/:name/history/:commit", async (c) =>
-    c.json(await board.homeChange(c.req.param("name"), c.req.param("commit"))),
+    c.json(await board.homeChange(nameOf(c), c.req.param("commit"))),
   );
   api.get("/roles", async (c) => c.json(await board.listRoles()));
   api.get("/runners", async (c) => c.json(await board.listRunners()));
@@ -258,7 +279,7 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     if (c.get("actor").role !== USER_ROLE) {
       throw new BoardError("FORBIDDEN", "only the user reads a runner's quota");
     }
-    const runner = NameSchema.parse(c.req.param("name"));
+    const runner = nameOf(c);
     const cli = CliKindSchema.parse(c.req.param("cli"));
     if (quotas === undefined) {
       throw new RunnerAwayError("this server asks no runner for quotas");
@@ -272,7 +293,7 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   ] as const) {
     for (const path of [`/runners/:name/${verb}`, `/runners/:name/${verb}/:cli`]) {
       api.post(path, async (c) => {
-        const name = NameSchema.parse(c.req.param("name"));
+        const name = nameOf(c);
         const cli = c.req.param("cli");
         return c.json(
           await board.setRunnerPaused(c.get("actor"), name, {
@@ -286,7 +307,7 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   // The user renames a runner, with every record that names it, once nothing runs there; the hub,
   // when there is one, checks that and has the runner connect again under its new name.
   api.put("/runners/:name/name", async (c) => {
-    const from = NameSchema.parse(c.req.param("name"));
+    const from = nameOf(c);
     const body = RunnerRenameBodySchema.parse(await c.req.json());
     return c.json(
       deps.runners === undefined
@@ -298,7 +319,7 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   // and nothing runs there; the hub, when there is one, checks that it is paused or away too, and
   // lets go of it.
   api.delete("/runners/:name", async (c) => {
-    const name = NameSchema.parse(c.req.param("name"));
+    const name = nameOf(c);
     return c.json(
       deps.runners === undefined
         ? await board.removeRunner(c.get("actor"), name)
@@ -336,15 +357,13 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   api.get("/proposals", async (c) => c.json(await board.listProposals()));
   // Every cron, ended ones too; they are set, changed, and ended through their verbs.
   api.get("/crons", async (c) => c.json(await board.listCrons()));
-  api.get("/proposals/:id", async (c) => c.json(await board.readProposal(c.req.param("id"))));
+  api.get("/proposals/:id", async (c) => c.json(await board.readProposal(idOf(c))));
   // Where the messages that text names by id are, for the interface to link them.
   api.get("/messages", async (c) =>
     c.json(await board.findMessages(MessageIdsSchema.parse(c.req.query("ids") ?? ""))),
   );
   // A skill proposal's folder as the board took it from its proposer's home, with each file's text.
-  api.get("/proposals/:id/files", async (c) =>
-    c.json(await board.readSkillFiles(UlidSchema.parse(c.req.param("id")))),
-  );
+  api.get("/proposals/:id/files", async (c) => c.json(await board.readSkillFiles(idOf(c))));
   api.get("/signals", async (c) =>
     c.json(await board.listSignals(Number(c.req.query("limit") ?? "100"))),
   );
@@ -362,42 +381,50 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   api.get("/society/knowledge", async (c) => c.json(await board.listKnowledge(null)));
   api.get("/skills", async (c) => c.json(await board.listSocietySkills()));
   // A society skill's folder as it is published, with each file's text.
-  api.get("/skills/:name/files", async (c) =>
-    c.json(await board.readSocietySkillFiles(NameSchema.parse(c.req.param("name")))),
-  );
+  api.get("/skills/:name/files", async (c) => c.json(await board.readSocietySkillFiles(nameOf(c))));
 
   // Governance the user does directly: retirement, charters, channels.
   api.post("/agents/:name/retire", async (c) => {
+    const name = nameOf(c);
     const body = RetireBodySchema.parse(await c.req.json());
     const { tokenHash: _hash, ...agent } = await board.retireAgent(c.get("actor"), {
-      name: c.req.param("name"),
+      name,
       reason: body.reason,
     });
     return c.json(agent);
   });
   api.put("/agents/:name/model", async (c) => {
+    const name = nameOf(c);
     const body = ModelBodySchema.parse(await c.req.json());
     const { tokenHash: _hash, ...agent } = await board.setAgentModel(
       c.get("actor"),
-      c.req.param("name"),
+      name,
       body.model,
     );
     return c.json(agent);
   });
   api.put("/agents/:name/effort", async (c) => {
+    const name = nameOf(c);
     const body = EffortBodySchema.parse(await c.req.json());
     const { tokenHash: _hash, ...agent } = await board.setAgentEffort(
       c.get("actor"),
-      c.req.param("name"),
+      name,
       body.effort,
     );
     return c.json(agent);
   });
+  api.put("/agents/:name/cli", async (c) => {
+    const name = nameOf(c);
+    const body = CliBodySchema.parse(await c.req.json());
+    const { tokenHash: _hash, ...agent } = await board.setAgentCli(c.get("actor"), name, body);
+    return c.json(agent);
+  });
   api.put("/agents/:name/runner", async (c) => {
+    const name = nameOf(c);
     const body = HomeRunnerBodySchema.parse(await c.req.json());
     const { tokenHash: _hash, ...agent } = await board.setAgentRunner(
       c.get("actor"),
-      c.req.param("name"),
+      name,
       body.runner,
     );
     return c.json(agent);
@@ -417,12 +444,14 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   });
   // A citizen's choices come from the runner its turns run on, since that runner's install of the
   // CLI decides which models and effort levels exist: its pinned runner, else where its projects
-  // live, else any runner with its CLI.
+  // live, else any runner with its CLI. `cli` names another CLI to list, one to switch it to.
   api.get("/agents/:name/models", async (c) => {
-    const agent = await board.readAgent(c.req.param("name"));
+    const agent = await board.readAgent(nameOf(c));
     if (agent.cli === null) {
       throw new BoardError("INVALID_STATE", `${agent.name} takes no turns, so it has no models`);
     }
+    const asked = c.req.query("cli");
+    const cli = asked === undefined ? agent.cli : CliKindSchema.parse(asked);
     if (models === undefined) {
       throw new RunnerAwayError("this server asks no runner for models");
     }
@@ -432,12 +461,13 @@ export function createApp(deps: AppDependencies): Hono<Env> {
     const prefer = [agent.homeRunner, ...agent.memberships.map((slug) => placed.get(slug))].filter(
       (runner): runner is string => runner !== undefined,
     );
-    return c.json(await models.list(agent.cli, prefer));
+    return c.json(await models.list(cli, prefer));
   });
   api.put("/roles/:name", async (c) => {
+    const name = nameOf(c);
     const charter = RoleCharterSchema.parse({
       ...z.record(z.string(), z.unknown()).parse(await c.req.json()),
-      name: c.req.param("name"),
+      name,
     });
     return c.json(await board.setRoleCharter(c.get("actor"), charter));
   });
@@ -448,14 +478,16 @@ export function createApp(deps: AppDependencies): Hono<Env> {
 
   // Projects, tasks, channels, threads
   api.get("/projects", async (c) => c.json(await board.listProjects()));
-  api.get("/projects/:slug", async (c) => c.json(await board.readProject(c.req.param("slug"))));
-  api.get("/projects/:slug/tasks", async (c) => c.json(await board.listTasks(c.req.param("slug"))));
-  api.get("/projects/:slug/dashboard", async (c) =>
-    c.json(await board.readDashboard(c.req.param("slug"))),
-  );
-  api.get("/projects/:slug/knowledge", async (c) =>
-    c.json(await board.listKnowledge(c.req.param("slug"))),
-  );
+  // A slug names a folder of the board's, so it is parsed before anything reads one: a NUL or an
+  // encoded slash in it would reach the path.
+  const slugOf = (c: Context<Env>) => NameSchema.parse(c.req.param("slug"));
+  api.get("/projects/:slug", async (c) => c.json(await board.readProject(slugOf(c))));
+  api.get("/projects/:slug/tasks", async (c) => c.json(await board.listTasks(slugOf(c))));
+  api.get("/projects/:slug/dashboard", async (c) => c.json(await board.readDashboard(slugOf(c))));
+  api.get("/projects/:slug/knowledge", async (c) => {
+    const project = await board.readProject(slugOf(c));
+    return c.json(await board.listKnowledge(project.slug));
+  });
   // One path on a branch of a project's repository, read on the runner the project lives on.
   const branchFile = async (c: Context<Env>, project: string, branch: string, file: string) => {
     if (deps.runners === undefined) {
@@ -465,37 +497,35 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   };
   // The project's code as its default branch has it in the clone on its runner.
   const projectFile = async (c: Context<Env>, file: string) => {
-    const project = await board.readProject(NameSchema.parse(c.req.param("slug")));
+    const project = await board.readProject(slugOf(c));
     return branchFile(c, project.slug, project.defaultBranch, file);
   };
   api.get("/projects/:slug/files", (c) => projectFile(c, ""));
   // The user moves a project to another runner, carrying its repository; answered once it ends.
   api.put("/projects/:slug/runner", async (c) => {
+    const slug = slugOf(c);
     const body = ProjectRunnerBodySchema.parse(await c.req.json());
     if (deps.runners === undefined) {
       throw new BoardError("NOT_FOUND", "this board has no runners to move a project between");
     }
     return c.json(
-      await deps.runners.moveProject(
-        c.get("actor"),
-        NameSchema.parse(c.req.param("slug")),
-        body.runner,
-        { withoutBranches: body.withoutBranches },
-      ),
+      await deps.runners.moveProject(c.get("actor"), slug, body.runner, {
+        withoutBranches: body.withoutBranches,
+      }),
     );
   });
   api.get("/projects/:slug/files/:path{.+}", (c) => projectFile(c, c.req.param("path")));
-  api.get("/tasks/:id", async (c) => c.json((await board.findTask(c.req.param("id"))).task));
-  api.get("/tasks/:id/thread", async (c) => c.json(await board.listThread(c.req.param("id"))));
+  api.get("/tasks/:id", async (c) => c.json((await board.findTask(idOf(c))).task));
+  api.get("/tasks/:id/thread", async (c) => c.json(await board.listThread(idOf(c))));
   // What a task's work left: one path on its branch.
   const taskFile = async (c: Context<Env>, file: string) => {
-    const { task } = await board.findTask(UlidSchema.parse(c.req.param("id")));
+    const { task } = await board.findTask(idOf(c));
     return branchFile(c, task.project, `task/${task.id}`, file);
   };
   api.get("/tasks/:id/files", (c) => taskFile(c, ""));
   // What a task's branch changed since it left the default branch, file by file.
   api.get("/tasks/:id/changes", async (c) => {
-    const { task } = await board.findTask(UlidSchema.parse(c.req.param("id")));
+    const { task } = await board.findTask(idOf(c));
     if (deps.runners === undefined) {
       throw new BoardError("NOT_FOUND", "this board has no runners to read a task's branch from");
     }
@@ -503,7 +533,7 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   });
   // What a task's branch did to one file, counted as its changes are.
   api.get("/tasks/:id/diff/:path{.+}", async (c) => {
-    const { task } = await board.findTask(UlidSchema.parse(c.req.param("id")));
+    const { task } = await board.findTask(idOf(c));
     if (deps.runners === undefined) {
       throw new BoardError("NOT_FOUND", "this board has no runners to read a task's branch from");
     }
@@ -519,7 +549,7 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   // An image a citizen uploaded, as its bytes: it never changes, and only a holder of a token sees
   // it, so a browser keeps it privately for good, and never runs it as anything but an image.
   api.get("/images/:id", async (c) => {
-    const { type, bytes } = await board.readImage(UlidSchema.parse(c.req.param("id")));
+    const { type, bytes } = await board.readImage(idOf(c));
     return c.body(new Uint8Array(bytes), 200, {
       "content-type": IMAGE_MEDIA_TYPES[type],
       "cache-control": "private, max-age=31536000, immutable",
@@ -530,11 +560,14 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   api.get("/threads", async (c) => c.json(await board.listThreads()));
   api.get("/requests", async (c) => c.json(await board.listRequests()));
   api.get("/threads/:id", async (c) => {
-    const id = c.req.param("id");
+    const id = idOf(c);
     return c.json({ thread: await board.readThread(id), messages: await board.listThread(id) });
   });
   api.get("/channels", async (c) => c.json(await board.listChannels()));
-  api.get("/channels/:ref{.+}", async (c) => c.json(await board.listChannel(c.req.param("ref"))));
+  // A channel's reference names its folder, so it is parsed before the board reads one as well.
+  api.get("/channels/:ref{.+}", async (c) =>
+    c.json(await board.listChannel(ChannelRefSchema.parse(c.req.param("ref")))),
+  );
 
   // Board events: the durable log, as a page or as a stream.
   api.get("/events", async (c) => {
@@ -721,7 +754,8 @@ export function createApp(deps: AppDependencies): Hono<Env> {
   });
 
   // Compressed, since the bundle is a megabyte raw and often crosses a slow forwarded link. The
-  // API and its event streams answer before this route, so compression never buffers a stream.
+  // API answers before this route and compresses only its JSON (`compressJson`), so no compressor
+  // ever holds back one of its event streams.
   if (deps.webDir !== undefined) {
     app.get("*", compress(), spaHandler(deps.webDir));
   }

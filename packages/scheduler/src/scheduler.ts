@@ -22,6 +22,7 @@ import {
   signalWakes,
   USER_NAME,
   USER_ROLE,
+  userPostWakesDesk,
   parseChannelRef,
   SOCIETY_SCOPE,
   TriggerSchema,
@@ -29,6 +30,7 @@ import {
   UlidSchema,
   WAKING_SIGNAL_KINDS,
   wakeScope,
+  wakesOnMention,
   workspaceConversationOf,
   type Agent,
   type BoardEvent,
@@ -616,6 +618,7 @@ export class Scheduler {
         const channel = stringOf(payload["channel"]);
         const messageId = stringOf(payload["id"]) ?? undefined;
         const threadId = stringOf(payload["thread"]) ?? undefined;
+        const woken: Agent[] = [];
         for (const name of mentions) {
           if (name === event.actor || name === USER_NAME) {
             continue;
@@ -624,6 +627,7 @@ export class Scheduler {
           if (agent === null) {
             continue;
           }
+          woken.push(agent);
           const scope = this.scopeFor(agent, channel);
           this.enqueue(
             agent.name,
@@ -643,7 +647,7 @@ export class Scheduler {
         // A step's note from the user is the task's business, not a request for the front desk.
         const step = payload["step"];
         if (event.actor === USER_NAME && (step === undefined || step === null)) {
-          await this.wakeFrontDesk(channel, messageId, threadId, now);
+          await this.wakeFrontDesk(channel, messageId, threadId, woken, now);
         }
         return;
       }
@@ -923,15 +927,27 @@ export class Scheduler {
     }
   }
 
-  /** Roles charted for `user_post` wake on every post by the user, mentioned or not. */
+  /**
+   * Roles charted for `user_post` wake on a post by the user that is an ask, or that names no other
+   * citizen the mentions woke, `woken`, who will act on it (`userPostWakesDesk`).
+   */
   private async wakeFrontDesk(
     channel: string | null,
     messageId: string | undefined,
     threadId: Ulid | undefined,
+    woken: readonly Agent[],
     now: number,
   ): Promise<void> {
+    // A lookup that fails leaves the post to the rule for any post: a throw here would end every
+    // pass at this event, before the cursor moves past it.
+    const place = {
+      channel,
+      opensThread:
+        messageId !== undefined &&
+        (await this.board.opensThread({ id: messageId, thread: threadId }).catch(() => false)),
+    };
     for (const agent of await this.board.listAgents()) {
-      if (agent.status !== "active" || agent.cli === null) {
+      if (!wakesOnMention(agent) || !userPostWakesDesk(agent.name, woken, place)) {
         continue;
       }
       const charter = await this.board.readRole(agent.role);
@@ -1388,7 +1404,7 @@ export class Scheduler {
   private async tryReadAgent(name: Name): Promise<Agent | null> {
     try {
       const agent = await this.board.readAgent(name);
-      return agent.status === "active" && agent.cli !== null ? agent : null;
+      return wakesOnMention(agent) ? agent : null;
     } catch {
       return null;
     }

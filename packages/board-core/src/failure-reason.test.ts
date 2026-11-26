@@ -193,9 +193,40 @@ const SHAPES: readonly (readonly ["claude" | "codex", FailedTurnEnd, string])[] 
     "service",
   ],
   // A mark the words leave is the adapters', the model service's: Claude Code's words for a
-  // connection that failed or timed out, against a stub.
+  // connection that failed or timed out, against a stub, and Codex 0.170.0's for
+  // `policyCapacityUnavailable`, through the adapter, for a stub answering a 503 with the code.
   ["claude", failed("Request timed out", { transient: true }), "service"],
   ["claude", failed("API Error: Connection dropped (ECONNRESET).", { transient: true }), "service"],
+  [
+    "codex",
+    failed("Policy-restricted capacity is unavailable. Please try again later.", {
+      transient: true,
+    }),
+    "service",
+  ],
+  // Codex 0.170.0's for a stream it gave up on, through the adapter, for a stub cutting every body
+  // on the way and one closing every socket with no answer, and a compaction's, which stays one.
+  [
+    "codex",
+    failed(
+      "stream disconnected before completion: Transport error: network error: error decoding response body",
+      { transient: true },
+    ),
+    "service",
+  ],
+  [
+    "codex",
+    failed("stream disconnected before completion: error sending request", { transient: true }),
+    "service",
+  ],
+  [
+    "codex",
+    failed(
+      "Error running remote compact task: stream disconnected before completion: error sending request",
+      { transient: true },
+    ),
+    "compaction",
+  ],
   ["claude", failed("runner runner-1 went away during the turn"), "runner_dropped"],
   ["claude", failed("runner runner-1 restarted during the turn"), "runner_dropped"],
   ["codex", failed("runner runner-1 restarted during the turn"), "runner_dropped"],
@@ -266,6 +297,9 @@ const SHAPES: readonly (readonly ["claude" | "codex", FailedTurnEnd, string])[] 
     failed("the runner could not run the turn: Error: EIO: i/o error, scandir '/work/demo'"),
     "other",
   ],
+  // Codex 0.170.0's words for an access-program refusal with no message of the provider's, which
+  // the adapter does not mark transient.
+  ["codex", failed("The requested access program is not enabled."), "other"],
   ["codex", failed(null), "other"],
 ];
 

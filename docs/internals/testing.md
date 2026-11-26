@@ -40,6 +40,20 @@ Vitest 5 shows no console output from a test that passes; pass `--silent=false` 
 
 `vitest.config.ts` sets `testTimeout: 30_000` for the whole suite rather than per test, since which git-heavy tests run past Vitest's 5 s default depends on the machine's load; the slowest take up to about 20 s on a loaded 4-CPU machine. `hookTimeout` keeps Vitest's 10 s. A test that times out under load is no regression until the base's version, run beside it at the same load, passes.
 
+### A wait for a turn to start takes `TURN_START_WAIT`
+
+A test that waits, with `vi.waitFor` or `expect.poll`, for a turn on a test society's runner to reach its CLI passes `TURN_START_WAIT` from `apps/server/src/testing/harness.ts`, 10 s, rather than Vitest's 1 s default. Before the CLI starts, the runner pulls the board's copy, clones the citizen's home from the server on the citizen's first turn there and fetches it after, and prepares the project's repository and worktree, all git processes. Timed phase by phase on a 4-CPU machine, a citizen's first turn on a fresh test society reached its CLI 0.5 to 1.9 s after `run` at load 2.2 to 2.7, most of it the home's clone, and 1.6 to 2.3 s with the test's process on one CPU shared with seven busy loops; its second turn took 0.2 to 0.3 s at that load. So a 1 s wait for a first turn failed even at load 2.4, in two runs of three. 10 s is about four times the slowest start measured, and leaves the test's 30 s to report the wait's own assertion when a turn never starts. No other wait takes it, so a stop, a job's arrival, or a connection that stalls fails within its own wait's timeout: Vitest's 1 s, `RECONNECT_WAIT` for a runner's reconnect, or the longer timeout a few waits set for what they wait on, as a board copy's sync.
+
+A failed wait in `runner.test.ts` for a `LoggedBackend` turn also times out the `afterEach` hook at 10 s, since `society.stop()` waits for the turn the backend never ends; the wait's error is the one to read.
+
+### A wait for a runner to connect again takes `RECONNECT_WAIT`
+
+A test that waits for a runner of a test board's server to connect again passes `RECONNECT_WAIT` from the same file, 10 s, whatever ended the runner's stream: a rename, its network's return, or its own check of a stream gone quiet, as in the test that has its runner say hello every 100 ms and waits for two more hellos. The runner waits out its retry delay, 50 ms for `startTestSociety`'s runners and doubling with each try that fails while its network is down, checks its git identity with `git config`, and says hello; the server answers the hello once it has written the runner's record, and writes it again as the stream opens. Timed on a 4-CPU machine from a rename's answer, the runner took its new name in 58 to 66 ms idle and in up to 593 ms beside the server's and the packages' tests, where the server took up to 285 ms over the hello, nearly all of it the record's write; with a disk writer beside them as well, one took 4.6 s, and a 1 s wait for the name failed in 2 of 10 runs. 10 s is what the waits for a runner back from an outage already had, which also covers a retry delay grown while it was away.
+
+### A test that stops work at a point waits for that point
+
+A test that stops or aborts work once the work has reached a point, as `packages/runner-core`'s `board-sync.test.ts` stops a sync once its first try has failed, waits for what reports that point, never a fixed time. A sync's try writes the copy's state file before it asks for the stream and again as it fails, before the failure is reported, and beside the suites a loaded disk held one of those writes past the 50 ms the test once slept in 4 of 2,600 runs, so the abort landed first and no failure was ever reported.
+
 ### `pnpm test -- --testTimeout=…` keeps the configured timeout
 
 pnpm passes the `--` on to Vitest, which ignores every option after it. Write `pnpm test --testTimeout=60000` or `pnpm exec vitest run --testTimeout=60000`.
@@ -51,6 +65,13 @@ It runs with `residentIdleMs: 1_000`, so when more than a second passes between 
 ### A test that times out can leave its temp folder
 
 Its body goes on running after Vitest gives up on it, so its cleanup races the test's own writes, may fail with `ENOTEMPTY`, and leaves the `stellaris-*` folder in the temp directory. Point `TMPDIR` at a folder of your own and delete it after the run.
+
+### A browser test that races one of the page's timers runs on the page's clock
+
+A real wait between two presses stretches under load. The red Remove takes no press for its first 500 ms, and `runners.spec.ts` pressed the bin twice 150 ms apart with `page.waitForTimeout`, which a loaded machine can stretch past 500 ms, so the second press would remove the runner. With that wait raised to 600 ms, standing in for the load, both of its tests failed. They now install Playwright's clock before the page loads (`page.clock.install()`), stop it once the page has loaded, and move it between the presses with `page.clock.runFor`. With 600 ms of real time added between the presses, they pass.
+
+- `pauseAt` refuses a time the clock has passed, and the page's clock runs on while the test asks, so `stopClock` in `runners.spec.ts` stops it a few seconds ahead of the page's own `Date.now()`.
+- A stopped clock fires no timer, and TanStack Query hands the board's answers to the view with `setTimeout(0)`, so stop it only once the page has loaded, and resume it (`page.clock.resume()`) before a step that waits for an answer to show. In a probe, `/runners` loaded on a stopped clock showed no heading after 3 s, its heading but none of its rows after a `runFor(10)`, and its three rows once resumed. A request leaves without a timer, so a press that sends one still reaches the fake board while the clock is stopped.
 
 ## Scheduler and server tests
 
@@ -71,6 +92,8 @@ With a concurrency cap of one, a leftover onboarding dispatch merges with a late
 ### A runner's disconnect is recorded after its stream closes, so stop the hub before deleting a society
 
 The server notices a closed stream asynchronously and then writes the runner's state and a `runner.changed` event. A test that stopped its runner and removed the data directory at once failed one run in three with `ENOTEMPTY` on `events/`; `RunnerHub.close` marks every stream closed and waits for the disconnects under way, and the test harness and the server's shutdown call it.
+
+A connection is written late too. The stream's answer is chunked, and `@hono/node-server` sends a chunked answer's headers before any write. So the runner counts its stream open, and its `start()` resolves, while `RunnerHub.attach` is still writing the runner's record. The enroll test in `runner.test.ts` started a runner, stopped it, and went on. Its cleanup's `rm` failed with `ENOTEMPTY` on the data directory itself about once in 60 CI runs, and in 40 of 200 repeats at a load of 10 to 12 on four cores. In each failure that write, its `rename` held about 100 ms by the disk, landed during the `rm` and created `events/` again. `close` now waits for the connections under way too, and the same 200 repeats passed.
 
 ### CI's account has no git identity
 
@@ -114,7 +137,7 @@ The WHATWG URL parser resolves `.` and `..` segments, `%2E%2E` included, before 
 - `page.waitForLoadState("networkidle")` never settles, because the interface polls and streams. Wait for the DOM.
 - `test.use({ launchOptions })` forces a new worker, which Playwright refuses inside a `describe`; put it at the top of the spec file, as `e2e/layout.spec.ts` does.
 - The interface's `QueryClient` sets `refetchOnWindowFocus: false`, so focus events refetch nothing, and it polls `/api/scheduler` every 3 s, so a change in the fake board's working state shows within about 3 s.
-- The router keeps a route's view mounted when only its params change. `ThreadView` and `ChannelView` key their whole stream by id, while `TaskView` and `ProposalView` key only their message list, so state a hook keeps in the view's own body carries from one task or proposal to the next, as when a blocker's link leads from one cached task to another.
+- The router keeps a route's view mounted when only its params change. `ThreadView` and `ChannelView` key their whole stream by id, while `TaskView` and `ProposalView` key only their message list and a few parts by the subject's id (the task's top, and each view's box), so state a hook keeps in the view's own body carries from one task or proposal to the next, as when a blocker's link leads from one cached task to another. A part keyed by its subject takes a prefix (`top:<id>`, `box:<id>`), so no two siblings share a key: with the list's own key on a sibling, React kept the old list beside the new one, two lists with two jump buttons, which `scroll.spec.ts`'s walk from one proposal to another caught. The task's box has no keyed sibling and takes the prefix all the same.
 
 ### The fake board
 

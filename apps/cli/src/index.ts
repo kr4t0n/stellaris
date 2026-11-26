@@ -283,7 +283,7 @@ agent
   .command("add <name>")
   .description("Add an agent and print its board token once")
   .requiredOption("--role <role>", "role charter name")
-  .option("--cli <cli>", "claude or codex")
+  .option("--cli <cli>", "claude, codex, or antigravity")
   .option("--model <model>", "model to run the CLI with; the CLI's own default otherwise")
   .option("--runner <name>", "runner preferred for its turns; any with its CLI otherwise")
   .option("-p, --project <slug...>", "project memberships")
@@ -381,6 +381,27 @@ agent
       updated,
       () =>
         `${updated.name} runs with ${updated.effort === undefined ? "its model's default effort" : `${updated.effort} effort`} from its next turn`,
+    );
+  });
+
+agent
+  .command("cli <name> <cli>")
+  .description(
+    "Switch the CLI a member's turns run on, claude, codex, or antigravity, from its next turn, where every conversation starts a new session; the model and effort it had go back to the new CLI's defaults unless given",
+  )
+  .option("--model <model>", "the model to run on the new CLI")
+  .option("--effort <effort>", "the reasoning effort to run with, such as high")
+  .action(async (name: string, cli: string, opts: { model?: string; effort?: string }) => {
+    const board = await open();
+    const updated = await board.setAgentCli(board.userActor(), name, {
+      cli: CliKindSchema.parse(cli),
+      model: opts.model ?? null,
+      effort: opts.effort ?? null,
+    });
+    print(
+      updated,
+      () =>
+        `${updated.name} runs on ${updated.cli ?? cli} with ${updated.model ?? "its CLI's default model"} and ${updated.effort === undefined ? "its model's default effort" : `${updated.effort} effort`} from its next turn, in a new session in every conversation`,
     );
   });
 

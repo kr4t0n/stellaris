@@ -51,7 +51,11 @@ export async function readMarkdown<T>(
   file: string,
   schema: z.ZodType<T>,
 ): Promise<MarkdownDocument<T>> {
-  const raw = await readFile(file, "utf8");
+  return parseMarkdown(await readFile(file, "utf8"), schema);
+}
+
+/** `readMarkdown` over text already read, as `writeMarkdown` gives back what it wrote. */
+export function parseMarkdown<T>(raw: string, schema: z.ZodType<T>): MarkdownDocument<T> {
   const parsed = parseMatter(raw);
   return { data: schema.parse(parsed.data), body: parsed.content.replace(/^\n/, "") };
 }
@@ -80,11 +84,14 @@ export function parseLooseMarkdown(raw: string): LooseMarkdownDocument {
   }
 }
 
-export async function writeMarkdown(file: string, data: object, body: string): Promise<void> {
+/** Writes a document atomically and gives back the text written, which `parseMarkdown` reads. */
+export async function writeMarkdown(file: string, data: object, body: string): Promise<string> {
   const normalized = body.endsWith("\n") || body.length === 0 ? body : `${body}\n`;
   // Given a string, gray-matter parses it as a document first, so a body opening with a `---`
   // block would lose that block to the frontmatter, or throw when it is not YAML.
-  await writeFileAtomic(file, matter.stringify({ content: normalized }, data, {}));
+  const text = matter.stringify({ content: normalized }, data, {});
+  await writeFileAtomic(file, text);
+  return text;
 }
 
 function isMissing(error: unknown): boolean {

@@ -183,6 +183,12 @@ export class RunnerHub implements TurnRunner {
   private readonly pending = new Map<string, Pending>();
   /** Disconnects being recorded, which `close` waits for. */
   private readonly detaching = new Set<Promise<void>>();
+  /**
+   * Connections being recorded, which `close` waits for too: the runner counts its stream open on
+   * the answer's headers, which leave before this is written, so it may stop, and the server with
+   * it, while the write is under way.
+   */
+  private readonly attaching = new Set<Promise<unknown>>();
   private readonly runnerListeners = new Set<(runner: Name) => void>();
   /** The project being moved, by slug: none of its turns is placed and nothing lands there until it ends. */
   private readonly moving = new Map<Name, Move>();
@@ -397,7 +403,11 @@ export class RunnerHub implements TurnRunner {
         );
       }
     }
-    await this.board.markRunner(name, { status: "connected" });
+    const connected = this.board.markRunner(name, { status: "connected" }).finally(() => {
+      this.attaching.delete(connected);
+    });
+    this.attaching.add(connected);
+    await connected;
     this.runnerChanged(name);
     return async () => {
       if (seat.send !== send) {
@@ -431,7 +441,8 @@ export class RunnerHub implements TurnRunner {
 
   /**
    * Lets every runner go, as the server stops: streams count as closed from here on, and the
-   * disconnects under way are recorded before this resolves.
+   * connections and disconnects under way are recorded before this resolves. A stream that closes
+   * after this writes nothing, since its seat no longer sends to it.
    */
   async close(): Promise<void> {
     for (const seat of this.seats.values()) {
@@ -445,7 +456,7 @@ export class RunnerHub implements TurnRunner {
         clearTimeout(timer);
       }
     }
-    await Promise.allSettled(this.detaching);
+    await Promise.allSettled([...this.attaching, ...this.detaching]);
   }
 
   /** A turn's steps, which show its job arrived as its receipt would. */
@@ -1134,9 +1145,10 @@ export class RunnerHub implements TurnRunner {
    * any moment, so the user stops its work first. The board clears every record that names it
    * (`Board.removeRunner`). The hub then lets go of its seat, its limit reads and tries, and its
    * warm sessions' tokens, has the model catalog forget it, and ends its stream without recording a
-   * disconnect, since its record is gone. Its token is refused from then on: a runner still running
-   * asks again every 15 seconds until its process stops, and one started again asks to enroll, or
-   * exits when its token came from the environment.
+   * disconnect, since its record is gone, once it has sent `removed` down it. Its token is refused
+   * from then on: a connected runner stops on that message and its process exits, while one away,
+   * or from before, asks again every 15 seconds until its process stops; one started again asks to
+   * enroll, or exits when its token came from the environment.
    */
   async removeRunner(actor: Actor, name: Name): Promise<RunnerRemoved> {
     if (actor.role !== USER_ROLE) {
@@ -1229,7 +1241,7 @@ export class RunnerHub implements TurnRunner {
   /**
    * Lets go of what the hub holds of a removed runner: its seat, with its timers, its limit reads
    * and tries, and its warm sessions' tokens, and has the model catalog forget it. Its stream ends
-   * last, and records no disconnect: `attach`'s close finds the seat let go.
+   * last, after `removed`, and records no disconnect: `attach`'s close finds the seat let go.
    */
   private forget(runner: Name): void {
     const seat = this.seats.get(runner);
@@ -1252,9 +1264,11 @@ export class RunnerHub implements TurnRunner {
         clearTimeout(timer);
       }
       seat.unacked.clear();
-      const end = seat.end;
+      const { send, end } = seat;
       seat.send = null;
       seat.end = null;
+      // Told before its stream ends, the runner stops rather than ask again with a refused token.
+      send?.({ type: "removed" });
       end?.();
     }
     this.runnerChanged(runner);

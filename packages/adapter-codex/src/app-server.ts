@@ -124,12 +124,15 @@ function resumeFailureOf(error: string): ResumeFailure {
 }
 
 /**
- * The `codexErrorInfo` codes 0.162.1 gives a failure on the model service's side, after its own
- * retries ran out. `serverOverloaded` is the one behind "Selected model is at capacity", and
- * `usageLimitExceeded`, the plan's limit, is not among them.
+ * The `codexErrorInfo` codes 0.162.1 and 0.170.0 give a failure on the model service's side, after
+ * their own retries ran out. `serverOverloaded` is the one behind "Selected model is at capacity",
+ * `policyCapacityUnavailable`, new in 0.170.0, the one behind "Policy-restricted capacity is
+ * unavailable", which Codex retries as it retries an overload, and `usageLimitExceeded`, the
+ * plan's limit, is not among them.
  */
 const TRANSIENT_ERRORS = new Set([
   "serverOverloaded",
+  "policyCapacityUnavailable",
   "internalServerError",
   "rateLimitExceeded",
   "flexUnavailable",
@@ -144,12 +147,40 @@ const HTTP_FAILURES = [
 ];
 
 /**
+ * Codex's words for a request that got no answer (`ConnectionFailedError`), behind any prefix such
+ * as a compaction's. Up to 0.165.0 that failure was the only `httpConnectionFailed` with no status;
+ * 0.170.0 sends an in-stream `access_program_not_enabled` refusal so too, in the provider's words
+ * or "The requested access program is not enabled.", and never retries it itself.
+ */
+const CONNECTION_FAILED = "Connection failed: ";
+
+/**
+ * Codex's words for a stream it gave up on (`Stream`), which it retries itself as a dropped stream
+ * and ends as `other` once its retries ran out, behind any prefix such as a compaction's: a body
+ * cut on the way, a request sent to a socket that closed, a stream that ended or went silent
+ * before its completion, and a failed stream with a code Codex does not know, such as
+ * `server_error`, in the provider's words. In 0.162.1 to 0.170.0 the content filter's refusal
+ * ends in them too, after the same retries, and is no failure of the service's.
+ */
+const STREAM_DISCONNECTED = "stream disconnected before completion: ";
+const CONTENT_FILTER = "Incomplete response returned, reason: content_filter";
+
+/**
  * Whether an app-server error says the model service turned the turn away for now: one of the
- * codes above, or a request that failed with no answer, a 429, or a 5xx. Any other 4xx, a policy,
- * the context window, or a sign-in is not worth sending again.
+ * codes above, a request that failed with no answer, a 429, or a 5xx, or a stream Codex gave up
+ * on. Any other 4xx, a policy, the content filter, the context window, or a sign-in is not worth
+ * sending again. A status-less `httpConnectionFailed` is a request with no answer only in Codex's
+ * words for one, and an `other` a stream given up on only in Codex's words for that.
  */
 export function isTransient(error: unknown): boolean {
-  const info = isDict(error) ? error["codexErrorInfo"] : undefined;
+  if (!isDict(error)) {
+    return false;
+  }
+  const info = error["codexErrorInfo"];
+  if (info === "other") {
+    const message = str(error["message"]) ?? "";
+    return message.includes(STREAM_DISCONNECTED) && !message.includes(CONTENT_FILTER);
+  }
   if (typeof info === "string") {
     return TRANSIENT_ERRORS.has(info);
   }
@@ -160,7 +191,12 @@ export function isTransient(error: unknown): boolean {
     const failure = info[kind];
     if (isDict(failure)) {
       const status = failure["httpStatusCode"];
-      return typeof status !== "number" || status === 429 || status >= 500;
+      if (typeof status === "number") {
+        return status === 429 || status >= 500;
+      }
+      return (
+        kind !== "httpConnectionFailed" || (str(error["message"]) ?? "").includes(CONNECTION_FAILED)
+      );
     }
   }
   return false;
@@ -476,7 +512,8 @@ function toolOutputOf(item: Dict): string {
         .join("\n");
     }
     // Codex reports an image only once it has read and decoded the file, and the model was given
-    // the image itself, which both adapters show as they show an image block in a result.
+    // the image itself, which the Claude and Codex adapters show as they show an image block in a
+    // result.
     case "imageView":
       return "[image]";
     case "collabAgentToolCall":

@@ -1,8 +1,8 @@
-import { runnerSyncing, type Task } from "@stellaris/shared";
+import { runnerSyncing, type CliKind, type Task } from "@stellaris/shared";
 import { keepPreviousData, useQueries, useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { createContext, useContext, useEffect, useState } from "react";
 import type { MetricsWindow } from "@stellaris/shared";
-import { ApiError, type Api } from "./api.js";
+import { ApiError, namesNothing, type Api } from "./api.js";
 import type { FileSource } from "./files.js";
 
 export interface Session {
@@ -154,6 +154,8 @@ export function useThread(id: string | null) {
     queryKey: ["thread", id],
     queryFn: () => api.thread(id ?? ""),
     enabled: id !== null,
+    // A thread the board does not have is an answer, which a task or a proposal without one gets.
+    retry: (failures, error) => failures < 1 && !namesNothing(error),
   });
 }
 
@@ -375,12 +377,15 @@ export function useEnrollments() {
 }
 
 /** The models a CLI offers; asking starts the CLI, so the server keeps the list and so does this. */
-/** A citizen's model choices, as the CLI on the runner its turns run on lists them. */
-export function useAgentModels(name: string) {
+/**
+ * A citizen's model choices, as a CLI on the runner its turns run on lists them: its own, or one
+ * to switch it to.
+ */
+export function useAgentModels(name: string, cli: CliKind) {
   const { api } = useSession();
   return useQuery({
-    queryKey: ["models", "agent", name],
-    queryFn: () => api.agentModels(name),
+    queryKey: ["models", "agent", name, cli],
+    queryFn: () => api.agentModels(name, cli),
     staleTime: 10 * 60_000,
     retry: false,
   });

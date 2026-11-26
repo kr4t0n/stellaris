@@ -15,7 +15,7 @@ import {
   type TurnDispatch,
 } from "@stellaris/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { startTestSociety, type TestSociety } from "./testing/harness.js";
+import { startTestSociety, TURN_START_WAIT, type TestSociety } from "./testing/harness.js";
 import { addWorkRoles, USER } from "./testing/scripted-backend.js";
 
 /** A backend whose every turn says who ran it and where. */
@@ -148,13 +148,10 @@ describe("a runner's board sync as it connects", () => {
     );
     expect(ran).toEqual([]);
     await expect
-      .poll(
-        async () => {
-          await scheduler.tick();
-          return ran;
-        },
-        { timeout: 10_000 },
-      )
+      .poll(async () => {
+        await scheduler.tick();
+        return ran;
+      }, TURN_START_WAIT)
       .toContain("eng-1@pod");
     await scheduler.drain();
 
@@ -249,13 +246,10 @@ describe("a runner's board sync as it connects", () => {
     expect(record.sync).toMatchObject({ phase: "done", attempt: 2 });
 
     await expect
-      .poll(
-        async () => {
-          await scheduler.tick();
-          return ran;
-        },
-        { timeout: 10_000 },
-      )
+      .poll(async () => {
+        await scheduler.tick();
+        return ran;
+      }, TURN_START_WAIT)
       .toContain("eng-1@pod");
     await scheduler.drain();
     const events = await board.readEvents(null, 10_000);

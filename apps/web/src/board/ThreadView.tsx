@@ -5,7 +5,7 @@ import { BackLink } from "../components/BackLink.js";
 import { Button } from "../components/Button.js";
 import { Markdown } from "../components/Markdown.js";
 import { ago } from "../lib/format.js";
-import { ApiError } from "../lib/api.js";
+import { namesNothing } from "../lib/api.js";
 import { markSeen } from "../lib/seen.js";
 import { useMembers, useNow, useSession } from "../lib/session.js";
 import { useDisplayName } from "./Avatar.js";
@@ -37,9 +37,11 @@ function ThreadStream({ id, target }: { id: string; target: string | undefined }
   if (detail.data === undefined) {
     return (
       <PaneNote>
-        {detail.error instanceof ApiError && detail.error.status === 404
+        {namesNothing(detail.error)
           ? `There is no thread ${id}.`
-          : "Reading the thread…"}
+          : detail.isError
+            ? "Could not read the thread."
+            : "Reading the thread…"}
       </PaneNote>
     );
   }

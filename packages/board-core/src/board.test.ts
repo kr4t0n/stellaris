@@ -682,11 +682,123 @@ describe("Board", () => {
     expect(await ids("demo")).toEqual([]);
 
     // News wakes no work role; a society role reads it in its own scope, where its heartbeat looks:
-    // rev-1's three posts, and the user's, which the front desk reads wherever it is.
+    // rev-1's three posts and the user's, in general, which the front desk follows.
     await board.postMessage(REV, { channel: "general", body: "one more thing" });
     expect(await board.unreadByConversation(ENG)).toEqual([]);
     expect(await board.unreadByConversation({ name: "desk", role: "concierge" })).toEqual([
       { scope: "society", thread: null, channel: null, place: null, count: 4 },
+    ]);
+  });
+
+  it("leaves a user post naming a citizen who wakes out of the front desk's count, and in its thread", async () => {
+    const { board } = await society();
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    await board.addAgent(USER, { name: "ghost", role: "reviewer", cli: null });
+    await board.addAgent(USER, { name: "old", role: "reviewer", cli: "claude" });
+    await board.retireAgent(USER, { name: "old", reason: "test" });
+    const DESK: Actor = { name: "desk", role: "concierge" };
+    const task = await board.createTask(DESK, {
+      project: "demo",
+      title: "build",
+      stages: [{ name: "build", agent: "eng-1" }],
+    });
+    const topic = await board.openThread(REV, { channel: "demo/general", title: "the logo" });
+    const thread = async (id: Ulid): Promise<string[]> =>
+      (
+        await board.readDigest({ ...DESK, scope: "society", thread: id }, { advance: false })
+      ).messages.map((m) => m.id);
+    const unread = async () =>
+      (await board.unreadByConversation(DESK)).map(({ thread: id, place, count }) => ({
+        where: id === task.id ? "task" : id === topic.id ? "topic" : (place ?? "home"),
+        count,
+      }));
+
+    // A post naming a citizen who wakes is theirs, in a task's thread, a topic's, or a channel.
+    const inTask = await board.postMessage(USER, { thread_id: task.id, body: "@eng-1 go ahead" });
+    const inTopic = await board.postMessage(USER, { thread_id: topic.id, body: "@rev-1 which?" });
+    await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 and the docs" });
+    expect(await unread()).toEqual([]);
+    expect(
+      (await board.readDigest({ ...DESK, scope: "society", place: "demo" }, { advance: false }))
+        .messages,
+    ).toEqual([]);
+
+    // One naming nobody who wakes, a typo, a retired or CLI-less citizen, or nobody at all, is
+    // the front desk's, wherever it is.
+    const typo = await board.postMessage(USER, {
+      thread_id: task.id,
+      body: "@klin and the tests?",
+    });
+    const gone = await board.postMessage(USER, { thread_id: task.id, body: "@old or @ghost?" });
+    const nobody = await board.postMessage(USER, { channel: "demo/general", body: "anyone?" });
+    expect(await unread()).toEqual([
+      { where: "task", count: 2 },
+      { where: "demo", count: 1 },
+    ]);
+    expect(
+      (
+        await board.readDigest({ ...DESK, scope: "society", place: "demo" }, { advance: false })
+      ).messages.map((m) => m.id),
+    ).toEqual([nobody.id]);
+
+    // When someone asks the front desk in the thread, the ask counts, and its turn there reads
+    // the earlier post too.
+    const askTask = await board.postMessage(ENG, { thread_id: task.id, body: "@desk a gate?" });
+    const askTopic = await board.postMessage(REV, { thread_id: topic.id, body: "@desk who says?" });
+    expect(await unread()).toEqual([
+      { where: "task", count: 3 },
+      { where: "demo", count: 1 },
+      { where: "topic", count: 1 },
+    ]);
+    expect(await thread(task.id)).toEqual([inTask.id, typo.id, gone.id, askTask.id]);
+    expect(await thread(topic.id)).toEqual([inTopic.id, askTopic.id]);
+  });
+
+  it("counts an ask for the front desk whatever it names, and a reply in its thread as any post", async () => {
+    const { board } = await society();
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    const DESK: Actor = { name: "desk", role: "concierge" };
+    const ask = async (body: string) => {
+      const thread = await board.openThread(USER, { channel: "asks", title: body });
+      return { thread, ask: await board.postMessage(USER, { thread_id: thread.id, body }) };
+    };
+    const unread = async () =>
+      (await board.unreadByConversation(DESK)).map(({ thread: id, count }) => ({
+        where: id === naming.thread.id ? "naming" : id === nobody.thread.id ? "nobody" : id,
+        count,
+      }));
+
+    // An ask is the front desk's whatever it names, and so is one naming nobody, once.
+    const naming = await ask("@eng-1 can you add a health check?");
+    const nobody = await ask("@desk what runs where?");
+    expect(await unread()).toEqual([
+      { where: "naming", count: 1 },
+      { where: "nobody", count: 1 },
+    ]);
+    expect(
+      (
+        await board.readDigest(
+          { ...DESK, scope: "society", thread: naming.thread.id },
+          { advance: false },
+        )
+      ).messages.map((m) => m.id),
+    ).toEqual([naming.ask.id]);
+
+    // A reply in an ask's thread naming a citizen who wakes is theirs, and so is the first post of
+    // a thread on another channel.
+    await board.postMessage(USER, { thread_id: naming.thread.id, body: "@eng-1 and the docs" });
+    const topic = await board.openThread(USER, { channel: "general", title: "the logo" });
+    await board.postMessage(USER, { thread_id: topic.id, body: "@rev-1 which one?" });
+    expect(await unread()).toEqual([
+      { where: "naming", count: 1 },
+      { where: "nobody", count: 1 },
+    ]);
+
+    // A reply naming nobody who wakes is the desk's, as anywhere.
+    await board.postMessage(USER, { thread_id: naming.thread.id, body: "and the tests?" });
+    expect(await unread()).toEqual([
+      { where: "naming", count: 2 },
+      { where: "nobody", count: 1 },
     ]);
   });
 
@@ -871,6 +983,13 @@ describe("Board", () => {
     });
     expect(await board.readSessions("eng-1", "demo", task.id)).toEqual({
       claude: "task-session",
+      runner: "pod",
+    });
+    // Each CLI's session is kept beside the others', Antigravity's included.
+    await board.writeSession("eng-1", "demo", "antigravity", "agy-session", "pod", task.id);
+    expect(await board.readSessions("eng-1", "demo", task.id)).toEqual({
+      claude: "task-session",
+      antigravity: "agy-session",
       runner: "pod",
     });
     // Two turns in one scope at once: each pairs its start with its own end.
@@ -1377,7 +1496,8 @@ describe("Board", () => {
   it("files a project's channels in a conversation of their own for a citizen outside it, until it is archived", async () => {
     const { board } = await society();
     await board.addProject(USER, { slug: "lab", channels: ["general", "dev"] });
-    // The front desk, a society role, reads every post by the user, in every project's channels.
+    // The front desk, a society role, reads every post by the user that names nobody, in every
+    // project's channels.
     await board.addAgent(USER, { name: "concierge-1", role: "concierge", cli: "claude" });
     const FRONT: Actor = { name: "concierge-1", role: "concierge" };
     const demoGeneral = await board.postMessage(USER, { channel: "demo/general", body: "demo?" });
@@ -1801,6 +1921,146 @@ describe("Board", () => {
     });
   });
 
+  it("lets the user switch a citizen's CLI only where every runner its turns need offers it", async () => {
+    const { board } = await society();
+    await expect(
+      board.setAgentCli({ name: "stew", role: "steward" }, "eng-1", { cli: "codex" }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(board.setAgentCli(USER, "user", { cli: "codex" })).rejects.toThrow(
+      "user takes no turns, so it has no CLI to switch",
+    );
+    await expect(board.setAgentCli(USER, "eng-1", { cli: "claude" })).rejects.toThrow(
+      "eng-1 runs on claude already",
+    );
+    await expect(
+      board.setAgentCli(USER, "eng-1", { cli: "codex", model: "two words" }),
+    ).rejects.toThrow(/one word/);
+    await expect(
+      board.setAgentCli(USER, "eng-1", { cli: "codex", effort: "High" }),
+    ).rejects.toThrow(/one lowercase word/);
+
+    // With no pin, its work outside projects goes to any runner with the CLI, so one must have it.
+    const refused = (reason: string) =>
+      expect(board.setAgentCli(USER, "eng-1", { cli: "codex" })).rejects.toMatchObject({
+        code: "INVALID_STATE",
+        message: `eng-1 cannot switch to codex: ${reason}`,
+      });
+    await refused("no runner offers it");
+    // A pinned runner must offer it, as last reported, and so must the runner each project lives on.
+    await board.addRunner(USER, "laptop");
+    await board.setAgentRunner(USER, "eng-1", "laptop");
+    await refused("its work outside projects runs on runner laptop, which has reported no CLI");
+    await board.addRunner(USER, "mini");
+    await board.markRunner("mini", { status: "connected", clis: ["claude"] });
+    await board.setAgentRunner(USER, "eng-1", "mini");
+    await board.placeProject("demo", "mini");
+    await refused(
+      "its work outside projects runs on runner mini, which offers only claude; demo lives on runner mini, which offers only claude",
+    );
+    await board.addRunner(USER, "pod");
+    await board.markRunner("pod", { status: "disconnected", clis: ["claude", "codex"] });
+    await board.setAgentRunner(USER, "eng-1", "pod");
+    await refused("demo lives on runner mini, which offers only claude");
+    expect((await board.readAgent("eng-1")).cli).toBe("claude");
+
+    // rev-1 is on codex in demo, on mini, which offers claude.
+    const ran = await board.beginTurn({
+      agent: "rev-1",
+      project: "demo",
+      runner: "mini",
+      cli: "codex",
+      session: "c-0",
+      trigger: { kind: "mention", from: "user", fromUser: true, reason: "asked" },
+      startedAt: clock.toISOString(),
+      endedAt: null,
+      exitReason: null,
+      status: null,
+      error: null,
+      usage: null,
+      costUsd: 0,
+      toolCalls: 0,
+      model: "gpt-5.5",
+    });
+    await board.finishTurn({ ...ran, endedAt: clock.toISOString(), exitReason: "completed" });
+    expect((await board.listMembers()).find((m) => m.name === "rev-1")?.lastModel).toBe("gpt-5.5");
+    await board.setAgentModel(USER, "rev-1", "gpt-5.5");
+    await board.setAgentEffort(USER, "rev-1", "xhigh");
+    const task = await board.createTask(USER, { project: "demo", title: "t" });
+    const held = await board.claimTask(REV, { task_id: task.id });
+    await board.writeSession("rev-1", "demo", "codex", "c-1", "mini");
+    await board.writeSession("rev-1", "demo", "claude", "a-1", "mini", task.id);
+    await board.writeSession("rev-1", "demo", "codex", "c-2", "mini", task.id);
+    await board.writeSession("rev-1", "demo", "antigravity", "g-1", "mini", task.id);
+    await board.endSession("rev-1", "demo", "codex", "mini", "#dev");
+    await board.writeSession("rev-1", "society", "codex", "c-3", "pod");
+    await board.writeSession("eng-1", "demo", "claude", "a-2", "mini");
+
+    // Not given, the model and the effort go back to the new CLI's defaults.
+    const switched = await board.setAgentCli(USER, "rev-1", { cli: "claude" });
+    expect(switched).toMatchObject({ cli: "claude" });
+    expect(switched.model).toBeUndefined();
+    expect(switched.effort).toBeUndefined();
+    // What its last turn ran on codex is not its model on claude.
+    const member = (await board.listMembers()).find((m) => m.name === "rev-1");
+    expect(member).toMatchObject({ cli: "claude" });
+    expect(member?.lastModel).toBeUndefined();
+    // No conversation keeps a session to resume, and each still names the runner it began on.
+    expect(await board.readSessions("rev-1", "demo")).toEqual({ runner: "mini" });
+    expect(await board.readSessions("rev-1", "demo", task.id)).toEqual({ runner: "mini" });
+    expect(await board.readSessions("rev-1", "demo", "#dev")).toEqual({ runner: "mini" });
+    expect(await board.readSessions("rev-1", "society")).toEqual({ runner: "pod" });
+    expect(await board.readSessions("eng-1", "demo")).toEqual({ claude: "a-2", runner: "mini" });
+    // The stage it holds keeps its lease.
+    expect(await board.getTask(USER, { task_id: task.id })).toMatchObject({
+      claimedBy: "rev-1",
+      leaseExpiresAt: held.leaseExpiresAt,
+    });
+
+    // Back to codex once mini reports it.
+    const back = { cli: "codex", model: "gpt-5.5", effort: "high" } as const;
+    await expect(board.setAgentCli(USER, "rev-1", back)).rejects.toThrow(
+      "rev-1 cannot switch to codex: demo lives on runner mini, which offers only claude",
+    );
+    await board.markRunner("mini", { clis: ["claude", "codex"] });
+    // A sessions.json it cannot read stops the switch before the record changes, so it can go again.
+    const unreadable = path.join(dir, "agents", "rev-1", "projects", "demo", "sessions.json");
+    const kept = await readFile(unreadable, "utf8");
+    await writeFile(unreadable, '{"claude": 5}');
+    await expect(
+      board.setAgentCli(USER, "rev-1", { cli: "codex", model: "gpt-5.5" }),
+    ).rejects.toThrow(/expected string, received number/);
+    expect((await board.readAgent("rev-1")).cli).toBe("claude");
+    await writeFile(unreadable, kept);
+    expect(await board.setAgentCli(USER, "rev-1", back)).toMatchObject(back);
+    const events = (await board.readEvents(null)).filter(
+      (e) => e.type === "agent.configured" && "cli" in e.payload,
+    );
+    expect(events.map((e) => [e.actor, e.payload])).toEqual([
+      [
+        "user",
+        {
+          agent: "rev-1",
+          cli: "claude",
+          model: null,
+          effort: null,
+          previous: { cli: "codex", model: "gpt-5.5", effort: "xhigh" },
+          sessions: 3,
+        },
+      ],
+      [
+        "user",
+        {
+          agent: "rev-1",
+          cli: "codex",
+          model: "gpt-5.5",
+          effort: "high",
+          previous: { cli: "claude", model: null, effort: null },
+          sessions: 0,
+        },
+      ],
+    ]);
+  });
+
   it("treats claims as leases: expired ones can be taken over and are released by the sweep", async () => {
     const { board } = await society();
     const task = await board.createTask(USER, { project: "demo", title: "t" });
@@ -2106,6 +2366,8 @@ describe("Board", () => {
       await board.writeSession("eng-1", scope, "claude", `session-${part ?? scope}`, "pod", part);
     }
     await board.writeSession("rev-1", "demo", "codex", "far-session", "far");
+    // A record holding an Antigravity session alone.
+    await board.writeSession("eng-1", "society", "antigravity", "agy-session", "pod");
     // A session ended there, whose record names the runner and holds no id.
     await board.writeSession("rev-1", "society", "codex", "ended", "pod");
     await board.dropSession("rev-1", "society", "codex", "ended");
@@ -2139,7 +2401,7 @@ describe("Board", () => {
       name: "pod",
       projects: ["lab", "yard"],
       agents: ["eng-1"],
-      sessions: 4,
+      sessions: 5,
     });
     await expect(board.readRunner("pod")).rejects.toMatchObject({ code: "NOT_FOUND" });
     expect((await board.listRunners()).map((runner) => runner.name)).toEqual(["far"]);
@@ -2155,6 +2417,7 @@ describe("Board", () => {
     for (const [scope, part] of records) {
       expect(await board.readSessions("eng-1", scope, part)).toEqual({ runner: "pod" });
     }
+    expect(await board.readSessions("eng-1", "society")).toEqual({ runner: "pod" });
     expect(await board.readSessions("rev-1", "society")).toEqual({ runner: "pod" });
     expect(await board.readSessions("rev-1", "demo")).toEqual({
       codex: "far-session",
@@ -2173,7 +2436,7 @@ describe("Board", () => {
     expect(events.filter((event) => event.type === "runner.removed")).toMatchObject([
       {
         actor: "user",
-        payload: { name: "pod", projects: ["lab", "yard"], agents: ["eng-1"], sessions: 4 },
+        payload: { name: "pod", projects: ["lab", "yard"], agents: ["eng-1"], sessions: 5 },
       },
     ]);
     expect(events.find((event) => event.type === "runner.added")?.payload).toEqual({
@@ -3488,7 +3751,7 @@ describe("Board", () => {
     );
     expect(completedEvent?.payload["model"]).toBe("claude-opus-5-5");
 
-    // Every post by the user wakes the front desk, so every one reaches its digest, even in a
+    // A post by the user naming nobody wakes the front desk, so it reaches its digest, even in a
     // thread it takes no part in; the thread's participants read it as usual, and nobody else.
     const topic = await board.openThread(ENG, { channel: "demo/dev", title: "flaky test" });
     const aside = await board.postMessage(USER, {

@@ -1411,6 +1411,31 @@ describe("CodexBackend cold turns", () => {
     expect(failed.events.filter((e) => e.type === "error")).toHaveLength(1);
   });
 
+  it("says a turn whose stream Codex gave up on may pass, and not one the content filter refused", async () => {
+    // As 0.170.0 ended a turn against a stub that cut every body on the way, or answered with the
+    // content filter: five retries, each announced, then `other`.
+    const cut =
+      "stream disconnected before completion: Transport error: network error: error decoding response body";
+    const filtered =
+      "stream disconnected before completion: Incomplete response returned, reason: content_filter";
+    for (const [message, transient] of [
+      [cut, true],
+      [filtered, undefined],
+    ] as const) {
+      const fake = fakeAppServer({
+        turn: (turn) => {
+          for (let retry = 1; retry <= 5; retry += 1) {
+            turn.error(`Reconnecting... ${retry}/5`, true);
+          }
+          turn.refuse({ message, codexErrorInfo: "other", additionalDetails: null });
+        },
+      });
+      const ended = await new CodexBackend({ spawn: fake.spawn }).runTurn(request());
+      expect(ended).toMatchObject({ exitReason: "error", error: message });
+      expect(ended.transient).toBe(transient);
+    }
+  });
+
   it("ends the turn when the server dies mid-turn instead of waiting forever", async () => {
     const fake = fakeAppServer({ turn: (turn) => turn.exit("thread 'main' panicked") });
     const result = await new CodexBackend({ spawn: fake.spawn }).runTurn(
@@ -1649,8 +1674,10 @@ describe("steering and stopping a Codex turn", () => {
 });
 
 /**
- * The codes codex-cli 0.162.1 ends a turn with. The first five rows are what its app server sent
- * when a stub model service answered so; the rest are from its error enum.
+ * The codes codex-cli 0.162.1 and 0.170.0 end a turn with. The first five rows are what 0.162.1's
+ * app server sent when a stub model service answered so, and the sixth what 0.170.0's sent for a
+ * 503 or a failed stream with the code `policy_capacity_unavailable`; the rest are from their
+ * error enums.
  */
 describe("isTransient", () => {
   it.each([
@@ -1659,19 +1686,111 @@ describe("isTransient", () => {
     ["a 429 rate limit", { responseTooManyFailedAttempts: { httpStatusCode: 429 } }, true],
     ["the plan's usage limit", "usageLimitExceeded", false],
     ["a rate limit Codex gave up on", "rateLimitExceeded", true],
+    [
+      "a 503 or a failed stream saying policy-restricted capacity is unavailable",
+      "policyCapacityUnavailable",
+      true,
+    ],
     ["flex capacity", "flexUnavailable", true],
-    ["no connection", { httpConnectionFailed: { httpStatusCode: null } }, true],
     ["a 502 on the stream", { responseStreamConnectionFailed: { httpStatusCode: 502 } }, true],
     ["a dropped stream", { responseStreamDisconnected: {} }, true],
     ["a 401", { httpConnectionFailed: { httpStatusCode: 401 } }, false],
     ["a 400", { responseTooManyFailedAttempts: { httpStatusCode: 400 } }, false],
     ["the context window", "contextWindowExceeded", false],
     ["a policy", "cyberPolicy", false],
+    ["the workspace's inference hook refusing the request", "inferenceHookDenied", false],
     ["a sign-in", "unauthorized", false],
     ["a bad request", "badRequest", false],
     ["anything else", "other", false],
     ["no code", undefined, false],
   ])("%s", (_case, codexErrorInfo, transient) => {
     expect(isTransient({ message: "failed", codexErrorInfo })).toBe(transient);
+  });
+
+  /**
+   * An `httpConnectionFailed` with no status, told apart by its words. The first and third are what
+   * 0.165.0 and 0.170.0 sent for a provider at a closed port, with unbounded connection retries
+   * off, and 0.170.0 for a failed stream with the code `access_program_not_enabled`; the second is
+   * a compaction's prefix, and the last Codex's words for a refusal with no message.
+   */
+  it.each([
+    ["a request with no answer", "Connection failed: error sending request", true],
+    [
+      "a compaction's request with no answer",
+      "Error running remote compact task: Connection failed: error sending request",
+      true,
+    ],
+    ["an access-program refusal in the stream", "stub access_program_not_enabled", false],
+    [
+      "an access-program refusal in Codex's words",
+      "The requested access program is not enabled.",
+      false,
+    ],
+  ])("no status: %s", (_case, message, transient) => {
+    const codexErrorInfo = { httpConnectionFailed: { httpStatusCode: null } };
+    expect(isTransient({ message, codexErrorInfo })).toBe(transient);
+  });
+
+  /**
+   * An `other`, told apart by its words. All but the compaction's are what 0.170.0 sent, after its
+   * own retries, for a stub that failed every request so, and 0.165.0 the same; 0.165.0 alone sent
+   * the last two true rows, for failed streams with the codes `policy_capacity_unavailable` and
+   * `content_policy_violation`, which it does not parse. The compaction's prefix is the one Codex
+   * puts on a compaction's failures.
+   */
+  it.each([
+    [
+      "a body cut on the way",
+      "stream disconnected before completion: Transport error: network error: error decoding response body",
+      true,
+    ],
+    [
+      "a socket closed with no answer",
+      "stream disconnected before completion: error sending request",
+      true,
+    ],
+    [
+      "a stream that ended with no completion",
+      "stream disconnected before completion: stream closed before response.completed",
+      true,
+    ],
+    [
+      "a stream gone silent",
+      "stream disconnected before completion: idle timeout waiting for SSE",
+      true,
+    ],
+    [
+      "a failed stream with a code Codex does not know",
+      "stream disconnected before completion: stub server_error",
+      true,
+    ],
+    [
+      "a compaction's stream given up on",
+      "Error running remote compact task: stream disconnected before completion: error sending request",
+      true,
+    ],
+    [
+      "a capacity failure in the stream that 0.165.0 does not parse",
+      "stream disconnected before completion: stub policy_capacity_unavailable",
+      true,
+    ],
+    [
+      "a refusal in the stream that 0.165.0 does not parse",
+      "stream disconnected before completion: stub content_policy_violation",
+      true,
+    ],
+    [
+      "the content filter",
+      "stream disconnected before completion: Incomplete response returned, reason: content_filter",
+      false,
+    ],
+    ["a content-policy refusal in the stream", "stub content_policy_violation", false],
+    [
+      "a 400",
+      '{"error":{"code":"invalid_request_error","message":"stub invalid_request_error","type":"stub"}}',
+      false,
+    ],
+  ])("other: %s", (_case, message, transient) => {
+    expect(isTransient({ message, codexErrorInfo: "other" })).toBe(transient);
   });
 });

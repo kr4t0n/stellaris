@@ -3,9 +3,15 @@ import os from "node:os";
 import path from "node:path";
 import { Board, BoardError } from "@stellaris/board-core";
 import { ZERO_USAGE, type AgentBackend, type TurnResult } from "@stellaris/runner-core";
-import { TurnDispatchSchema, type ModelOption } from "@stellaris/shared";
+import {
+  RUNNER_PROTOCOL,
+  RunnerHelloSchema,
+  TurnDispatchSchema,
+  type ModelOption,
+  type RunnerMessage,
+} from "@stellaris/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { startTestSociety, type TestSociety } from "./testing/harness.js";
+import { startTestSociety, TURN_START_WAIT, type TestSociety } from "./testing/harness.js";
 import { addWorkRoles, USER } from "./testing/scripted-backend.js";
 
 /** A turn that ends at once, done. */
@@ -155,7 +161,7 @@ describe("removing a runner", () => {
     // Paused while a turn runs there, it waits for the turn.
     gate = Promise.withResolvers<void>();
     const running = society.run(dispatch);
-    await expect.poll(() => turns).toBe(2);
+    await expect.poll(() => turns, TURN_START_WAIT).toBe(2);
     await board.setRunnerPaused(USER, "pod", { paused: true });
     expect(await remove()).toEqual({
       status: 409,
@@ -199,12 +205,11 @@ describe("removing a runner", () => {
     expect(warmTokens).toHaveLength(1);
     expect(board.resolveToken(warmTokens[0] ?? "")).toBeNull();
 
-    // pod's stream ended, and the server refuses its token: still running, it asks again and is
-    // refused each time, until its process is stopped.
-    await expect
-      .poll(() => hellos.slice(asked).length, { timeout: 10_000 })
-      .toBeGreaterThanOrEqual(3);
-    expect(new Set(hellos.slice(asked))).toEqual(new Set([401]));
+    // pod was told before its stream ended, so it stopped and asks no more, where it would have
+    // asked again within 50 ms, then 100 and 200; the server refuses its token all the same.
+    await society.runners.get("pod")?.removed;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(hellos.slice(asked)).toEqual([]);
     const refused = await fetch(`${society.url}/runner/hello`, {
       method: "POST",
       headers: {
@@ -225,6 +230,47 @@ describe("removing a runner", () => {
     expect(prompts.at(-1)).toContain("## Your session started afresh");
     expect(prompts.at(-1)).not.toContain("## First turn");
     expect((await board.readAgent("concierge-1")).homeRunner).toBe("far");
+  });
+
+  it("tells a connected runner it was removed before its stream ends, and one away nothing", async () => {
+    const { board } = await Board.init(dir, { name: "told" });
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("session-0"),
+      runTurn: () => Promise.resolve(done),
+    };
+    society = await startTestSociety({ board, backends: () => ({ claude: backend }) });
+    const { hub } = society;
+    // Two runners the test plays itself, each paused: what each is sent and when its stream is
+    // ended, in order.
+    const heard: Record<string, Array<RunnerMessage["type"] | "end">> = { near: [], away: [] };
+    const detach: Record<string, () => Promise<void>> = {};
+    for (const name of ["near", "away"]) {
+      await board.addRunner(USER, name);
+      await hub.register(
+        name,
+        RunnerHelloSchema.parse({
+          protocol: RUNNER_PROTOCOL,
+          version: "test",
+          os: "linux",
+          clis: ["claude"],
+          slots: null,
+        }),
+      );
+      detach[name] = await hub.attach(
+        name,
+        (message) => (heard[name]?.push(message.type) ?? 0) > 0,
+        () => heard[name]?.push("end"),
+      );
+      await board.setRunnerPaused(USER, name, { paused: true });
+    }
+    // away's stream closed, as when its machine went, and its seat waits out the grace period.
+    await detach["away"]?.();
+
+    await hub.removeRunner(USER, "near");
+    await hub.removeRunner(USER, "away");
+    expect(heard).toEqual({ near: ["removed", "end"], away: [] });
+    expect(hub.connected).toEqual(["pod"]);
   });
 
   it("asks nothing of the runner while it is removed, and waits for a request, a move, or a rename to end first", async () => {

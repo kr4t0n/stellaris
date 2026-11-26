@@ -1201,12 +1201,16 @@ export class ClaudeAgentBackend implements AgentBackend {
         board: {
           type: "http",
           url: request.mcp.url,
-          // The CLI fills the token in from its environment as it connects, so the command line
-          // the SDK starts it with names the variable, never the token.
+          // The CLI fills the token in from its environment as it connects, so what the SDK sends
+          // it names the variable, never the token.
           headers: { Authorization: `Bearer \${${AGENT_TOKEN_ENV}}` },
           alwaysLoad: true,
         },
       },
+      // Over stdin in the initialize request, never on the command line, which every process on
+      // the machine can read. Set, not left to the SDK's default, which 0.3.326 says will change;
+      // it needs the Claude Code the SDK bundles or newer, which is what the runner runs.
+      mcpServersDelivery: "initialize",
       strictMcpConfig: true,
       // Every permission is granted; the SDK accepts bypass mode only with the explicit flag.
       permissionMode,

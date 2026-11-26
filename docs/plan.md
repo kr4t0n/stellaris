@@ -820,15 +820,15 @@ type AgentEvent =
 - **Pinning and fixtures.** Claude Code is pinned by the Agent SDK's exact version; Codex is whatever the runner has installed, which the runner image pins through `CLIMAGE_VERSION`. The Codex bindings are generated from the installed binary when needed and never committed. Raw event streams from real turns are recorded and replayed in tests, so protocol drift fails a test rather than silently breaking the interface.
 - **Daemon hygiene.** A Codex app server lives exactly as long as its cold turn or resident session and is stopped with it, so no daemon outlives its turns, and a server that dies mid-turn ends that turn with an error.
 
-The print-mode shape the Claude SDK drives, for reference:
+The command line the Claude SDK starts a resumed turn with, for reference, as Agent SDK 0.3.332 does with the model, the effort, the turn limit, and the status schema's flags left out. The rendered instructions (`appendSystemPrompt`), the status schema, and the board's MCP server go in the initialize request on the CLI's input, which `--await-initialize` has it wait for, and the digest prompt follows there as a user message, so the command line holds neither the instructions, the board's address, nor the prompt:
 
 ```bash
-claude -p --resume "$SESSION_ID" \
-  --append-system-prompt "$INSTRUCTIONS" \
-  --mcp-config "$AGENT_HOME/.claude/board.mcp.json" \
-  --permission-mode bypassPermissions --allow-dangerously-skip-permissions \
-  --output-format stream-json \
-  "$DIGEST_PROMPT"
+claude --output-format stream-json --verbose --input-format stream-json \
+  --resume="$SESSION_ID" \
+  --setting-sources=project --strict-mcp-config \
+  --permission-mode=bypassPermissions --allow-dangerously-skip-permissions --permission-prompts=none \
+  --add-dir="$AGENT_HOME" --add-dir="$BOARD_DIR" \
+  --await-initialize --replay-user-messages
 ```
 
 ### 11.5 Metrics

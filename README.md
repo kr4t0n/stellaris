@@ -101,6 +101,8 @@ data/              runtime data, ignored by git
   its own CLI binary. Real turns cost real money.
 - **The `codex` CLI**, logged in, where Codex agents run, and **the `gh` CLI**, logged
   in, on a runner whose projects land through GitHub pull requests.
+- **Google's `agy`**, [signed in](./docs/guide/deployment.md#signing-agy-in), where
+  Antigravity agents run; a runner without it sets `STELLARIS_CLIS=claude,codex`.
 - **For the iOS client,** Swift 6: Xcode 27.1 and
   [XcodeGen](https://github.com/yonaskolb/XcodeGen/releases) 2.46.0 on a Mac for the
   app, or swift.org's toolchain on Linux for BoardKit alone.
@@ -204,20 +206,20 @@ in detail. The board server reads these, and the admin CLI `STELLARIS_DATA_DIR`:
 
 A runner reads these, and sets `STELLARIS_AGENT_TOKEN` and `HUSKY=0` for each CLI:
 
-| Variable                  | Default                 | Purpose                                 |
-| ------------------------- | ----------------------- | --------------------------------------- |
-| `STELLARIS_SERVER_URL`    | `http://127.0.0.1:4700` | The board server, as it reaches it      |
-| `STELLARIS_RUNNER_TOKEN`  | none                    | A token from `runner add`               |
-| `STELLARIS_RUNNER_DIR`    | `./runner-data`         | Its data: mirror, homes, repositories   |
-| `STELLARIS_LOG_LEVEL`     | `info`                  | How much it logs                        |
-| `STELLARIS_CONCURRENCY`   | `2`                     | Turns at once on its machine            |
-| `STELLARIS_CLIS`          | `claude,codex`          | The CLIs it runs turns with             |
-| `STELLARIS_CAPABILITIES`  | none                    | What it offers projects and tasks       |
-| `STELLARIS_CODEX_SANDBOX` | `danger-full-access`    | Codex's sandbox                         |
-| `STELLARIS_RECORD_DIR`    | none                    | Where to record raw CLI streams         |
-| `ANTHROPIC_API_KEY`       | none                    | Claude Code's key, instead of its login |
-| `OPENAI_API_KEY`          | none                    | Codex's key, instead of its login       |
-| `GEMINI_API_KEY`          | none                    | agy's key, with a setting of its own    |
+| Variable                  | Default                    | Purpose                                 |
+| ------------------------- | -------------------------- | --------------------------------------- |
+| `STELLARIS_SERVER_URL`    | `http://127.0.0.1:4700`    | The board server, as it reaches it      |
+| `STELLARIS_RUNNER_TOKEN`  | none                       | A token from `runner add`               |
+| `STELLARIS_RUNNER_DIR`    | `./runner-data`            | Its data: mirror, homes, repositories   |
+| `STELLARIS_LOG_LEVEL`     | `info`                     | How much it logs                        |
+| `STELLARIS_CONCURRENCY`   | `2`                        | Turns at once on its machine            |
+| `STELLARIS_CLIS`          | `claude,codex,antigravity` | The CLIs it runs turns with             |
+| `STELLARIS_CAPABILITIES`  | none                       | What it offers projects and tasks       |
+| `STELLARIS_CODEX_SANDBOX` | `danger-full-access`       | Codex's sandbox                         |
+| `STELLARIS_RECORD_DIR`    | none                       | Where to record raw CLI streams         |
+| `ANTHROPIC_API_KEY`       | none                       | Claude Code's key, instead of its login |
+| `OPENAI_API_KEY`          | none                       | Codex's key, instead of its login       |
+| `GEMINI_API_KEY`          | none                       | agy's key, with a setting of its own    |
 
 Never commit a real token, nor the GitHub client secret.
 
@@ -229,7 +231,7 @@ server's own included. Runners connect out, so only the server must be reachable
 - **npm:** `@kubitnodes/stellaris` (the CLI and the server) and
   `@kubitnodes/stellaris-runner`, for a machine without Docker.
 - **Images:** `kr4t0n/stellaris-server`, and `kr4t0n/stellaris-runner` with Claude
-  Code, Codex, and the agents' toolchains inside, on Docker Hub.
+  Code, Codex, `agy`, and the agents' toolchains inside, on Docker Hub.
 - **Helm:** `helm/stellaris`, at `https://kr4t0n.github.io/stellaris/helm`, with every
   value in [its README](./helm/stellaris/README.md).
 

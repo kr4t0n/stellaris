@@ -315,9 +315,16 @@ describe("runner config", () => {
       dataDir: "./runner-data",
       logLevel: "info",
       slots: 2,
-      clis: ["claude", "codex"],
+      clis: ["claude", "codex", "antigravity"],
       capabilities: [],
     });
+    // An empty list is the default too, and a list names the only CLIs a runner offers.
+    expect(loadRunnerConfig({ STELLARIS_CLIS: " , " }).clis).toEqual([
+      "claude",
+      "codex",
+      "antigravity",
+    ]);
+    expect(loadRunnerConfig({ STELLARIS_CLIS: "claude,codex" }).clis).toEqual(["claude", "codex"]);
     expect(
       loadRunnerConfig({
         STELLARIS_RUNNER_TOKEN: "stl_runner",

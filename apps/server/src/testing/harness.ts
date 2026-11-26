@@ -35,6 +35,15 @@ export type TestApp = ReturnType<typeof createApp>;
 export const TURN_START_WAIT = { timeout: 10_000 } as const;
 
 /**
+ * How long a test waits for a job to reach a test society's runner, or a stand-in attached to the
+ * hub, as `vi.waitFor`'s or `expect.poll`'s options. Before it is sent, the server places the turn
+ * and opens it, reading the citizen's records and digest from the board's files and writing the
+ * turn's start, which a loaded machine slows past Vitest's 1 s default (testing.md, "A wait for a
+ * job to arrive takes `JOB_ARRIVAL_WAIT`").
+ */
+export const JOB_ARRIVAL_WAIT = { timeout: 10_000 } as const;
+
+/**
  * How long a test waits for a runner of a test board's server to connect again, whatever ended
  * its stream (a rename, its network's return, its own check of a stream gone quiet), as
  * `vi.waitFor`'s or `expect.poll`'s options. The runner waits out its retry delay, which doubles

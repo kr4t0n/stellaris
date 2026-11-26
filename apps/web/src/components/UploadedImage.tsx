@@ -1,3 +1,4 @@
+import { failureOf } from "../lib/api.js";
 import { useUploadedImage } from "../lib/session.js";
 import { EnlargeableImage } from "./EnlargeableImage.js";
 
@@ -14,5 +15,5 @@ export function UploadedImage({ id, alt }: { id: string; alt: string }) {
   if (image.isPending) {
     return <span className="text-meta">Loading {name}…</span>;
   }
-  return <span title={image.error?.message}>{name}</span>;
+  return <span title={image.error === null ? undefined : failureOf(image.error)}>{name}</span>;
 }

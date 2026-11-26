@@ -80,6 +80,11 @@ export const TurnDispatchSchema = z.object({
   onboarding: z.boolean().default(false),
   /** Every cron that came due for this turn, whatever wake it merged into; its prompt quotes each. */
   crons: z.array(UlidSchema).optional(),
+  /**
+   * Every task the agent created that finished for this turn, whatever wake it merged into; its
+   * prompt names each.
+   */
+  tasksDone: z.array(UlidSchema).optional(),
 });
 export type TurnDispatch = z.infer<typeof TurnDispatchSchema>;
 

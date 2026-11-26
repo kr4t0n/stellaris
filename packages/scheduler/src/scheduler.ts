@@ -2626,9 +2626,8 @@ export class Scheduler {
   /**
    * Sees through the finished tasks a turn named, by how it ended: a turn that completed sees each
    * through; one the user stopped, those its own wake brought, as a stopped cron fire is no
-   * failure, leaving those another wake's turn had not finished; any other end, or none, leaves
-   * them all owed, from now. A wake for owed tasks, and a failed turn's retry, brings every task it
-   * names.
+   * failure, leaving owed those it was given beside them; any other end, or none, leaves them all
+   * owed, from now. A wake for owed tasks, and a failed turn's retry, brings every task it names.
    */
   private settleTasksOwed(
     key: string,

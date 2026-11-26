@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
-# A runner on climage's `full` variant, which brings Claude Code, Codex, and the toolchains agents
-# shell out to. Build from the repository root:
+# A runner on climage's `full` variant, which brings Claude Code, Codex, Antigravity's agy, and the
+# toolchains agents shell out to. Build from the repository root:
 #   docker build -f apps/runner/Dockerfile -t stellaris-runner .
 
 ARG NODE_VERSION=24
@@ -53,9 +53,10 @@ COPY --from=build /out/runner /opt/stellaris-runner
 RUN printf '#!/bin/sh\nexec node /opt/stellaris-runner/dist/index.js "$@"\n' > /usr/local/bin/stellaris-runner \
  && chmod +x /usr/local/bin/stellaris-runner
 USER stellaris
-# Everything the runner keeps sits in the home, beside the CLIs' logins in ~/.claude and ~/.codex
-# and whatever agents install, so one volume at /home/stellaris carries all of it across restarts:
-# its saved credentials, the agents' homes, and the repositories and worktrees of its projects.
+# Everything the runner keeps sits in the home, beside the CLIs' logins in ~/.claude, ~/.codex, and
+# ~/.gemini and whatever agents install, so one volume at /home/stellaris carries all of it across
+# restarts: its saved credentials, the agents' homes, and the repositories and worktrees of its
+# projects.
 ENV STELLARIS_RUNNER_DIR=/home/stellaris/stellaris-runner
 # climage's entrypoint stays, behind tini, which reaps the CLI and git processes turns start and
 # hands SIGTERM to the runner so it drains its turns.

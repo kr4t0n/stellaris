@@ -345,9 +345,10 @@ function messageOf(trigger: Trigger): Ulid | undefined {
 
 /** A `task_done` wake's reason, naming each task done. */
 function tasksDoneReason(tasks: readonly Ulid[]): string {
+  const ids = tasks.join(", ");
   return tasks.length === 1
-    ? `task ${tasks.join("")} you created is done`
-    : `tasks ${tasks.join(", ")} you created are done`;
+    ? `task ${ids} you created is done`
+    : `tasks ${ids} you created are done`;
 }
 
 /**

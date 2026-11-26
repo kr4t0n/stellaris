@@ -518,7 +518,7 @@ describe("Scheduler", () => {
         `tasks ${first}, ${second} you created are done`,
       );
 
-      // Finished by two citizens, the turn names neither as the sender.
+      // Finished by rev-1 and by the user, the turn names neither as the sender.
       runner.dispatches.length = 0;
       const third = await finish(board, scheduler, "third");
       advance(9_000);

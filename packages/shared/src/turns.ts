@@ -49,6 +49,8 @@ export const TriggerSchema = z.object({
   channel: ChannelRefSchema.optional(),
   /** The cron that came due, for a `cron` wake. */
   cronId: UlidSchema.optional(),
+  /** The proposal decided, for a `proposal_decided` wake. */
+  proposalId: UlidSchema.optional(),
   /** What a `heartbeat` woke for; absent on records from before the board kept it. */
   heartbeat: HeartbeatCauseSchema.optional(),
 });
@@ -85,6 +87,11 @@ export const TurnDispatchSchema = z.object({
    * prompt names each.
    */
   tasksDone: z.array(UlidSchema).optional(),
+  /**
+   * Every proposal the agent made that was decided for this turn, whatever wake it merged into;
+   * its prompt points at each one's thread.
+   */
+  proposalsDecided: z.array(UlidSchema).optional(),
 });
 export type TurnDispatch = z.infer<typeof TurnDispatchSchema>;
 

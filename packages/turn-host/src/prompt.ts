@@ -566,9 +566,19 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
       `A task you created is done too: ${tasksDone.join(", ")}. Tell whoever asked for it, if anyone did.`,
     );
   }
-  if (dispatch.trigger.kind === "proposal_decided") {
+  // Every proposal decided that merged into this wake, whichever trigger it kept.
+  const decided = dispatch.proposalsDecided ?? [];
+  const decision =
+    decided.length > 1
+      ? `Proposals you made were decided: ${decided.join(", ")}; each decision is the last post in that proposal's thread.`
+      : dispatch.trigger.kind === "proposal_decided"
+        ? "A proposal you made was decided; the decision is the last post in the proposal's thread."
+        : decided.length === 1
+          ? `A proposal you made was decided too: ${decided.join(", ")}; the decision is the last post in its thread.`
+          : null;
+  if (decision !== null) {
     lines.push(
-      "A proposal you made was decided; the decision is the last post in the proposal's thread. A decision wakes you in the conversation you filed the proposal from, or at home once that has ended. Carry on with what an approval enables or a rejection asks, and stay silent if nothing follows. An approved skill is published under society/skills/<name>/: delete your own skills/<name>/ from your home and report memoryUpdated, so your index lists the published copy alone.",
+      `${decision} A decision wakes you in the conversation you filed the proposal from, or at home once that has ended. Carry on with what an approval enables or a rejection asks, and stay silent if nothing follows. An approved skill is published under society/skills/<name>/: delete your own skills/<name>/ from your home and report memoryUpdated, so your index lists the published copy alone.`,
     );
   }
   if (dispatch.trigger.kind === "cron") {

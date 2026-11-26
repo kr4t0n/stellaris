@@ -523,7 +523,11 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
   lines.push("");
   const from = dispatch.trigger.from === undefined ? "" : ` from ${dispatch.trigger.from}`;
   lines.push(`Trigger: ${dispatch.trigger.kind}${from}. ${dispatch.trigger.reason}`.trim());
-  if (dispatch.trigger.taskId !== undefined) {
+  // Every task done that merged into this wake, whichever trigger it kept.
+  const tasksDone = dispatch.tasksDone ?? [];
+  if (dispatch.trigger.kind === "task_done" && tasksDone.length > 1) {
+    lines.push(`Tasks in question: ${tasksDone.join(", ")}`);
+  } else if (dispatch.trigger.taskId !== undefined) {
     lines.push(`Task in question: ${dispatch.trigger.taskId}`);
   }
   if (input.clock !== undefined) {
@@ -551,8 +555,16 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
       "A stage is waiting for you: claim it with claim_task unless you hold it already, do the work in your worktree, which is on the task's branch unless Your workspace says otherwise, commit there, then advance_task. If the plan no longer fits, reshape it with plan_task.",
     );
   }
-  if (dispatch.trigger.kind === "task_done") {
+  if (tasksDone.length > 1) {
+    lines.push(
+      `Tasks you created are done: ${tasksDone.join(", ")}. Tell whoever asked for each, if anyone did.`,
+    );
+  } else if (dispatch.trigger.kind === "task_done") {
     lines.push("A task you created is done. Tell whoever asked for it, if anyone did.");
+  } else if (tasksDone.length === 1) {
+    lines.push(
+      `A task you created is done too: ${tasksDone.join(", ")}. Tell whoever asked for it, if anyone did.`,
+    );
   }
   if (dispatch.trigger.kind === "proposal_decided") {
     lines.push(

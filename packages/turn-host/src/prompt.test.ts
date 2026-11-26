@@ -92,6 +92,22 @@ function promptWith(changedInstructions?: string | null): string {
   });
 }
 
+/** eng-1's prompt for a wake with this trigger and these tasks done merged into it. */
+function donePrompt(trigger: object, tasksDone?: string[]): string {
+  return buildTurnPrompt({
+    dispatch: {
+      ...cronlessDispatch,
+      trigger: TriggerSchema.parse(trigger),
+      priority: 1,
+      ...(tasksDone === undefined ? {} : { tasksDone }),
+    },
+    messages: [],
+    heldClaims: [],
+    lastTurn: null,
+    onboarding: null,
+  });
+}
+
 describe("buildTurnPrompt", () => {
   it("tells the time in the society's zone, and quotes each cron that woke the turn", () => {
     const cron = {
@@ -682,6 +698,41 @@ describe("buildTurnPrompt", () => {
       "This thread is closed, so posts to it are refused: if something still needs saying, post it in lab/general.",
     );
     expect(late).not.toContain(`Talk here with post_message and thread_id ${pricing.id}.`);
+  });
+
+  it("names every task done that merged into the wake, whichever trigger it kept", () => {
+    const [first, second] = ["01ARZ3NDEKTSV4RRFFQ69G5FAV", "01ARZ3NDEKTSV4RRFFQ69G5FAW"];
+    const done = { kind: "task_done", from: "rev-1", taskId: first };
+
+    const one = donePrompt({ ...done, reason: `task ${first} you created is done` }, [first]);
+    expect(one).toContain(`Trigger: task_done from rev-1. task ${first} you created is done`);
+    expect(one).toContain(`Task in question: ${first}`);
+    expect(one).toContain("A task you created is done. Tell whoever asked for it, if anyone did.");
+
+    const both = donePrompt({ ...done, reason: `tasks ${first}, ${second} you created are done` }, [
+      first,
+      second,
+    ]);
+    expect(both).toContain(
+      `Trigger: task_done from rev-1. tasks ${first}, ${second} you created are done`,
+    );
+    expect(both).toContain(`Tasks in question: ${first}, ${second}`);
+    expect(both).toContain(
+      `Tasks you created are done: ${first}, ${second}. Tell whoever asked for each, if anyone did.`,
+    );
+    expect(both).not.toContain("A task you created is done");
+
+    const mention = { kind: "mention", from: "user", fromUser: true, reason: "mentioned by user" };
+    const under = donePrompt(mention, [first]);
+    expect(under).toContain("Trigger: mention from user. mentioned by user");
+    expect(under).not.toContain("in question");
+    expect(under).toContain(
+      `A task you created is done too: ${first}. Tell whoever asked for it, if anyone did.`,
+    );
+    expect(donePrompt(mention, [first, second])).toContain(
+      `Tasks you created are done: ${first}, ${second}. Tell whoever asked for each, if anyone did.`,
+    );
+    expect(donePrompt(mention)).not.toContain("you created");
   });
 
   it("frames a turn triggered by operations signals as a decision about proposing", () => {

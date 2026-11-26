@@ -343,6 +343,30 @@ function messageOf(trigger: Trigger): Ulid | undefined {
   return trigger.kind === "mention" || trigger.kind === "user_post" ? trigger.messageId : undefined;
 }
 
+/** A `task_done` wake's reason, naming each task done. */
+function tasksDoneReason(tasks: readonly Ulid[]): string {
+  return tasks.length === 1
+    ? `task ${tasks.join("")} you created is done`
+    : `tasks ${tasks.join(", ")} you created are done`;
+}
+
+/**
+ * The trigger a merge keeps: a `task_done` one names every task done the wake holds, and its
+ * sender only while each of them came from the same one.
+ */
+function namingTasksDone(kept: Trigger, merged: Trigger, tasksDone: readonly Ulid[]): Trigger {
+  if (kept.kind !== "task_done" || tasksDone.length < 2) {
+    return kept;
+  }
+  const { from, ...rest } = kept;
+  const sameSender = merged.kind !== "task_done" || merged.from === from;
+  return {
+    ...rest,
+    ...(from !== undefined && sameSender ? { from } : {}),
+    reason: tasksDoneReason(tasksDone),
+  };
+}
+
 function later(a: Ulid | undefined, b: Ulid | undefined): Ulid | undefined {
   if (a === undefined) return b;
   if (b === undefined) return a;
@@ -1230,7 +1254,7 @@ export class Scheduler {
     this.enqueue(
       agent.name,
       scope,
-      { kind: "task_done", from, reason: `task ${taskId} you created is done`, taskId },
+      { kind: "task_done", from, reason: tasksDoneReason([taskId]), taskId },
       now,
     );
   }
@@ -1444,6 +1468,7 @@ export class Scheduler {
     const existing = this.pending.get(key);
     const message = messageOf(trigger);
     const cron = trigger.kind === "cron" ? trigger.cronId : undefined;
+    const done = trigger.kind === "task_done" ? trigger.taskId : undefined;
     if (existing === undefined) {
       this.pending.set(key, {
         dispatch: {
@@ -1454,6 +1479,7 @@ export class Scheduler {
           priority: decision.priority,
           onboarding: trigger.kind === "onboarding",
           ...(cron === undefined ? {} : { crons: [cron] }),
+          ...(done === undefined ? {} : { tasksDone: [done] }),
         },
         readyAt,
         ...(trigger.kind === "stage" ? { stageWakes: [trigger] } : {}),
@@ -1469,13 +1495,18 @@ export class Scheduler {
     const crons = [
       ...new Set([...(existing.dispatch.crons ?? []), ...(cron === undefined ? [] : [cron])]),
     ];
+    // A finished task is named in the turn whichever trigger the merge keeps.
+    const tasksDone = [
+      ...new Set([...(existing.dispatch.tasksDone ?? []), ...(done === undefined ? [] : [done])]),
+    ];
     this.pending.set(key, {
       dispatch: {
         ...existing.dispatch,
-        trigger: keepNew ? trigger : existing.dispatch.trigger,
+        trigger: namingTasksDone(keepNew ? trigger : existing.dispatch.trigger, trigger, tasksDone),
         priority,
         onboarding: existing.dispatch.onboarding || trigger.kind === "onboarding",
         ...(crons.length === 0 ? {} : { crons }),
+        ...(tasksDone.length === 0 ? {} : { tasksDone }),
       },
       readyAt: Math.min(existing.readyAt, readyAt),
       ...(existing.stageWakes !== undefined && trigger.kind === "stage"

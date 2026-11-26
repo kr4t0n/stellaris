@@ -546,6 +546,8 @@ export class Scheduler {
   private readonly landing = new Set<Ulid>();
   /** Sweeps of ended conversations' workspaces under way, which `drain` and `stop` wait for. */
   private readonly sweeping = new Set<Promise<void>>();
+  /** Saves of the tasks a turn saw through as it ended, which `drain` and `stop` wait for. */
+  private readonly saving = new Set<Promise<void>>();
   /** Crons whose fire's turn is running; a cron's next time passes while one is. */
   private readonly cronsInFlight = new Set<Ulid>();
   /** Turns in a row that failed for now, by session key, which `retryRefused` counts. */
@@ -612,6 +614,7 @@ export class Scheduler {
       ...this.completing,
       ...this.steering.values(),
       ...this.sweeping,
+      ...this.saving,
     ]);
   }
 
@@ -671,6 +674,7 @@ export class Scheduler {
       ...this.running.values(),
       ...this.completing,
       ...this.sweeping,
+      ...this.saving,
     ]);
   }
 
@@ -2524,9 +2528,10 @@ export class Scheduler {
         }
         dispatch = { ...dispatch, trigger: current };
       }
-      // What an earlier turn here named and did not finish is named again.
-      const carried = this.state.tasksOwed[key]?.tasks ?? [];
-      dispatch = withTasksOwed(dispatch, carried);
+      // What an earlier turn here named and did not finish is named again, beside what this
+      // wake brought itself.
+      const own = item.dispatch.tasksDone ?? [];
+      dispatch = withTasksOwed(dispatch, this.state.tasksOwed[key]?.tasks ?? []);
       const assignment = await this.runner.assign(dispatch);
       if (assignment === null) {
         // No runner can take it now: the one it would run on, its project's or the citizen's pinned
@@ -2587,15 +2592,19 @@ export class Scheduler {
             this.cronsInFlight.delete(id);
           }
           if (named.length > 0) {
-            this.settleTasksOwed(key, named, carried, ended);
-            // Saved now, since a stop waits for turns but runs no pass after them; a save that
-            // fails is left to the next pass's.
-            await this.save().catch((error: unknown) => {
+            this.settleTasksOwed(key, named, own, ended);
+            // Saved now, since a stop runs no pass after the turns it waits for, and kept where a
+            // stop waits for it, since the turn no longer counts as running; a save that fails is
+            // left to the next pass's.
+            const saved = this.save().catch((error: unknown) => {
               this.log.error(
                 { agent: dispatch.agent, project: dispatch.project, error: String(error) },
                 "could not save the tasks a turn named",
               );
             });
+            this.saving.add(saved);
+            await saved;
+            this.saving.delete(saved);
           }
         }
       })();
@@ -2617,13 +2626,14 @@ export class Scheduler {
   /**
    * Sees through the finished tasks a turn named, by how it ended: a turn that completed sees each
    * through; one the user stopped, those its own wake brought, as a stopped cron fire is no
-   * failure, leaving those an earlier turn had not finished; any other end, or none, leaves them
-   * all owed, from now.
+   * failure, leaving those another wake's turn had not finished; any other end, or none, leaves
+   * them all owed, from now. A wake for owed tasks, and a failed turn's retry, brings every task it
+   * names.
    */
   private settleTasksOwed(
     key: string,
     named: readonly Ulid[],
-    carried: readonly Ulid[],
+    own: readonly Ulid[],
     ended: TurnRecord["exitReason"],
   ): void {
     const owed = this.state.tasksOwed[key];
@@ -2631,11 +2641,7 @@ export class Scheduler {
       return;
     }
     const seen =
-      ended === "completed" || ended === "blocked"
-        ? named
-        : ended === "stopped"
-          ? named.filter((id) => !carried.includes(id))
-          : [];
+      ended === "completed" || ended === "blocked" ? named : ended === "stopped" ? own : [];
     const tasks = owed.tasks.filter((id) => !seen.includes(id));
     if (tasks.length === 0) {
       delete this.state.tasksOwed[key];
@@ -2679,6 +2685,14 @@ export class Scheduler {
         now,
         besideOwed(owed),
       );
+      // The wake brings every owed task, so a stop sees them through as it would its own.
+      const queued = this.pending.get(key);
+      if (queued !== undefined) {
+        this.pending.set(key, {
+          ...queued,
+          dispatch: { ...queued.dispatch, tasksDone: [...owed.tasks] },
+        });
+      }
     }
   }
 

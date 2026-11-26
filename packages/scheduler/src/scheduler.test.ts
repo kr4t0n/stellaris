@@ -583,6 +583,18 @@ describe("Scheduler", () => {
       error: "usage limit reached: You've hit your 5-hour limit",
     };
 
+    /** A turn the user stopped. */
+    const STOPPED: Partial<TurnRecord> = { exitReason: "stopped", stoppedBy: "user" };
+
+    /** Lets `count` heartbeats pass, running what comes due. */
+    const heartbeatsPass = async (scheduler: Scheduler, count: number): Promise<void> => {
+      for (let i = 0; i < count; i += 1) {
+        advance(10_000);
+        await scheduler.tick();
+        await scheduler.drain();
+      }
+    };
+
     it("wakes for a task done again a heartbeat after the turn naming it failed, until one completes", async () => {
       const { board, runner, scheduler } = await setup({ timings });
       runner.outcomes.push(LIMITED);
@@ -689,7 +701,6 @@ describe("Scheduler", () => {
 
     it("sees a task done through when the user stops its turn, not one an earlier turn left", async () => {
       const { board, runner, scheduler } = await setup({ timings });
-      const STOPPED: Partial<TurnRecord> = { exitReason: "stopped", stoppedBy: "user" };
       runner.outcomes.push(STOPPED);
       const first = await finish(board, scheduler, "first");
       await settle(scheduler);
@@ -712,6 +723,83 @@ describe("Scheduler", () => {
         ["task_done", "rev-1", second, [second]],
         ["manual", "user", undefined, [second]],
         ["task_done", undefined, second, [second]],
+      ]);
+    });
+
+    it("comes for a task done no more once the user stops the turn the wake for it brought", async () => {
+      const { board, runner, scheduler } = await setup({ timings });
+      runner.outcomes.push(LIMITED, STOPPED);
+      const first = await finish(board, scheduler, "first");
+      await settle(scheduler);
+      advance(10_000);
+      await scheduler.tick();
+      await settle(scheduler);
+      await heartbeatsPass(scheduler, 6);
+      expect(homeTurns(runner)).toEqual([
+        ["task_done", "rev-1", first, [first]],
+        ["task_done", undefined, first, [first]],
+      ]);
+      expect(scheduler.pendingPairs).toEqual([]);
+    });
+
+    it("comes for a task done no more once the user stops a failed turn's retry", async () => {
+      const { board, runner, scheduler } = await setup({ timings });
+      runner.outcomes.push(
+        { ...LIMITED, error: "API Error: 529 overloaded", transient: true },
+        STOPPED,
+      );
+      const first = await finish(board, scheduler, "first");
+      await settle(scheduler);
+      // The retry waits out the first delay of `transientRetryMs`, a minute.
+      advance(60_000);
+      await scheduler.tick();
+      await scheduler.drain();
+      await heartbeatsPass(scheduler, 6);
+      expect(homeTurns(runner)).toEqual([
+        ["task_done", "rev-1", first, [first]],
+        ["task_done", "rev-1", first, [first]],
+      ]);
+      expect(scheduler.pendingPairs).toEqual([]);
+    });
+
+    it("holds a stop until the save of what an ended turn saw through has landed", async () => {
+      const { board, runner, scheduler } = await setup({ timings });
+      runner.hold = true;
+      const first = await finish(board, scheduler, "first");
+      advance(timings.debounceMs);
+      await scheduler.tick();
+      // The turn ends before the stop, and its save waits until it is let go.
+      const write = board.writeState.bind(board);
+      let started = (): void => {};
+      const saving = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      let letGo = (): void => {};
+      const held = new Promise<void>((resolve) => {
+        letGo = resolve;
+      });
+      vi.spyOn(board, "writeState").mockImplementationOnce(async (name, value) => {
+        started();
+        await held;
+        await write(name, value);
+      });
+      runner.hold = false;
+      runner.releaseHeld();
+      await saving;
+      let stopped = false;
+      const stopping = scheduler.stop().then(() => {
+        stopped = true;
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(stopped).toBe(false);
+      letGo();
+      await stopping;
+      const restarted = new Scheduler({ board, runner, now, timings });
+      await wakeLater(board, restarted);
+      await heartbeatsPass(restarted, 2);
+      expect(homeTurns(runner)).toEqual([
+        ["task_done", "rev-1", first, [first]],
+        ["manual", "user", undefined, undefined],
       ]);
     });
 

@@ -361,6 +361,12 @@ test("a turn in flight takes a post into its conversation, and stops on a second
   // The turn is no longer in flight, so its controls go.
   await expect(view.getByRole("button", { name: "Stop…" })).toBeHidden();
   await expect(view.getByLabel("Message desk while it works")).toBeHidden();
+  // The box goes only once a read finds the turn stopped, which takes a stop the fake recorded.
+  // One stop, from the second click: the first only asked.
+  expect(board.writes.map((write) => write.path)).toEqual([
+    "/api/verbs/post_message",
+    `/api/turns/${DESK_TURN_IN_FLIGHT}/stop`,
+  ]);
 });
 
 test("after a restart the Now tab shows the last turn from its transcript", async ({ page }) => {

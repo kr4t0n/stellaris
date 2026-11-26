@@ -101,6 +101,8 @@ data/              runtime data, ignored by git
   its own CLI binary. Real turns cost real money.
 - **The `codex` CLI**, logged in, where Codex agents run, and **the `gh` CLI**, logged
   in, on a runner whose projects land through GitHub pull requests.
+- **Google's `agy`**, [signed in](./docs/guide/deployment.md#signing-agy-in), where
+  Antigravity agents run; a runner without it sets `STELLARIS_CLIS=claude,codex`.
 - **For the iOS client,** Swift 6: Xcode 27.1 and
   [XcodeGen](https://github.com/yonaskolb/XcodeGen/releases) 2.46.0 on a Mac for the
   app, or swift.org's toolchain on Linux for BoardKit alone.
@@ -229,7 +231,7 @@ server's own included. Runners connect out, so only the server must be reachable
 - **npm:** `@kubitnodes/stellaris` (the CLI and the server) and
   `@kubitnodes/stellaris-runner`, for a machine without Docker.
 - **Images:** `kr4t0n/stellaris-server`, and `kr4t0n/stellaris-runner` with Claude
-  Code, Codex, and the agents' toolchains inside, on Docker Hub.
+  Code, Codex, `agy`, and the agents' toolchains inside, on Docker Hub.
 - **Helm:** `helm/stellaris`, at `https://kr4t0n.github.io/stellaris/helm`, with every
   value in [its README](./helm/stellaris/README.md).
 

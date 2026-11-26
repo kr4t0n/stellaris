@@ -72,6 +72,7 @@ Runners in the cluster
 
     kubectl -n {{ $ns }} exec -it {{ $runnerName }}-0 -c runner -- claude auth login
     kubectl -n {{ $ns }} exec -it {{ $runnerName }}-0 -c runner -- codex login --device-auth
+    kubectl -n {{ $ns }} exec -it {{ $runnerName }}-0 -c runner -- agy acp --login --disable-telemetry
 {{- if $enrolls }}
     kubectl -n {{ $ns }} logs {{ $runnerName }}-0 -c runner | grep approve
 

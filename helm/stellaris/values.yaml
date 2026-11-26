@@ -199,8 +199,8 @@ ingress:
     secretName: ""
 
 # Runners in the cluster, which run the turns: a StatefulSet of the runner image, which brings
-# Claude Code, Codex, and the toolchains agents use, each pod a runner of its own with a volume of
-# its own. Runners on other machines connect as before, with or without these.
+# Claude Code, Codex, Antigravity's agy, and the toolchains agents use, each pod a runner of its
+# own with a volume of its own. Runners on other machines connect as before, with or without these.
 #
 # Agents run with every permission and no sandbox, so a runner pod runs whatever they decide with
 # the pod's network. The pod gets no service-account token unless automountServiceAccountToken

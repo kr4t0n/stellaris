@@ -24,11 +24,12 @@ if (process.argv.includes("--help")) {
   console.log(
     [
       "stellaris-runner: runs a Stellaris society's turns on this machine with the CLIs that",
-      "STELLARIS_CLIS names: claude (Claude Code), codex, and antigravity (agy), claude and codex",
-      "when it is unset. Start it with STELLARIS_SERVER_URL set to the board server: the first",
-      "start prints a code to approve on the board, and the runner keeps what approval returns in",
-      "STELLARIS_RUNNER_DIR (./runner-data) with its other files. STELLARIS_RUNNER_TOKEN takes a",
-      "token registered on the board instead. Every setting is a STELLARIS_* variable:",
+      "STELLARIS_CLIS names: claude (Claude Code), codex, and antigravity (agy), all three when",
+      "it is unset, so claude,codex leaves Antigravity out. Start it with STELLARIS_SERVER_URL set",
+      "to the board server: the first start prints a code to approve on the board, and the runner",
+      "keeps what approval returns in STELLARIS_RUNNER_DIR (./runner-data) with its other files.",
+      "STELLARIS_RUNNER_TOKEN takes a token registered on the board instead. Every setting is a",
+      "STELLARIS_* variable:",
       "https://github.com/kr4t0n/stellaris#environment-variables",
     ].join("\n"),
   );

@@ -22,11 +22,19 @@ describe("the runner's backends", () => {
     expect(Object.values(all).map((backend) => backend.kind)).toEqual(CliKindSchema.options);
   });
 
-  it("runs Antigravity only where STELLARIS_CLIS names it", () => {
-    const unset = loadRunnerConfig({});
-    expect(Object.keys(buildBackends(unset.clis, settings))).toEqual(["claude", "codex"]);
+  it("runs all three CLIs where STELLARIS_CLIS is unset, and only those it names otherwise", () => {
+    const unset = buildBackends(loadRunnerConfig({}).clis, settings);
+    expect(Object.keys(unset)).toEqual(["claude", "codex", "antigravity"]);
+    expect(Object.values(unset).map((backend) => backend.kind)).toEqual([
+      "claude",
+      "codex",
+      "antigravity",
+    ]);
+    // Naming the other two is how a runner opts out of Antigravity.
+    const optedOut = loadRunnerConfig({ STELLARIS_CLIS: "claude,codex" });
+    expect(Object.keys(buildBackends(optedOut.clis, settings))).toEqual(["claude", "codex"]);
     const named = loadRunnerConfig({ STELLARIS_CLIS: "antigravity" });
-    expect(buildBackends(named.clis, settings).antigravity?.kind).toBe("antigravity");
+    expect(Object.keys(buildBackends(named.clis, settings))).toEqual(["antigravity"]);
     expect(() => loadRunnerConfig({ STELLARIS_CLIS: "gemini" })).toThrow('"invalid_value"');
   });
 

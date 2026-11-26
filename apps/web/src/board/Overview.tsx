@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { CliIcon } from "../components/CliIcon.js";
 import { LinkedText } from "../components/Entities.js";
 import type { Topic } from "../lib/api.js";
-import { pairsOf } from "../lib/api.js";
+import { pairsOf, readNote } from "../lib/api.js";
 import { ago, firstParagraph } from "../lib/format.js";
 import { useScheduler } from "../lib/session.js";
 import { scopeName } from "./citizen.js";
@@ -80,14 +80,17 @@ export function CrewList({ members, scope }: { members: readonly Member[]; scope
 export function TopicList({
   scope,
   topics,
+  error,
   now,
 }: {
   scope: string;
   topics: readonly Topic[] | undefined;
+  /** Why the topics could not be read, while there are none to show. */
+  error: Error | null;
   now: number;
 }) {
   if (topics === undefined) {
-    return <p className="text-meta">Reading…</p>;
+    return <p className="text-meta">{readNote("the knowledge", error, "Reading…")}</p>;
   }
   if (topics.length === 0) {
     return <p className="text-meta">No knowledge yet.</p>;

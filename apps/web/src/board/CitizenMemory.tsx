@@ -1,6 +1,7 @@
 import type { Member, RoleCharter } from "@stellaris/shared";
 import type { ReactNode } from "react";
 import { Markdown } from "../components/Markdown.js";
+import { readNote } from "../lib/api.js";
 import { ago } from "../lib/format.js";
 import { useAgentSkills, useHomeConflicts, useMemoryCore, useNow } from "../lib/session.js";
 import { withoutTitle } from "./citizen.js";
@@ -57,7 +58,7 @@ export function CitizenMemory({
       </Section>
       <Section title="Core memory">
         {memory.data === undefined ? (
-          <p className="text-meta">Reading…</p>
+          <p className="text-meta">{readNote("the core memory", memory.error, "Reading…")}</p>
         ) : memory.data.body.trim() === "" ? (
           <p className="text-meta">Empty.</p>
         ) : (
@@ -66,7 +67,7 @@ export function CitizenMemory({
       </Section>
       <Section title="Own skills">
         {skills.data === undefined ? (
-          <p className="text-meta">Reading…</p>
+          <p className="text-meta">{readNote("its skills", skills.error, "Reading…")}</p>
         ) : skills.data.length === 0 ? (
           <p className="text-meta">None yet.</p>
         ) : (

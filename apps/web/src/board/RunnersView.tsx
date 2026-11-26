@@ -9,6 +9,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "../components/Button.js";
 import { CliIcon } from "../components/CliIcon.js";
+import { readNote } from "../lib/api.js";
 import { ago } from "../lib/format.js";
 import {
   useEnrollments,
@@ -549,7 +550,7 @@ export function RunnersView() {
           </ul>
         )}
         {runners.data === undefined ? (
-          <PaneNote>Reading the runners…</PaneNote>
+          <PaneNote>{readNote("the runners", runners.error)}</PaneNote>
         ) : registered.length === 0 ? (
           <p className="px-2 py-2 text-meta">No runners yet.</p>
         ) : null}

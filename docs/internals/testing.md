@@ -72,6 +72,7 @@ A real wait between two presses stretches under load. The red Remove takes no pr
 
 - `pauseAt` refuses a time the clock has passed, and the page's clock runs on while the test asks, so `stopClock` in `runners.spec.ts` stops it a few seconds ahead of the page's own `Date.now()`.
 - A stopped clock fires no timer, and TanStack Query hands the board's answers to the view with `setTimeout(0)`, so stop it only once the page has loaded, and resume it (`page.clock.resume()`) before a step that waits for an answer to show. In a probe, `/runners` loaded on a stopped clock showed no heading after 3 s, its heading but none of its rows after a `runFor(10)`, and its three rows once resumed. A request leaves without a timer, so a press that sends one still reaches the fake board while the clock is stopped.
+- A test that waits out a poll jumps the clock with `page.clock.fastForward`, which fires each timer that falls due once. `runFor` fires every timer in between, the sky's every frame among them: `runFor(60_000)` outlasted the 30 s test limit at a load average of 5 to 10 on 4 CPUs, where `reads.spec.ts`'s test of a polled read's note takes 2 to 3 s with `fastForward`.
 
 ## Scheduler and server tests
 

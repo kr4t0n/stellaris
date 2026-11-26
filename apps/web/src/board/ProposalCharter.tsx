@@ -16,6 +16,7 @@ import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { CliIcon } from "../components/CliIcon.js";
 import { Markdown } from "../components/Markdown.js";
+import { readNote } from "../lib/api.js";
 import { useProjects, useProposalFiles, useTasks } from "../lib/session.js";
 import { Citizen } from "./Avatar.js";
 import { proposedRole, roleDiff, skillText } from "./governance.js";
@@ -245,7 +246,7 @@ function ArchiveCharterView({
       {pending ? (
         <Field label="Tasks in play">
           {tasks.data === undefined
-            ? "reading…"
+            ? readNote("the tasks", tasks.error, "reading…")
             : open === 0
               ? "none"
               : `${open}: approval is refused`}

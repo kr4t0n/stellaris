@@ -2,7 +2,7 @@ import type { Metrics, MetricsWindow } from "@stellaris/shared";
 import { Link, useSearch } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { EntityLink } from "../components/Entities.js";
-import { ApiError } from "../lib/api.js";
+import { failureOf } from "../lib/api.js";
 import { ago, span } from "../lib/format.js";
 import { useMetrics, useNow } from "../lib/session.js";
 import { useDisplayName } from "./Avatar.js";
@@ -170,7 +170,7 @@ export function MetricsView() {
       <>
         {header}
         <PaneNote>
-          {metrics.error instanceof ApiError ? metrics.error.message : "Counting the event log…"}
+          {metrics.error === null ? "Counting the event log…" : failureOf(metrics.error)}
         </PaneNote>
       </>
     );

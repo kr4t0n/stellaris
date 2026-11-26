@@ -515,6 +515,15 @@ describe("Scheduler", () => {
     await scheduler.drain();
   };
 
+  /** Lets `count` heartbeats of 10 s pass, running what comes due. */
+  const heartbeatsPass = async (scheduler: Scheduler, count: number): Promise<void> => {
+    for (let i = 0; i < count; i += 1) {
+      advance(10_000);
+      await scheduler.tick();
+      await scheduler.drain();
+    }
+  };
+
   describe("a wake for finished tasks", () => {
     const timings = { debounceMs: 30_000, heartbeatMs: 10_000 };
 
@@ -585,15 +594,6 @@ describe("Scheduler", () => {
 
     /** A turn the user stopped. */
     const STOPPED: Partial<TurnRecord> = { exitReason: "stopped", stoppedBy: "user" };
-
-    /** Lets `count` heartbeats pass, running what comes due. */
-    const heartbeatsPass = async (scheduler: Scheduler, count: number): Promise<void> => {
-      for (let i = 0; i < count; i += 1) {
-        advance(10_000);
-        await scheduler.tick();
-        await scheduler.drain();
-      }
-    };
 
     it("wakes for a task done again a heartbeat after the turn naming it failed, until one completes", async () => {
       const { board, runner, scheduler } = await setup({ timings });
@@ -770,29 +770,24 @@ describe("Scheduler", () => {
       await scheduler.tick();
       // The turn ends before the stop, and its save waits until it is let go.
       const write = board.writeState.bind(board);
-      let started = (): void => {};
-      const saving = new Promise<void>((resolve) => {
-        started = resolve;
-      });
-      let letGo = (): void => {};
-      const held = new Promise<void>((resolve) => {
-        letGo = resolve;
-      });
+      const saving = Promise.withResolvers<void>();
+      const held = Promise.withResolvers<void>();
       vi.spyOn(board, "writeState").mockImplementationOnce(async (name, value) => {
-        started();
-        await held;
+        saving.resolve();
+        await held.promise;
         await write(name, value);
       });
       runner.hold = false;
       runner.releaseHeld();
-      await saving;
+      await saving.promise;
       let stopped = false;
-      const stopping = scheduler.stop().then(() => {
+      const stopping = (async (): Promise<void> => {
+        await scheduler.stop();
         stopped = true;
-      });
+      })();
       await new Promise((resolve) => setImmediate(resolve));
       expect(stopped).toBe(false);
-      letGo();
+      held.resolve();
       await stopping;
       const restarted = new Scheduler({ board, runner, now, timings });
       await wakeLater(board, restarted);

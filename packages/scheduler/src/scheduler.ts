@@ -2652,7 +2652,7 @@ export class Scheduler {
   /**
    * Wakes a conversation for the finished tasks it is owed once a heartbeat has passed since the
    * turn that left them owed began or ended, unless a wake is queued there or a turn runs, which
-   * names them: a `task_done` wake, which a limited CLI's hold keeps queued until its reset. The
+   * names them: a `task_done` wake, which a limited CLI's hold, or its model's pool's, keeps queued until its reset. The
    * owed tasks of a citizen no longer active, or no longer in the scope, are dropped.
    */
   private async wakeForTasksOwed(now: number): Promise<void> {

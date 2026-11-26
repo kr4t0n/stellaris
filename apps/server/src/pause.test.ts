@@ -575,38 +575,42 @@ describe("holding one pool of a CLI's models while its limit lasts", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
+  /** The models the fake service meters in Antigravity's third-party pool. */
+  const THIRD_PARTY_MODELS: ReadonlySet<string> = new Set(["claude-sonnet-4-6", "gpt-oss-120b"]);
+
   /**
-   * A runner's login on 2026-11-26: a citizen's turn on a Claude model through Antigravity was
-   * refused for the third-party pool's quota, and its next turn, on a Gemini model, ran. Here a society on one
-   * clock in a project on pod has three Antigravity citizens (one on a Claude model, one on a Gemini
-   * model, one with none set), one on Claude Code with a model set, and one on Codex. An
-   * Antigravity turn on a Claude model is refused for the third-party pool while `refusing` says
-   * so, reporting what the adapter reports for agy's words.
+   * A society on one clock from `start`, in a project on pod with `citizens`, and a scheduler over
+   * its hub. Every turn says who ran it. An Antigravity turn on a third-party model is refused for
+   * that pool while `refusing` says so, reporting what the adapter reports for agy's words, with
+   * the pool limited until `limitedUntil` gives from the refusal's time, null for a countdown that
+   * doesn't read. Antigravity's quota reads answer as `read` says.
    */
-  it("holds the refused pool's turns until its reset while the other pool's and other CLIs' run", async () => {
-    let clock = Date.parse("2026-11-26T14:42:52.000Z");
+  async function poolSociety(options: {
+    start: string;
+    citizens: readonly { name: string; cli: CliKind; model?: string }[];
+    refusing: () => boolean;
+    limitedUntil: (at: Date) => string | null;
+    read?: () => Promise<CliQuota>;
+  }) {
+    let clock = Date.parse(options.start);
     const now = (): Date => new Date(clock);
     const { board } = await Board.init(dir, { name: "pools" }, { now });
     await addWorkRoles(board);
     await board.addProject(USER, { slug: "lab" });
-    const citizens = [
-      { name: "eng-1", cli: "antigravity", model: "claude-sonnet-4-6" },
-      { name: "eng-2", cli: "antigravity", model: "gemini-4-neon" },
-      { name: "eng-3", cli: "antigravity" },
-      { name: "eng-4", cli: "claude", model: "opus" },
-      { name: "rev-1", cli: "codex" },
-    ] as const;
-    for (const citizen of citizens) {
+    for (const citizen of options.citizens) {
       await board.addAgent(USER, { ...citizen, role: "engineer", memberships: ["lab"] });
     }
-    let refusing = false;
     const ran: string[] = [];
     const backend = (kind: CliKind): AgentBackend => ({
       kind,
       newSession: () => Promise.resolve(`session-${ran.length}`),
       runTurn: (request) => {
         ran.push(request.spec.agent);
-        if (kind === "antigravity" && refusing && request.spec.model === "claude-sonnet-4-6") {
+        if (
+          kind === "antigravity" &&
+          options.refusing() &&
+          THIRD_PARTY_MODELS.has(request.spec.model ?? "")
+        ) {
           const observedAt = now().toISOString();
           return Promise.resolve({
             events: [],
@@ -622,12 +626,7 @@ describe("holding one pool of a CLI's models while its limit lasts", () => {
               source: "turn",
               status: "warning",
               pools: [
-                {
-                  key: "3p",
-                  limited: true,
-                  limitedUntil: new Date(clock + 13_794_000).toISOString(),
-                  observedAt,
-                },
+                { key: "3p", limited: true, limitedUntil: options.limitedUntil(now()), observedAt },
               ],
             }),
           });
@@ -647,6 +646,7 @@ describe("holding one pool of a CLI's models while its limit lasts", () => {
           exitReason: "completed",
         });
       },
+      ...(kind === "antigravity" && options.read !== undefined ? { readQuota: options.read } : {}),
     });
     society = await startTestSociety({
       board,
@@ -671,36 +671,168 @@ describe("holding one pool of a CLI's models while its limit lasts", () => {
       await scheduler.tick();
       await scheduler.drain();
     };
-    const wakeAll = async (): Promise<void> => {
-      for (const { name } of citizens) {
-        await board.requestWake(USER, { agent: name, project: "lab", reason: "work" });
-      }
-    };
+    // The onboarding turns go through the backend too, so `refusing` is to be set after this.
     await settle();
-    expect(ran.toSorted()).toEqual(citizens.map(({ name }) => name).toSorted());
+    expect(ran.toSorted()).toEqual(options.citizens.map(({ name }) => name).toSorted());
     ran.length = 0;
+    return {
+      board,
+      scheduler,
+      settle,
+      ran,
+      now,
+      advance: (ms: number): void => {
+        clock += ms;
+      },
+      wake: (agent: string): Promise<unknown> =>
+        board.requestWake(USER, { agent, project: "lab", reason: "work" }),
+    };
+  }
+
+  /**
+   * A runner's login on 2026-11-26: a citizen's turn on a Claude model through Antigravity was
+   * refused for the third-party pool's quota, and its next turn, on a Gemini model, ran. Here three
+   * Antigravity citizens (one on a Claude model, one on a Gemini model, one with none set), one on
+   * Claude Code with a model set, and one on Codex.
+   */
+  it("holds the refused pool's turns until its reset while the other pool's and other CLIs' run", async () => {
+    let refusing = false;
+    const citizens = [
+      { name: "eng-1", cli: "antigravity", model: "claude-sonnet-4-6" },
+      { name: "eng-2", cli: "antigravity", model: "gemini-4-neon" },
+      { name: "eng-3", cli: "antigravity" },
+      { name: "eng-4", cli: "claude", model: "opus" },
+      { name: "rev-1", cli: "codex" },
+    ] as const;
+    const { scheduler, settle, ran, now, advance, wake } = await poolSociety({
+      start: "2026-11-26T14:42:52.000Z",
+      citizens,
+      refusing: () => refusing,
+      limitedUntil: (at) => new Date(at.getTime() + 13_794_000).toISOString(),
+    });
 
     refusing = true;
-    await board.requestWake(USER, { agent: "eng-1", project: "lab", reason: "work" });
+    await wake("eng-1");
     await settle();
     expect(ran).toEqual(["eng-1"]);
     ran.length = 0;
 
     // Seven minutes on, as the citizen's next turn was: every turn runs but the refused pool's.
-    clock += 7 * 60_000;
-    await wakeAll();
+    advance(7 * 60_000);
+    for (const { name } of citizens) {
+      await wake(name);
+    }
     await settle();
     expect(ran.toSorted()).toEqual(["eng-2", "eng-3", "eng-4", "rev-1"]);
     ran.length = 0;
 
     // At the reset the kept wake goes, as the wake it was.
     refusing = false;
-    clock = Date.parse("2026-11-26T18:32:46.000Z") - 1;
+    advance(Date.parse("2026-11-26T18:32:46.000Z") - 1 - now().getTime());
     await settle();
     expect(ran).toEqual([]);
-    clock += 1;
+    advance(1);
     await settle();
     expect(ran).toEqual(["eng-1"]);
+    await scheduler.stop();
+  });
+
+  it("lets one turn try a pool's limit with no reset at its half hour, reading it once while a turn waits, as the other pool's run", async () => {
+    let refusing = false;
+    const reads: string[] = [];
+    const answers: Array<() => CliQuota> = [];
+    const thirdParty = ["eng-1", "eng-2"];
+    const { board, scheduler, settle, ran, now, advance, wake } = await poolSociety({
+      start: "2026-11-26T14:42:52.000Z",
+      citizens: [
+        { name: "eng-1", cli: "antigravity", model: "claude-sonnet-4-6" },
+        { name: "eng-2", cli: "antigravity", model: "gpt-oss-120b" },
+        { name: "eng-3", cli: "antigravity", model: "gemini-4-neon" },
+      ],
+      refusing: () => refusing,
+      limitedUntil: () => null,
+      read: () => {
+        reads.push(now().toISOString());
+        const answer = answers.shift();
+        return answer === undefined
+          ? Promise.reject(new Error("the usage read did not answer"))
+          : Promise.resolve().then(answer);
+      },
+    });
+    const started = now().getTime();
+
+    // A refusal whose countdown doesn't read holds the third-party pool for half an hour.
+    refusing = true;
+    await wake("eng-1");
+    await settle();
+    expect(ran).toEqual(["eng-1"]);
+    ran.length = 0;
+
+    // Both third-party citizens wait, and the quota is read once while they do, the read failing;
+    // the Gemini citizen runs.
+    for (const name of ["eng-1", "eng-2", "eng-3"]) {
+      await wake(name);
+    }
+    await settle();
+    expect(ran).toEqual(["eng-3"]);
+    await expect.poll(() => reads.length).toBe(1);
+    advance(30 * 60_000 - 1);
+    await settle();
+    await settle();
+    expect(ran).toEqual(["eng-3"]);
+    expect(reads).toHaveLength(1);
+    ran.length = 0;
+
+    // At the half hour, with all three woken for one pass, one third-party turn tries the limit and
+    // the Gemini turn runs beside it. The limit refuses the try, which holds the other another half
+    // hour, and that wait asks for the next read, which fails too.
+    advance(1);
+    await wake("eng-3");
+    await settle();
+    expect(ran).toHaveLength(2);
+    expect(ran).toContain("eng-3");
+    const tried = ran.find((name) => thirdParty.includes(name));
+    expect(tried).toBeDefined();
+    ran.length = 0;
+    await settle();
+    await expect.poll(() => reads.length).toBe(2);
+    advance(30 * 60_000 - 1);
+    await settle();
+    expect(ran).toEqual([]);
+    expect(reads).toHaveLength(2);
+
+    // At the next half hour, the refused try's citizen woken again, one of the two tries and is
+    // refused; the wait then asks for a read, which finds the pool clear and lifts the hold at once.
+    advance(1);
+    await wake(tried ?? "");
+    await settle();
+    expect(ran).toHaveLength(1);
+    refusing = false;
+    answers.push(() => {
+      const observedAt = now().toISOString();
+      return CliQuotaSchema.parse({
+        observedAt,
+        source: "read",
+        status: "allowed",
+        pools: [
+          { key: "gemini", limited: false, observedAt },
+          { key: "3p", limited: false, observedAt },
+        ],
+      });
+    });
+    await settle();
+    await expect.poll(() => reads.length).toBe(3);
+    await expect
+      .poll(
+        async () =>
+          (await board.readRunner("pod")).quotas?.antigravity?.pools?.find(
+            (pool) => pool.key === "3p",
+          )?.limited,
+      )
+      .toBe(false);
+    await settle();
+    expect(ran.toSorted()).toEqual(thirdParty);
+    expect(reads.map((at) => Date.parse(at) - started)).toEqual([0, 30 * 60_000, 60 * 60_000]);
     await scheduler.stop();
   });
 });

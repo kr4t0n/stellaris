@@ -186,11 +186,11 @@ export function quotaLevel(quota: CliQuota, now: Date): QuotaLevel {
 
 /**
  * How long a limit whose reset the CLI did not give holds its turns, from when it was reported.
- * Then one turn goes (`limitLapsed`), and its own report says whether the limit still holds.
+ * Then one turn goes (`lapsedLimit`), and its own report says whether the limit still holds.
  */
 export const UNKNOWN_LIMIT_HOLD_MS = 30 * 60_000;
 
-/** Until when a CLI's limit holds its turns on a runner, and whether the CLI gave that time. */
+/** Until when a CLI's limit, or a pool's, holds its turns on a runner, and whether the CLI gave that time. */
 export interface LimitHold {
   readonly until: string;
   readonly known: boolean;

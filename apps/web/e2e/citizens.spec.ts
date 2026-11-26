@@ -510,10 +510,13 @@ test("a citizen's CLI is switched from its mark by keyboard alone", async ({ pag
   const mark = view.getByRole("button", { name: /^Switch CLI/ });
   await mark.focus();
   await page.keyboard.press("Enter");
-  // The list opens on the CLI desk runs on; the arrow moves to the next.
+  // The list opens on the CLI desk runs on, and holds the others once the runners have answered;
+  // the arrow moves to the next.
+  const codex = view.getByRole("button", { name: "codex", exact: true });
   await expect(view.getByRole("button", { name: "claude", exact: true })).toBeFocused();
+  await expect(codex).toBeVisible();
   await page.keyboard.press("ArrowDown");
-  await expect(view.getByRole("button", { name: "codex", exact: true })).toBeFocused();
+  await expect(codex).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(mark).toHaveAccessibleName("Switch CLI (codex)");
   await expect(mark).toBeFocused();

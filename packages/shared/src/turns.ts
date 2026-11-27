@@ -224,8 +224,8 @@ export const TurnRecordSchema = z.object({
   resumeFailed: ResumeFailureSchema.optional(),
   /**
    * Whether the turn failed for now, which the same wake may get past in a minute: the model service
-   * turned it away or cut it off, the runner could not reach the board before the CLI started, or
-   * the job never reached the runner.
+   * turned it away or cut it off, the runner or its adapter could not reach the board before the
+   * CLI started or opened the session, or the job never reached the runner.
    */
   transient: z.boolean().optional(),
   /** How many turns in a row, this one included, could not resume the session for a `retry`. */

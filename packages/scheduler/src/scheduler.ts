@@ -2697,7 +2697,8 @@ export class Scheduler {
 
   /**
    * A turn that failed for now is sent again: the model service turned it away or cut it off, the
-   * runner could not reach the board before its CLI started, or its job never reached the runner.
+   * runner or its adapter could not reach the board before its CLI started or opened the session,
+   * or its job never reached the runner.
    * The same wake goes in the same conversation, after the next delay of `transientRetryMs`, with
    * every check a queued wake gets at dispatch. A wake already queued there, as a heartbeat's or a
    * new post's, runs the conversation instead. Once the delays are spent the heartbeat takes over,

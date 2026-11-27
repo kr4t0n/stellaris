@@ -158,6 +158,26 @@ describe("BoardRelay", () => {
     expect(call?.body).not.toContain(relay.secret);
   });
 
+  it("answers a call the board can't be reached for with a 502 and a JSON-RPC error", async () => {
+    const relay = await openRelay();
+    await relay.prefetch();
+    await board.close();
+    const called = await callAsAgy(entryOf(relay), "post_message", {});
+    expect(called).toMatchObject({
+      status: 502,
+      body: {
+        jsonrpc: "2.0",
+        id: 4,
+        error: {
+          code: -32603,
+          message: expect.stringMatching(
+            /^the board could not be reached: TypeError: fetch failed/,
+          ),
+        },
+      },
+    });
+  });
+
   it("refuses a request without its secret, which never reaches the board", async () => {
     const relay = await openRelay();
     await relay.prefetch();

@@ -129,7 +129,7 @@ With `STELLARIS_APPLE_APP_ID` set, the iOS app signs in on an `https` address of
 
 ### Set by the runner
 
-- `STELLARIS_AGENT_TOKEN`: set per turn in the agent CLI's environment by the runner, the only place the CLI gets its turn token but agy's, which reads no variable in the board's MCP header and gets the token in its session's header over stdin; no CLI's command line holds it.
+- `STELLARIS_AGENT_TOKEN`: set per turn in the agent CLI's environment by the runner, the only place the CLI gets its turn token; agy, which reads no variable in the board's MCP header, reaches the board through a relay of its session's own that holds the token, and gets only the relay's secret in its session's header over stdin; no CLI's command line holds either.
 - `HUSKY` (`0`): set in every agent CLI's environment by the runner, so husky neither points the clone away from the default branch's guard nor runs its hooks.
 
 ### Tokens

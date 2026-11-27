@@ -267,12 +267,12 @@ ACP reads no quota: `session/new` names the plan's tier in `_meta.antigravity.ti
 - **The hosts it passed** were `oauth2.googleapis.com`, `www.googleapis.com`, `daily-cloudcode-pa.googleapis.com`, `aicode.googleapis.com` and `lh3.googleusercontent.com`.
 - **A runner's own proxy is bypassed.** The guard dials each host itself, so a runner that reaches Google only through a proxy of its own gets a failed read, and its quota stays unknown.
 
-`/usage` answers groups of models that share their buckets, such as "Gemini Models" and "Claude and GPT models". Each bucket has an `id`, a `window` (`weekly`) and a `reset_time`. agy 1.5.15's print-mode bucket also holds `remaining_fraction` or `remaining_amount`, one of the two upstream, and a `disabled` flag, each left out when unset. The recorded answers carry only `remaining_fraction`.
+`/usage` answers groups of models that share their buckets, such as "Gemini Models" and "Claude and GPT models". Each bucket has an `id`, a `window` (`weekly` or `5h`) and a `reset_time`. agy 1.5.15's print-mode bucket also holds `remaining_fraction` or `remaining_amount`, one of the two upstream, and a `disabled` flag, each left out when unset. The recorded answers carry only `remaining_fraction`.
 
 `quotaFromUsage` makes each bucket a window keyed by its id and labelled with its group:
 
 - **Resets.** A bucket no window runs in, as both of a group nobody had used that week, has its `reset_time` at the Unix epoch (agy 1.5.15, 2026-11-24), which reads as no reset known. Kept as 1970, the interface showed a window just read as reset since the read.
-- **Length.** `window` gives it, by `WINDOW_MINUTES`. The same read had a `3p-5h` bucket, absent the day before, whose length the table doesn't give, so its meter shows none.
+- **Length.** `window` gives it, by `WINDOW_MINUTES`: on 2026-11-27 each group had a `weekly` bucket and a `5h` one, of 10,080 and 300 minutes, and `windowName` names each meter by its length and group, as `5h gemini models`. A `window` the table doesn't know leaves the length unknown, and the meter is named by the group's label alone, as the 5-hour buckets were (`gemini models`) from their first reads, `3p-5h`'s on 2026-11-24 and `gemini-5h`'s by 2026-11-26, until the table mapped `5h`.
 - **Used percent.** A fraction gives it. An amount has no total to give a percent: an amount of 0 is spent (100%), and any more leaves the percent unknown, as a bucket with neither field does.
 - **A `disabled` bucket** meters nothing and is left out.
 - **A group is a pool** (`pools`), keyed by its buckets' stem: `gemini` of `gemini-weekly` and `gemini-5h`, `3p` of `3p-weekly` and `3p-5h`. `quotaPool` names a citizen's pool the same way, by its model. Groups whose buckets share a stem are one pool.

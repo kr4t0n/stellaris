@@ -11,6 +11,7 @@ import {
   quotaPool,
   sameQuotaNumbers,
   windowName,
+  windowPool,
   type CliQuota,
   type CliQuotaInput,
   type QuotaWindowInput,
@@ -392,6 +393,49 @@ describe("pools", () => {
     for (const model of [undefined, "opus", "gemini-4-neon"]) {
       expect(heldOn([claude], "pod", { cli: "claude", model }, NOW)).toBe(true);
     }
+  });
+
+  it("reads a citizen's level by its model's pool: its own limit, and only the login's windows and its own pool's", () => {
+    // A read with the third-party pool spent, which warns for the login as a whole.
+    const thirdPartySpent = (gemini5h: number): CliQuota =>
+      quota({
+        source: "read",
+        status: "warning",
+        windows: [
+          window({ key: "gemini-5h", usedPercent: gemini5h, resetsAt: "2026-10-13T14:00:00.000Z" }),
+          window({ key: "3p-5h", usedPercent: 100, resetsAt: RESET }),
+        ],
+        pools: [
+          { key: "gemini", limited: false, observedAt: AT },
+          { key: "3p", limited: true, limitedUntil: RESET, limitedBy: "3p-5h", observedAt: AT },
+        ],
+      });
+    const spent = thirdPartySpent(30);
+    expect(windowPool(spent, spent.windows[0]!)).toBe("gemini");
+    expect(windowPool(spent, spent.windows[1]!)).toBe("3p");
+    expect(quotaLevel(spent, NOW)).toBe("warning");
+    expect(quotaLevel(spent, NOW, "3p")).toBe("limited");
+    expect(quotaLevel(spent, NOW, "gemini")).toBe("ok");
+    expect(quotaLevel(thirdPartySpent(80), NOW, "gemini")).toBe("warning");
+    // A pool spent with no reset holds, and so reads, for half an hour from its report.
+    const unknown = mergeQuota(open, refused("3p", null));
+    expect(quotaLevel(unknown, new Date("2026-10-13T12:29:59.000Z"), "3p")).toBe("limited");
+    expect(quotaLevel(unknown, new Date("2026-10-13T12:30:00.000Z"), "3p")).toBe("warning");
+    expect(quotaLevel(unknown, NOW, "gemini")).toBe("ok");
+    // The login's own warning, with no pool spent, and its limit read for every pool.
+    expect(quotaLevel(quota({ status: "warning", pools: open.pools }), NOW, "gemini")).toBe(
+      "warning",
+    );
+    expect(quotaLevel(quota({ status: "limited", limitedUntil: RESET }), NOW, "gemini")).toBe(
+      "limited",
+    );
+    // A window whose stem names no pool the quota reports is the login's, as every window is of a
+    // report with no pools, such as a runner's from before pools.
+    const before = quota({ status: "warning", windows: spent.windows });
+    expect(windowPool(before, before.windows[1]!)).toBeNull();
+    expect(quotaLevel(before, NOW, "gemini")).toBe("warning");
+    const claude = quota({ windows: [window({ key: "five_hour" })] });
+    expect(windowPool(claude, claude.windows[0]!)).toBeNull();
   });
 });
 

@@ -1353,6 +1353,79 @@ describe("Scheduler", () => {
     expect(await keys()).not.toContain("idle_member:eng-1");
   });
 
+  /**
+   * Antigravity on pod with its third-party pool spent until `reset` and its login and Gemini pool
+   * clear, as agy's read reports it, and two engineers there in demo: eng-3, on a Claude model,
+   * which draws from that pool, and eng-4, on a Gemini model.
+   */
+  async function thirdPartySpent(board: Board, reset: number): Promise<void> {
+    await board.addRunner(USER, "pod");
+    await board.markRunner("pod", { status: "connected", clis: ["claude", "antigravity"] });
+    await board.placeProject("demo", "pod");
+    for (const [name, model] of [
+      ["eng-3", "claude-sonnet-4-6"],
+      ["eng-4", "gemini-3.1-pro"],
+    ] as const) {
+      await board.addAgent(USER, {
+        name,
+        role: "engineer",
+        cli: "antigravity",
+        model,
+        memberships: ["demo"],
+      });
+    }
+    const observedAt = now().toISOString();
+    await board.recordQuota(
+      "pod",
+      "antigravity",
+      CliQuotaSchema.parse({
+        observedAt,
+        source: "read",
+        status: "warning",
+        pools: [
+          { key: "gemini", limited: false, observedAt },
+          { key: "3p", limited: true, limitedUntil: new Date(reset).toISOString(), observedAt },
+        ],
+      }),
+    );
+  }
+
+  it("signals no waiting stage its taker's pool's limit holds, and a stage for the other pool's taker", async () => {
+    const { board, scheduler } = await setup({ timings: OFF_REFLECTION });
+    await thirdPartySpent(board, now().getTime() + 2 * 60 * 60_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    const held = await board.createTask(USER, {
+      project: "demo",
+      title: "eng-3's alone",
+      stages: [{ name: "build", agent: "eng-3" }],
+    });
+    const free = await board.createTask(USER, {
+      project: "demo",
+      title: "eng-4's alone",
+      stages: [{ name: "build", agent: "eng-4" }],
+    });
+    advance(10_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    const keys = (await board.listSignals()).map((record) => record.signal.key);
+    expect(keys).toContain(`waiting_stage:${free.id}:s1`);
+    expect(keys).not.toContain(`waiting_stage:${held.id}:s1`);
+  });
+
+  it("signals no idle member its pool's limit holds, and the other pool's citizen on the same CLI", async () => {
+    const { board, scheduler } = await setup({ timings: OFF_REFLECTION });
+    await thirdPartySpent(board, now().getTime() + 3 * DAY + 10 * 60_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    advance(3 * DAY + 5 * 60_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    const keys = (await board.listSignals()).map((record) => record.signal.key);
+    expect(keys).toContain("idle_member:eng-4");
+    expect(keys).not.toContain("idle_member:eng-3");
+  });
+
   it("signals no stage open to anyone while the pause holds every citizen, the user aside", async () => {
     const { board, scheduler } = await setup();
     await board.addRunner(USER, "pod");

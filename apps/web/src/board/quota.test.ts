@@ -29,6 +29,28 @@ const FIVE_HOUR = {
   observedAt: "2026-10-13T11:55:00.000Z",
 };
 
+/** One of Antigravity's buckets, which all reset at 15:50 here. */
+function agyWindow(key: string, label: string, minutes: number, usedPercent: number) {
+  return {
+    key,
+    label,
+    minutes,
+    usedPercent,
+    resetsAt: "2026-10-13T15:50:00.000Z",
+    observedAt: "2026-10-13T11:55:00.000Z",
+  };
+}
+
+/** One of Antigravity's pools, spent until `limitedUntil` unless that is null. */
+function agyPool(key: string, limitedUntil: string | null) {
+  return {
+    key,
+    limited: limitedUntil !== null,
+    limitedUntil,
+    observedAt: "2026-10-13T11:55:00.000Z",
+  };
+}
+
 function runner(name: string, quotas: Runner["quotas"], status = "connected"): Runner {
   return RunnerSchema.parse({
     name,
@@ -150,5 +172,50 @@ describe("readings", () => {
     ).toBe("5h 35% · 7d 85% · near a limit");
     expect(quotaLine(quota({ status: "limited", limitedUntil: null }), NOON)).toBe("limited");
     expect(quotaLine(quota(), NOON)).toBe("no windows reported");
+  });
+
+  it("words and lines a citizen's quota by its model's pool, as its turns are held", () => {
+    // Antigravity's read with its third-party pool spent until 15:50, which warns for the login.
+    const spent = quota({
+      source: "read",
+      status: "warning",
+      windows: [
+        agyWindow("gemini-weekly", "Gemini Models", 10_080, 12),
+        agyWindow("gemini-5h", "Gemini Models", 300, 30),
+        agyWindow("3p-weekly", "Claude and GPT models", 10_080, 50),
+        agyWindow("3p-5h", "Claude and GPT models", 300, 100),
+      ],
+      pools: [agyPool("gemini", null), agyPool("3p", "2026-10-13T15:50:00.000Z")],
+    });
+    // The CLI as a whole, as the runners view reads it, is near a limit.
+    expect(quotaWords(spent, NOON).words).toBe("near a limit");
+    expect(quotaWords(spent, NOON, "3p")).toEqual({
+      level: "limited",
+      words: "limited for 3h 50m",
+      tone: "text-red-300",
+    });
+    expect(quotaLine(spent, NOON, "3p")).toBe("limited for 3h 50m");
+    expect(quotaWords(spent, NOON, "gemini")).toEqual({
+      level: "ok",
+      words: "",
+      tone: "text-fg-muted",
+    });
+    expect(quotaLine(spent, NOON, "gemini")).toBe("7d gemini models 12% · gemini models 30%");
+    // A pool spent with no reset reads as limited without a time, as long as it holds.
+    const unknown = quota({
+      status: "warning",
+      pools: [{ key: "3p", limited: true, observedAt: "2026-10-13T11:55:00.000Z" }],
+    });
+    expect(quotaWords(unknown, NOON, "3p").words).toBe("limited");
+    expect(quotaWords(unknown, NOON + 25 * 60_000, "3p").words).toBe("near a limit");
+    // While the login and the pool both hold, the later end does.
+    const both = quota({
+      ...spent,
+      status: "limited",
+      limitedUntil: "2026-10-13T13:00:00.000Z",
+    });
+    expect(quotaWords(both, NOON, "3p").words).toBe("limited for 3h 50m");
+    expect(quotaWords(both, NOON, "gemini").words).toBe("limited for 1h 0m");
+    expect(quotaWords(both, NOON).words).toBe("limited for 1h 0m");
   });
 });

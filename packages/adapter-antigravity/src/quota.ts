@@ -6,6 +6,7 @@ import {
   AGENT_TOKEN_ENV,
   CliQuotaSchema,
   RUNNER_TOKEN_ENV,
+  poolKeyOf,
   type CliQuota,
 } from "@stellaris/shared";
 import { isDict, str } from "./rpc.js";
@@ -203,16 +204,6 @@ function commandData(raw: unknown, command: string): Record<string, unknown> | s
   }
   const ran = isDict(result["command"]) ? result["command"] : {};
   return isDict(ran["data"]) ? ran["data"] : `agy -p /${command} answered no data`;
-}
-
-/**
- * A pool's key from its bucket's id: the id's stem before its last `-`, as `gemini` of
- * `gemini-weekly` and `3p` of `3p-5h`, which `quotaPool` keys a model's pool by; an id with no
- * stem is its own key.
- */
-function poolKeyOf(bucket: string): string {
-  const dash = bucket.lastIndexOf("-");
-  return dash > 0 ? bucket.slice(0, dash) : bucket;
 }
 
 /**

@@ -46,6 +46,26 @@ same "the runner image's account" \
 docker run --rm "$runner_image" sh -c 'claude --version && codex --version && agy --version && git --version &&
   kubectl version --client && helm version && helm plugin list | grep "^diff[[:space:]]" &&
   helm diff version && helmfile --version'
+# Any clone or checkout of a repository with LFS pointers runs git-lfs, through the filters the
+# system gitconfig registers for every account, so the image needs git-lfs 3.8.1 or later, which
+# fixes CVE-2026-105803, CVE-2026-105802, CVE-2026-69261 and CVE-2026-69260, and the filters
+# registered outside the home the image moves. Both are printed before either is checked.
+git_lfs_min=3.8.1
+git_lfs=$(docker run --rm "$runner_image" git lfs version) || git_lfs=""
+lfs_filters=$(docker run --rm "$runner_image" git config --system --get-regexp '^filter\.lfs\.') ||
+  lfs_filters=""
+echo "the runner image's git lfs version: ${git_lfs:-<none>}"
+echo "its system gitconfig's LFS filters:"
+echo "${lfs_filters:-<none>}"
+git_lfs_version=$(printf '%s\n' "$git_lfs" | sed -n 's#^git-lfs/\([0-9][0-9.]*\) .*#\1#p')
+if [ -z "$git_lfs_version" ] ||
+  [ "$(printf '%s\n' "$git_lfs_min" "$git_lfs_version" | sort -V | head -n 1)" != "$git_lfs_min" ]; then
+  echo "the runner image's git-lfs is not $git_lfs_min or later: ${git_lfs:-no git lfs}"
+  exit 1
+fi
+[ -n "$(docker run --rm "$runner_image" git config --system --get filter.lfs.process)" ] ||
+  { echo "the runner image's system gitconfig registers no filter.lfs.process"; exit 1; }
+echo "the runner image's git-lfs $git_lfs_version is $git_lfs_min or later, with the system LFS filters"
 # The runner's Claude turns run the Agent SDK's own Claude Code, not the claude on the PATH: the
 # binary in the SDK's per-platform package, found here as the SDK finds it. Brotli 1.2.1, the fix
 # for CVE-2026-111497, added this error code, so a binary without it embeds an older decoder.

@@ -444,12 +444,26 @@ function name(input: Partial<QuotaWindowInput> & { key: string }): string {
 }
 
 describe("windowName", () => {
-  it("names Claude's windows by key and label, and Codex's by length", () => {
+  it("names Claude's windows by key and label, agy's by length and group, and Codex's by length", () => {
     expect(name({ key: "five_hour", minutes: 300 })).toBe("5h");
     expect(name({ key: "seven_day_opus", minutes: 10_080 })).toBe("7d opus");
     // A model's name, as the CLI gives it, reads in lowercase like the rest.
     expect(name({ key: "model:Fable", label: "Fable", minutes: 10_080 })).toBe("7d fable");
-    expect(name({ key: "model:Fable", label: "Fable", minutes: 1_440 })).toBe("fable");
+    // Any labelled window of a known length is named by it, so one of a day reads as one; Claude's
+    // model windows are all weekly, so only this table has it.
+    expect(name({ key: "model:Fable", label: "Fable", minutes: 1_440 })).toBe("1d fable");
+    // agy's buckets, labelled with their group, each of whose two windows reads by its length.
+    expect(name({ key: "gemini-weekly", label: "Gemini Models", minutes: 10_080 })).toBe(
+      "7d gemini models",
+    );
+    expect(name({ key: "gemini-5h", label: "Gemini Models", minutes: 300 })).toBe(
+      "5h gemini models",
+    );
+    expect(name({ key: "3p-5h", label: "Claude and GPT models", minutes: 300 })).toBe(
+      "5h claude and gpt models",
+    );
+    // A labelled window of no known length reads as its label alone.
+    expect(name({ key: "gemini-5h", label: "Gemini Models" })).toBe("gemini models");
     expect(name({ key: "primary", minutes: 10_080 })).toBe("7d");
     expect(name({ key: "secondary", minutes: 300 })).toBe("5h");
     expect(name({ key: "primary", minutes: 90 })).toBe("90m");

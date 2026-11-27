@@ -893,7 +893,7 @@ test("a citizen's view and the citizens list read Antigravity's quota for the ci
   await expect(quota.getByText(/^limited for/)).toHaveClass(/text-red-300/);
   await page.goto("/citizen/cy");
   await expect(quota).toHaveText(
-    "antigravity quota · rig 7d gemini models 12% · gemini models 30%",
+    "antigravity quota · rig 7d gemini models 12% · 5h gemini models 30%",
   );
   await expect(quota.getByText(/^7d gemini models/)).toHaveClass(/text-fg-muted/);
 });

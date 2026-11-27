@@ -846,6 +846,24 @@ test("every row's windows share columns, so bars start together whatever the CLI
   }
 });
 
+test("the runners view names each Antigravity window by its length and its group", async ({
+  page,
+}) => {
+  await fakeBoard(page, { pooled: true });
+  await page.goto("/runners");
+  const rig = page
+    .getByRole("region", { name: "Plan quota" })
+    .locator('[aria-label="Quota by runner"] > li')
+    .filter({ hasText: "antigravity" });
+  // Each group has a weekly bucket and a 5-hour one, which share the group's label.
+  await expect(rig.getByRole("listitem")).toHaveText([
+    /^7d gemini models\s*12%/,
+    /^5h gemini models\s*30%/,
+    /^7d claude and gpt models\s*50%/,
+    /^5h claude and gpt models\s*100%/,
+  ]);
+});
+
 test("the runners view reads numbers missing or old once on opening, and again on request", async ({
   page,
 }) => {

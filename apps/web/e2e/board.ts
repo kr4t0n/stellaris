@@ -1277,6 +1277,57 @@ function codexQuota(observedAgo: number) {
   };
 }
 
+/**
+ * Antigravity's quota as a read gave it, in the shapes of one login's read on 2026-11-26: its
+ * Gemini pool in use, and its third-party pool spent for two hours, which warns for the login as a
+ * whole while only that pool's models are refused.
+ */
+function antigravityQuota(observedAgo: number) {
+  const observedAt = minutesFromNow(-observedAgo);
+  const spentUntil = minutesFromNow(120);
+  const window = (
+    key: string,
+    label: string,
+    minutes: number,
+    usedPercent: number,
+    resetsAt: string,
+  ) => ({ key, label, minutes, usedPercent, resetsAt, observedAt });
+  return {
+    observedAt,
+    source: "read",
+    status: "warning",
+    limitedUntil: null,
+    limitedBy: null,
+    plan: null,
+    windows: [
+      window("gemini-weekly", "Gemini Models", 10_080, 12, minutesFromNow(8_620)),
+      window("gemini-5h", "Gemini Models", 300, 30, minutesFromNow(200)),
+      window("3p-weekly", "Claude and GPT models", 10_080, 50, minutesFromNow(8_620)),
+      window("3p-5h", "Claude and GPT models", 300, 100, spentUntil),
+    ],
+    credits: null,
+    extraUsage: null,
+    pools: [
+      {
+        key: "gemini",
+        label: "Gemini Models",
+        limited: false,
+        limitedUntil: null,
+        limitedBy: null,
+        observedAt,
+      },
+      {
+        key: "3p",
+        label: "Claude and GPT models",
+        limited: true,
+        limitedUntil: spentUntil,
+        limitedBy: "3p-5h",
+        observedAt,
+      },
+    ],
+  };
+}
+
 /** A runner on a machine called studio asking to join, which `enrolling` puts on the board. */
 export const ENROLLING_CODE = "BCDF-GHJK";
 
@@ -1333,7 +1384,9 @@ const CODEX_MODELS = [
  * with its own; with
  * `quotas: "reads"`, pod's Claude numbers are old and its Codex never reported, so opening the
  * runners view reads both, and pod answers Codex's read as a runner from before quota reads; with
- * `quotas: "limited"`, pod's Claude is limited for 40 minutes. With `uploads`, ada shows three
+ * `quotas: "limited"`, pod's Claude is limited for 40 minutes. With `pooled`, rig, an Antigravity
+ * runner, has its third-party pool spent for two hours while its login and its Gemini pool are not,
+ * and runs bo, on a Claude model, and cy, on a Gemini one. With `uploads`, ada shows three
  * screenshots in the task's thread, one of them an image the board does not have and one on the
  * web, a post of web images in shapes that stay plain or size themselves, and the screenshot the
  * board has in lab's general.
@@ -1349,6 +1402,7 @@ export async function fakeBoard(
     signedOut?: boolean;
     inFlight?: boolean;
     quotas?: "reads" | "limited";
+    pooled?: boolean;
     uploads?: boolean;
     /** Links no pull request to the study whose sign-off names the user. */
     unlinked?: boolean;
@@ -1403,6 +1457,7 @@ export async function fakeBoard(
   const studioQuotas: Record<string, unknown> = { claude: claudeQuota(4, 20) };
   // laptop's, taken with pod's, so their resets match to the minute whenever the view asks.
   const laptopQuotas = { claude: claudeQuota(120, 35) };
+  const rigQuota = antigravityQuota(3);
   // The user's pauses, by runner: the whole runner's, and each CLI's on it.
   const runnerPauses = new Map<
     string,
@@ -1464,6 +1519,21 @@ export async function fakeBoard(
       quotas: laptopQuotas,
       ...pausesOf(named("laptop")),
     },
+    ...(options.pooled === true
+      ? [
+          {
+            name: named("rig"),
+            os: "linux",
+            clis: ["antigravity"],
+            capabilities: [],
+            version: "0.3.11",
+            gitIdentityMissing: [],
+            status: "connected",
+            quotas: { antigravity: rigQuota },
+            ...pausesOf(named("rig")),
+          },
+        ]
+      : []),
   ];
   // The runners removed, by the name each had then.
   const removedRunners = new Set<string>();
@@ -2187,6 +2257,12 @@ export async function fakeBoard(
             ? [{ ...member("ada", "researcher"), status: "retired", retiredAt: CREATED }]
             : []),
           ...(options.heartbeats === true ? [member("ren", "researcher", ["lab"])] : []),
+          ...(options.pooled === true
+            ? [
+                member("bo", "researcher", [], "claude-sonnet-4-6", "rig", null, "antigravity"),
+                member("cy", "researcher", [], "gemini-3.1-pro", "rig", null, "antigravity"),
+              ]
+            : []),
         ]);
       case "/api/version":
         return json(route, { version: "0.3.11" });

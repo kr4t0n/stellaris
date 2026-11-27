@@ -154,6 +154,35 @@ export function quotaPool(cli: CliKind | null, model: string | null | undefined)
     : ANTIGRAVITY_POOLS.thirdParty;
 }
 
+/**
+ * A pool's key from its bucket's id: the id's stem before its last `-`, as `gemini` of
+ * `gemini-weekly` and `3p` of `3p-5h`, which `quotaPool` keys a model's pool by; an id with no
+ * stem is its own key.
+ */
+export function poolKeyOf(bucket: string): string {
+  const dash = bucket.lastIndexOf("-");
+  return dash > 0 ? bucket.slice(0, dash) : bucket;
+}
+
+/**
+ * The pool whose models a window counts, of those the quota reports: the one its key's stem names
+ * (`poolKeyOf`), as a bucket of agy's is keyed, or null for a window of the login as a whole, as
+ * every window of a CLI without pools is.
+ */
+export function windowPool(quota: CliQuota, window: QuotaWindow): string | null {
+  const key = poolKeyOf(window.key);
+  return quota.pools?.some((pool) => pool.key === key) === true ? key : null;
+}
+
+/** Whether a window counts for a citizen whose model draws from `pool`: the login's, or its pool's. */
+export function windowCounts(quota: CliQuota, window: QuotaWindow, pool: string | null): boolean {
+  if (pool === null) {
+    return true;
+  }
+  const own = windowPool(quota, window);
+  return own === null || own === pool;
+}
+
 /** Whether a window still counts: one whose reset has passed has started afresh since it was read. */
 export function windowCurrent(window: QuotaWindow, now: Date): boolean {
   return window.resetsAt === null || Date.parse(window.resetsAt) > now.getTime();
@@ -165,7 +194,14 @@ export function windowCurrent(window: QuotaWindow, now: Date): boolean {
  */
 export type QuotaLevel = "ok" | "warning" | "limited" | "none";
 
-export function quotaLevel(quota: CliQuota, now: Date): QuotaLevel {
+/**
+ * How a CLI's quota reads now for a citizen whose model draws from `pool` (`quotaPool`), or for the
+ * CLI as a whole without one. A pool's own limit holding its models' turns (`limitHold`) is
+ * `limited` too; only the login's windows and the pool's own count (`windowCounts`), and the CLI's
+ * own warning counts unless every pool it reports limited is another's, as agy warns while one
+ * pool is spent.
+ */
+export function quotaLevel(quota: CliQuota, now: Date, pool: string | null = null): QuotaLevel {
   if (quota.status === "none") {
     return "none";
   }
@@ -175,13 +211,21 @@ export function quotaLevel(quota: CliQuota, now: Date): QuotaLevel {
   ) {
     return "limited";
   }
+  if (pool !== null && limitHold(quota, now, pool) !== null) {
+    return "limited";
+  }
   const high = quota.windows.some(
     (window) =>
+      windowCounts(quota, window, pool) &&
       windowCurrent(window, now) &&
       window.usedPercent !== null &&
       window.usedPercent >= QUOTA_WARNING_PERCENT,
   );
-  return quota.status === "warning" || high ? "warning" : "ok";
+  const stopped = (quota.pools ?? []).filter((each) => each.limited);
+  const warns =
+    quota.status === "warning" &&
+    (pool === null || stopped.length === 0 || stopped.some((each) => each.key === pool));
+  return warns || high ? "warning" : "ok";
 }
 
 /**

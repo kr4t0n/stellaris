@@ -1023,6 +1023,29 @@ describe("buildTurnPrompt", () => {
               }),
             },
           },
+          {
+            name: "ca",
+            os: "linux",
+            clis: ["antigravity"],
+            capabilities: [],
+            status: "connected",
+            quotas: {
+              antigravity: CliQuotaSchema.parse({
+                observedAt: "2026-10-13T11:50:00.000Z",
+                source: "turn",
+                status: "warning",
+                pools: [
+                  {
+                    key: "3p",
+                    label: "Claude and GPT models",
+                    limited: true,
+                    limitedUntil: "2026-10-13T15:40:00.000Z",
+                    observedAt: "2026-10-13T11:50:00.000Z",
+                  },
+                ],
+              }),
+            },
+          },
         ],
         projects: [listedProject("lab", "pod")],
       },
@@ -1035,7 +1058,10 @@ describe("buildTurnPrompt", () => {
       "- merlin: connected; linux; CLIs claude, codex; offers nothing beyond its CLIs; no projects; claude paused by the user since 2026-10-13T08:00:00.000Z; claude held by its limit until 2026-10-20T05:11:58.000Z; quota claude limited until 2026-10-20T05:11:58.000Z\n",
     );
     expect(prompt).toContain(
-      "A runner, or a CLI on it, paused by the user starts none of the turns it would run until the user resumes it, and a CLI held by its limit starts none of its turns there until the limit lifts",
+      "- ca: connected; linux; CLIs antigravity; offers nothing beyond its CLIs; no projects; antigravity's Claude and GPT models (pool 3p) held by their limit until 2026-10-13T15:40:00.000Z;",
+    );
+    expect(prompt).toContain(
+      "A runner, or a CLI on it, paused by the user starts none of the turns it would run until the user resumes it, and a CLI held by its limit starts none of its turns there until the limit lifts, nor a CLI's pool of models held by its own limit any turn of a citizen whose model is in it",
     );
     expect(prompt).toContain(
       "and a runner syncing its board copy as it connects starts none until the copy is up to date: they wait, and the stages their citizens hold keep their leases.",

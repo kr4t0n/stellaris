@@ -9,7 +9,7 @@ import {
   type Name,
 } from "./ids.js";
 import { DEFAULT_TIME_ZONE, TimeZoneSchema } from "./crons.js";
-import { CliQuotaSchema, limitHold, type LimitHold } from "./quota.js";
+import { CliQuotaSchema, limitHold, quotaPool, type LimitHold } from "./quota.js";
 import {
   CharterTriggerSchema,
   RoleCharterSchema,
@@ -724,25 +724,39 @@ export function runnerPause(runner: Runner, cli: CliKind): RunnerPause | undefin
 
 /**
  * The limit that holds `cli`'s turns on a runner until it lifts by itself, as its quota there
- * reads now (`limitHold`), or null when none does.
+ * reads now (`limitHold`), or null when none does: the login's, and with `pool` (`quotaPool`) that
+ * pool's own as well.
  */
-export function runnerLimitHold(runner: Runner, cli: CliKind, now: Date): LimitHold | null {
+export function runnerLimitHold(
+  runner: Runner,
+  cli: CliKind,
+  now: Date,
+  pool: string | null = null,
+): LimitHold | null {
   const quota = runner.quotas?.[cli];
-  return quota === undefined ? null : limitHold(quota, now);
+  return quota === undefined ? null : limitHold(quota, now, pool);
+}
+
+/** What of a citizen decides which of a runner's holds keep its turns: its CLI, and its model's pool. */
+export interface CitizenCli {
+  readonly cli: CliKind | null;
+  readonly model?: string | undefined;
 }
 
 /**
  * Whether a citizen's turns in a place would wait: the runner they would run on, the project's for
  * a project's turns and the citizen's home runner for its society scope's, paused by the user as a
- * whole or for the citizen's CLI, holding that CLI's turns for its limit until it lifts, or syncing
- * its board copy as it connects (`runnerSyncing`). Neither placed yet holds nothing.
+ * whole or for the citizen's CLI, holding that CLI's turns for its limit until it lifts, or the
+ * limit of the pool the citizen's model draws from (`quotaPool`), or syncing its board copy as it
+ * connects (`runnerSyncing`). Neither placed yet holds nothing.
  */
 export function heldOn(
   runners: readonly Runner[],
   runner: Name | undefined,
-  cli: CliKind | null,
+  citizen: CitizenCli,
   now: Date,
 ): boolean {
+  const { cli } = citizen;
   if (runner === undefined || cli === null) {
     return false;
   }
@@ -750,7 +764,7 @@ export function heldOn(
   return (
     record !== undefined &&
     (runnerPause(record, cli) !== undefined ||
-      runnerLimitHold(record, cli, now) !== null ||
+      runnerLimitHold(record, cli, now, quotaPool(cli, citizen.model)) !== null ||
       runnerSyncing(record) !== undefined)
   );
 }

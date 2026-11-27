@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   CliQuotaSchema,
+  lapsedLimit,
   limitHold,
   limitLapsed,
   mergeQuota,
+  poolHolds,
   quotaChanged,
   quotaLevel,
+  quotaPool,
   sameQuotaNumbers,
   windowName,
   type CliQuota,
@@ -214,12 +217,14 @@ describe("limitHold", () => {
       status: "connected",
       quotas: { claude: quota({ status: "limited", limitedUntil: "2026-10-13T13:00:00.000Z" }) },
     });
-    expect(heldOn([pod], "pod", "claude", NOW)).toBe(true);
-    expect(heldOn([pod], "pod", "codex", NOW)).toBe(false);
-    expect(heldOn([pod], "pod", "claude", new Date("2026-10-13T13:00:00.000Z"))).toBe(false);
-    expect(heldOn([pod], undefined, "claude", NOW)).toBe(false);
+    expect(heldOn([pod], "pod", { cli: "claude" }, NOW)).toBe(true);
+    expect(heldOn([pod], "pod", { cli: "codex" }, NOW)).toBe(false);
+    expect(heldOn([pod], "pod", { cli: "claude" }, new Date("2026-10-13T13:00:00.000Z"))).toBe(
+      false,
+    );
+    expect(heldOn([pod], undefined, { cli: "claude" }, NOW)).toBe(false);
     const paused = { ...pod, pausedClis: { codex: { at: AT, by: "user" } } };
-    expect(heldOn([paused], "pod", "codex", NOW)).toBe(true);
+    expect(heldOn([paused], "pod", { cli: "codex" }, NOW)).toBe(true);
   });
 
   it("holds every CLI of a connected runner while it syncs its board copy, and nothing once it is done or away", () => {
@@ -242,20 +247,151 @@ describe("limitHold", () => {
       sync,
     });
     expect(runnerSyncing(pod)).toEqual(sync);
-    expect(heldOn([pod], "pod", "claude", NOW)).toBe(true);
-    expect(heldOn([pod], "pod", "codex", NOW)).toBe(true);
+    expect(heldOn([pod], "pod", { cli: "claude" }, NOW)).toBe(true);
+    expect(heldOn([pod], "pod", { cli: "codex" }, NOW)).toBe(true);
     for (const settled of [
       { ...pod, sync: { ...sync, phase: "done" as const, finishedAt: AT } },
       { ...pod, status: "disconnected" as const },
       { ...pod, sync: undefined },
     ]) {
       expect(runnerSyncing(settled)).toBeUndefined();
-      expect(heldOn([settled], "pod", "claude", NOW)).toBe(false);
+      expect(heldOn([settled], "pod", { cli: "claude" }, NOW)).toBe(false);
     }
     expect(syncedFiles(sync)).toBe("6,200 / 15,152 files");
     expect(syncedFiles({ ...sync, files: 1_234_567, totalFiles: null })).toBe("1,234,567 files");
     expect(syncedFiles({ ...sync, phase: "starting", files: 0, totalFiles: null })).toBeNull();
     expect(syncedFiles({ ...sync, phase: "listing", files: 0, totalFiles: null })).toBeNull();
+  });
+});
+
+/**
+ * Antigravity's pools as its read names them, and a turn's refusal of one: the shapes of one
+ * login on 2026-11-26, where a third-party refusal left the Gemini models running.
+ */
+describe("pools", () => {
+  const open = quota({
+    source: "read",
+    status: "allowed",
+    pools: [
+      { key: "gemini", label: "Gemini Models", limited: false, observedAt: AT },
+      { key: "3p", label: "Claude and GPT models", limited: false, observedAt: AT },
+    ],
+  });
+  const refused = (key: string, limitedUntil: string | null, at: string = AT): CliQuota =>
+    quota({
+      observedAt: at,
+      status: "warning",
+      pools: [{ key, limited: true, limitedUntil, observedAt: at }],
+    });
+  const RESET = "2026-10-13T15:50:00.000Z";
+
+  it("names Antigravity's pool by the citizen's model, Gemini's with none set, and none for the other CLIs", () => {
+    expect(quotaPool("antigravity", "gemini-4-neon")).toBe("gemini");
+    expect(quotaPool("antigravity", "gemini-3.8-flash")).toBe("gemini");
+    expect(quotaPool("antigravity", undefined)).toBe("gemini");
+    expect(quotaPool("antigravity", "claude-sonnet-4-6")).toBe("3p");
+    expect(quotaPool("antigravity", "gpt-oss-120b")).toBe("3p");
+    expect(quotaPool("claude", "opus")).toBeNull();
+    expect(quotaPool("codex", "gpt-6-astra")).toBeNull();
+    expect(quotaPool(null, undefined)).toBeNull();
+  });
+
+  it("holds a pool's turns until its reset while the other pool's go", () => {
+    const limited = mergeQuota(open, refused("3p", RESET));
+    expect(limitHold(limited, NOW, "3p")).toEqual({ until: RESET, known: true });
+    expect(limitHold(limited, NOW, "gemini")).toBeNull();
+    expect(limitHold(limited, NOW)).toBeNull();
+    expect(limitHold(limited, new Date(RESET), "3p")).toBeNull();
+    // The read's label stays on the pool the refusal named by its key alone.
+    expect(poolHolds(limited, NOW)).toEqual([
+      { pool: "3p", label: "Claude and GPT models", until: RESET, known: true },
+    ]);
+    expect(quotaChanged(open, limited)).toBe(true);
+    expect(quotaChanged(limited, mergeQuota(limited, refused("3p", RESET)))).toBe(false);
+  });
+
+  it("keeps a pool's limit through a read until a read finds that pool clear", () => {
+    const limited = mergeQuota(open, refused("3p", RESET));
+    // A read that names the other pool spent, or this one still spent, leaves it held.
+    const geminiSpent = quota({
+      source: "read",
+      status: "warning",
+      pools: [{ key: "gemini", limited: true, limitedUntil: RESET, observedAt: AT }],
+    });
+    expect(limitHold(mergeQuota(limited, geminiSpent), NOW, "3p")).toEqual({
+      until: RESET,
+      known: true,
+    });
+    const bothSpent = quota({
+      source: "read",
+      status: "limited",
+      limitedUntil: "2026-10-13T14:00:00.000Z",
+      pools: [
+        { key: "gemini", limited: true, limitedUntil: "2026-10-13T14:00:00.000Z", observedAt: AT },
+        { key: "3p", limited: true, limitedUntil: RESET, observedAt: AT },
+      ],
+    });
+    // The login frees with the first pool, while the other's stays held to its own reset.
+    const afterBoth = mergeQuota(limited, bothSpent);
+    expect(limitHold(afterBoth, new Date("2026-10-13T14:00:00.000Z"), "gemini")).toBeNull();
+    expect(limitHold(afterBoth, new Date("2026-10-13T14:00:00.000Z"), "3p")).toEqual({
+      until: RESET,
+      known: true,
+    });
+    // A read that finds the pool clear lifts it.
+    expect(limitHold(mergeQuota(limited, open), NOW, "3p")).toBeNull();
+  });
+
+  it("holds every pool while the whole login is limited, as a refusal naming no pool it knows reports", () => {
+    const login = quota({ status: "limited", limitedUntil: RESET });
+    expect(limitHold(login, NOW, "gemini")).toEqual({ until: RESET, known: true });
+    expect(limitHold(login, NOW, "3p")).toEqual({ until: RESET, known: true });
+    // While both hold, the later end does.
+    const later = mergeQuota(refused("3p", "2026-10-13T18:00:00.000Z"), login);
+    expect(limitHold(later, NOW, "3p")).toEqual({ until: "2026-10-13T18:00:00.000Z", known: true });
+  });
+
+  it("lets one turn try a pool's limit with no reset once its half hour is over, by that report", () => {
+    const limited = mergeQuota(open, refused("3p", null));
+    expect(limitHold(limited, NOW, "3p")).toEqual({
+      until: "2026-10-13T12:30:00.000Z",
+      known: false,
+    });
+    const lapsedAt = new Date("2026-10-13T12:30:00.000Z");
+    expect(lapsedLimit(limited, NOW, "3p")).toBeNull();
+    expect(lapsedLimit(limited, lapsedAt, "3p")).toEqual({ key: "3p", observedAt: AT });
+    expect(limitLapsed(limited, lapsedAt, "gemini")).toBe(false);
+    expect(limitLapsed(limited, lapsedAt)).toBe(false);
+    // The login's own lapse is keyed apart from any pool's.
+    expect(lapsedLimit(quota({ status: "limited" }), lapsedAt, "3p")).toEqual({
+      key: "",
+      observedAt: AT,
+    });
+  });
+
+  it("holds a citizen's turns on a runner by its model's pool", () => {
+    const pod: Runner = RunnerSchema.parse({
+      name: "pod",
+      os: "linux",
+      clis: ["claude", "antigravity"],
+      capabilities: [],
+      status: "connected",
+      quotas: { antigravity: mergeQuota(open, refused("3p", RESET)) },
+    });
+    expect(heldOn([pod], "pod", { cli: "antigravity", model: "claude-sonnet-4-6" }, NOW)).toBe(
+      true,
+    );
+    expect(heldOn([pod], "pod", { cli: "antigravity", model: "gemini-4-neon" }, NOW)).toBe(false);
+    expect(heldOn([pod], "pod", { cli: "antigravity" }, NOW)).toBe(false);
+    expect(heldOn([pod], "pod", { cli: "claude", model: "claude-sonnet-4-6" }, NOW)).toBe(false);
+    // A CLI with no pools holds every citizen on it, whatever its model, as before pools.
+    const claude = {
+      ...pod,
+      quotas: { claude: quota({ status: "limited", limitedUntil: RESET }) },
+    };
+    for (const model of [undefined, "opus", "gemini-4-neon"]) {
+      expect(heldOn([claude], "pod", { cli: "claude", model }, NOW)).toBe(true);
+    }
   });
 });
 

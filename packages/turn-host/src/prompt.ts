@@ -7,6 +7,7 @@ import {
   nextFire,
   parseChannelRef,
   PATH_TOKENS,
+  poolHolds,
   quotaLevel,
   runnerLimitHold,
   runnerSyncing,
@@ -378,9 +379,14 @@ function runnerLine(runner: Runner, projects: readonly Project[], now: Date): st
   const pauses = runner.clis.flatMap((cli) => {
     const pause = runner.pausedClis?.[cli];
     const hold = runnerLimitHold(runner, cli, now);
+    const quota = runner.quotas?.[cli];
     return [
       ...(pause === undefined ? [] : [`${cli} paused by the user since ${pause.at}`]),
       ...(hold === null ? [] : [`${cli} held by its limit until ${hold.until}`]),
+      ...(quota === undefined ? [] : poolHolds(quota, now)).map(
+        (held) =>
+          `${cli}'s ${held.label ?? held.pool} (pool ${held.pool}) held by their limit until ${held.until}`,
+      ),
     ];
   });
   const quotas = runner.clis.flatMap((cli) => {
@@ -779,7 +785,7 @@ export function buildTurnPrompt(input: TurnPromptInput): string {
       "",
       "## Runners",
       "",
-      "The machines turns run on. A project lives on the runner that takes its first turn, one that offers every capability the project and that turn's task require, and moves only when the user moves it. A task's required_capabilities must name capabilities exactly as a runner below offers them; a task needing one its project's runner lacks waits. A runner's quota is what each CLI's login there last reported of its plan, in percent of each window. A runner, or a CLI on it, paused by the user starts none of the turns it would run until the user resumes it, and a CLI held by its limit starts none of its turns there until the limit lifts, at the reset the CLI gave or, with none given, half an hour after the report, and a runner syncing its board copy as it connects starts none until the copy is up to date: they wait, and the stages their citizens hold keep their leases.",
+      "The machines turns run on. A project lives on the runner that takes its first turn, one that offers every capability the project and that turn's task require, and moves only when the user moves it. A task's required_capabilities must name capabilities exactly as a runner below offers them; a task needing one its project's runner lacks waits. A runner's quota is what each CLI's login there last reported of its plan, in percent of each window. A runner, or a CLI on it, paused by the user starts none of the turns it would run until the user resumes it, and a CLI held by its limit starts none of its turns there until the limit lifts, nor a CLI's pool of models held by its own limit any turn of a citizen whose model is in it, each at the reset the CLI gave or, with none given, half an hour after the report, and a runner syncing its board copy as it connects starts none until the copy is up to date: they wait, and the stages their citizens hold keep their leases.",
       "",
     );
     if (machines.runners.length === 0) {

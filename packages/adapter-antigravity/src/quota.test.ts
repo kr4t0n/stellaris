@@ -38,6 +38,42 @@ function usageOf(remaining: Record<string, number>): unknown {
 }
 
 /**
+ * A runner's read of 2026-11-26 15:55:34 with each group's 5-hour bucket and the Gemini weekly one
+ * leaving what is given; the third-party weekly one is half used.
+ */
+function twoBuckets(gemini5h: number, gemini7d: number, thirdParty5h: number): unknown {
+  return {
+    status: "SUCCESS",
+    command: {
+      name: "usage",
+      data: {
+        groups: [
+          {
+            name: "Gemini Models",
+            buckets: [
+              bucket("gemini-weekly", "weekly", gemini7d, "2026-12-03T12:32:38Z"),
+              bucket("gemini-5h", "five_hour", gemini5h, "2026-11-26T17:32:38Z"),
+            ],
+          },
+          {
+            name: "Claude and GPT models",
+            buckets: [
+              bucket("3p-weekly", "weekly", 0.5, "2026-12-03T13:32:45Z"),
+              bucket("3p-5h", "five_hour", thirdParty5h, "2026-11-26T18:32:45Z"),
+            ],
+          },
+        ],
+      },
+    },
+  };
+}
+
+/** One bucket of a `/usage` answer, with what it leaves and when it resets. */
+function bucket(id: string, window: string, remaining: number, reset: string): unknown {
+  return { id, window, remaining_fraction: remaining, reset_time: reset };
+}
+
+/**
  * Print mode's `/usage` and `/credits`, recorded from agy 1.5.15 on 2026-11-23 with a signed-in
  * consumer account: a group of Gemini models and a group of third-party models, each with a weekly
  * bucket, and no credits.
@@ -76,6 +112,24 @@ describe("agy's quota from print mode", () => {
       ],
       credits: { hasCredits: false, unlimited: false, balance: "0" },
       extraUsage: null,
+      pools: [
+        {
+          key: "gemini",
+          label: "Gemini Models",
+          limited: false,
+          limitedUntil: null,
+          limitedBy: null,
+          observedAt: "2026-11-23T15:00:00.000Z",
+        },
+        {
+          key: "3p",
+          label: "Claude and GPT models",
+          limited: false,
+          limitedUntil: null,
+          limitedBy: null,
+          observedAt: "2026-11-23T15:00:00.000Z",
+        },
+      ],
     });
   });
 
@@ -166,6 +220,55 @@ describe("agy's quota from print mode", () => {
         AT,
       ),
     ).toMatchObject({ status: "limited", limitedBy: "unknown", limitedUntil: null });
+  });
+
+  /**
+   * A runner's read of 2026-11-26 15:55:34, two buckets a group: each group's 5-hour bucket spent and
+   * its weekly one not, while agy refused both pools' models.
+   */
+  describe("with two buckets a group", () => {
+    const READ_AT = new Date("2026-11-26T15:55:34.000Z");
+    it("stops a group when any of its buckets is spent, and the login while every group is, until the first frees", () => {
+      const quota = quotaFromUsage(twoBuckets(0, 1 - 0.2502, 0), null, READ_AT);
+      expect(quota).toMatchObject({
+        status: "limited",
+        limitedUntil: "2026-11-26T17:32:38.000Z",
+        limitedBy: "gemini-5h",
+      });
+      expect(quota.pools).toEqual([
+        {
+          key: "gemini",
+          label: "Gemini Models",
+          limited: true,
+          limitedUntil: "2026-11-26T17:32:38.000Z",
+          limitedBy: "gemini-5h",
+          observedAt: READ_AT.toISOString(),
+        },
+        {
+          key: "3p",
+          label: "Claude and GPT models",
+          limited: true,
+          limitedUntil: "2026-11-26T18:32:45.000Z",
+          limitedBy: "3p-5h",
+          observedAt: READ_AT.toISOString(),
+        },
+      ]);
+    });
+
+    it("limits only the group a spent bucket is in, until the last of its spent buckets resets", () => {
+      const one = quotaFromUsage(twoBuckets(0, 1 - 0.2502, 1), null, READ_AT);
+      expect(one).toMatchObject({ status: "warning", limitedUntil: null, limitedBy: null });
+      expect(one.pools?.map((pool) => [pool.key, pool.limited, pool.limitedUntil])).toEqual([
+        ["gemini", true, "2026-11-26T17:32:38.000Z"],
+        ["3p", false, null],
+      ]);
+      const both = quotaFromUsage(twoBuckets(0, 0, 1), null, READ_AT);
+      expect(both.pools?.[0]).toMatchObject({
+        limited: true,
+        limitedUntil: "2026-12-03T12:32:38.000Z",
+        limitedBy: "gemini-weekly",
+      });
+    });
   });
 
   it("reads a reset at the Unix epoch, as agy gives a bucket no window runs in, as none", () => {

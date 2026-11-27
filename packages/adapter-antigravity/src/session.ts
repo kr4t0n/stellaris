@@ -16,10 +16,13 @@ import {
 import {
   addUsage,
   AGENT_TOKEN_ENV,
+  ANTIGRAVITY_POOLS,
   capOutput,
+  CliQuotaSchema,
   ModelOptionSchema,
   RUNNER_TOKEN_ENV,
   type AgentEvent,
+  type CliQuota,
   type ModelOption,
   type ResumeFailure,
   type TurnExitReason,
@@ -57,6 +60,8 @@ export interface AcpSessionOptions {
   /** Directory to append agy's raw output to, one file per turn, for fixtures. */
   readonly recordDir?: string | undefined;
   readonly clientVersion?: string | undefined;
+  /** The clock a refusal of the plan's quota is stamped by; tests inject one. */
+  readonly now?: (() => Date) | undefined;
 }
 
 /** Sessions agy has not named yet start with this prefix; `session/new` gives the real id. */
@@ -298,6 +303,74 @@ const TRANSIENT_WORDS: readonly RegExp[] = [
   /\bnetwork issue connecting to the server\b/,
 ];
 
+/**
+ * The service's sentence for a turn the plan's quota refused, which agy passes on: it names the
+ * pool the model draws from and when that pool starts afresh. A signed-in account met
+ * `Individual quota reached. Please upgrade your subscription to increase your limits. Resets in
+ * 1h42m21s.` on its Gemini models and `Third-party quota reached. Please switch to Gemini models or
+ * upgrade your subscription to increase your limits. Resets in 3h49m54s.` on Claude, on 2026-11-26;
+ * against a stub, agy 1.5.15 put the same sentence in its executor's words, after `Error 429,
+ * Message: `, so it is read wherever it stands.
+ */
+const QUOTA_REACHED = /\b([A-Za-z][A-Za-z-]*) quota reached\b/;
+
+/** The countdown to the pool's reset in the service's sentence, in days, hours, minutes, and seconds. */
+const RESETS_IN = /\bResets in ((?:\d+[dhms])+)(?![A-Za-z0-9])/;
+
+const UNIT_MS: Readonly<Record<string, number>> = {
+  d: 86_400_000,
+  h: 3_600_000,
+  m: 60_000,
+  s: 1_000,
+};
+
+/** The pool each of the service's words names, as `quotaPool` keys a model's. */
+const POOL_WORDS: Readonly<Record<string, string>> = {
+  Individual: ANTIGRAVITY_POOLS.gemini,
+  "Third-party": ANTIGRAVITY_POOLS.thirdParty,
+};
+
+/** How long a countdown such as `1h42m21s` runs, or null for one that doesn't read. */
+function countdownMs(countdown: string): number | null {
+  let total = 0;
+  for (const [, amount = "", unit = ""] of countdown.matchAll(/(\d+)([dhms])/g)) {
+    const ms = UNIT_MS[unit];
+    if (ms === undefined) {
+      return null;
+    }
+    total += Number(amount) * ms;
+  }
+  return Number.isSafeInteger(total) && total > 0 ? total : null;
+}
+
+/**
+ * The quota a refusal of the plan's quota reports, from agy's words for the failed turn and when
+ * they came, or undefined for any other failure. The pool the words name is limited until the
+ * countdown's end, or with no reset when the countdown doesn't read, so the board holds that pool's
+ * models alone; words naming a pool `quotaPool` doesn't know limit the whole login the same way.
+ */
+export function quotaRefusalOf(words: string, at: Date): CliQuota | undefined {
+  const reached = QUOTA_REACHED.exec(words);
+  if (reached === null) {
+    return undefined;
+  }
+  const countdown = RESETS_IN.exec(words.slice(reached.index))?.[1];
+  const ms = countdown === undefined ? null : countdownMs(countdown);
+  const observedAt = at.toISOString();
+  const limitedUntil = ms === null ? null : new Date(at.getTime() + ms).toISOString();
+  const pool = POOL_WORDS[reached[1] ?? ""];
+  return CliQuotaSchema.parse(
+    pool === undefined
+      ? { observedAt, source: "turn", status: "limited", limitedUntil }
+      : {
+          observedAt,
+          source: "turn",
+          status: "warning",
+          pools: [{ key: pool, limited: true, limitedUntil, observedAt }],
+        },
+  );
+}
+
 /** A tool call's name as the board's steps show it: a board verb as Claude names it, a command as `Bash`. */
 function toolNameOf(update: Dict): string {
   const name = str(update["name"]) ?? "";
@@ -384,6 +457,8 @@ interface TurnRun {
   error: Error | undefined;
   /** The failure agy reported in the turn's messages, in its words. */
   failure: string | undefined;
+  /** When agy answered with the error or reported the failure. */
+  failedAt: Date | undefined;
   usage: Usage;
   /** The text of the message being said, gathered from its chunks until a step or the reply ends it. */
   message: string;
@@ -601,6 +676,7 @@ export class AntigravityAcpSession implements ResidentSession {
         if (failure !== undefined) {
           this.endMessage(turn);
           turn.failure = failure;
+          turn.failedAt = this.now();
           return;
         }
         // The model said more after a warning, so the warning did not end the turn.
@@ -668,6 +744,7 @@ export class AntigravityAcpSession implements ResidentSession {
     } catch (error) {
       if (seq === turn.seq) {
         turn.error = error instanceof Error ? error : new Error(String(error));
+        turn.failedAt = this.now();
         turn.settle();
       }
       return;
@@ -709,6 +786,7 @@ export class AntigravityAcpSession implements ResidentSession {
       stopReason: null,
       error: undefined,
       failure: undefined,
+      failedAt: undefined,
       usage: ZERO_USAGE,
       message: "",
       messageId: undefined,
@@ -801,13 +879,24 @@ export class AntigravityAcpSession implements ResidentSession {
     if (exitReason === "completed" && status === null) {
       error = "the turn ended without a parsable status object";
     }
+    // A refusal of the plan's quota, whichever way agy said it, holds the pool it names until its
+    // reset, and reads as the plan's limit, as Claude's and Codex's do.
+    const quota =
+      exitReason === "error" && error !== undefined
+        ? quotaRefusalOf(error, turn.failedAt ?? this.now())
+        : undefined;
+    if (quota !== undefined) {
+      error = `usage limit reached: ${error}`;
+    }
     if (error !== undefined) {
       emit({ type: "error", message: error });
     }
     // A failure agy reports in a message is the model service's; one it answers a prompt with,
-    // such as a sign-in it lacks, is the client's or the account's, and never transient.
+    // such as a sign-in it lacks, is the client's or the account's, and never transient. Nor is
+    // the plan's quota, though agy may say it with a 429's words.
     const transient =
       exitReason === "error" &&
+      quota === undefined &&
       turn.error === undefined &&
       turn.failure !== undefined &&
       isTransient(turn.failure);
@@ -823,8 +912,13 @@ export class AntigravityAcpSession implements ResidentSession {
       session: this.session,
       ...(this.model === undefined ? {} : { model: this.model }),
       ...(turn.contextTokens === undefined ? {} : { contextTokens: turn.contextTokens }),
+      ...(quota === undefined ? {} : { quota }),
       ...(transient ? { transient: true } : {}),
     };
+  }
+
+  private now(): Date {
+    return this.options.now?.() ?? new Date();
   }
 
   /**

@@ -39,7 +39,8 @@ function usageOf(remaining: Record<string, number>): unknown {
 
 /**
  * A runner's read of 2026-11-26 15:55:34 with each group's 5-hour bucket and the Gemini weekly one
- * leaving what is given; the third-party weekly one is half used.
+ * leaving what is given; the third-party weekly one is half used. Each bucket's `window` is as a read
+ * of 2026-11-27 gave it.
  */
 function twoBuckets(gemini5h: number, gemini7d: number, thirdParty5h: number): unknown {
   return {
@@ -52,14 +53,14 @@ function twoBuckets(gemini5h: number, gemini7d: number, thirdParty5h: number): u
             name: "Gemini Models",
             buckets: [
               bucket("gemini-weekly", "weekly", gemini7d, "2026-12-03T12:32:38Z"),
-              bucket("gemini-5h", "five_hour", gemini5h, "2026-11-26T17:32:38Z"),
+              bucket("gemini-5h", "5h", gemini5h, "2026-11-26T17:32:38Z"),
             ],
           },
           {
             name: "Claude and GPT models",
             buckets: [
               bucket("3p-weekly", "weekly", 0.5, "2026-12-03T13:32:45Z"),
-              bucket("3p-5h", "five_hour", thirdParty5h, "2026-11-26T18:32:45Z"),
+              bucket("3p-5h", "5h", thirdParty5h, "2026-11-26T18:32:45Z"),
             ],
           },
         ],
@@ -230,6 +231,13 @@ describe("agy's quota from print mode", () => {
     const READ_AT = new Date("2026-11-26T15:55:34.000Z");
     it("stops a group when any of its buckets is spent, and the login while every group is, until the first frees", () => {
       const quota = quotaFromUsage(twoBuckets(0, 1 - 0.2502, 0), null, READ_AT);
+      // Each 5-hour bucket has its length, as its weekly one does.
+      expect(quota.windows.map((window) => [window.key, window.minutes])).toEqual([
+        ["gemini-weekly", 10_080],
+        ["gemini-5h", 300],
+        ["3p-weekly", 10_080],
+        ["3p-5h", 300],
+      ]);
       expect(quota).toMatchObject({
         status: "limited",
         limitedUntil: "2026-11-26T17:32:38.000Z",
@@ -272,7 +280,8 @@ describe("agy's quota from print mode", () => {
   });
 
   it("reads a reset at the Unix epoch, as agy gives a bucket no window runs in, as none", () => {
-    // Read through a runner from agy 1.5.15 on 2026-11-24: a group no turn had used, with both buckets.
+    // Read through a runner from agy 1.5.15 on 2026-11-24: a group no turn had used, with both
+    // buckets, each with its `window` as a read of 2026-11-27 gave it.
     const unused = {
       name: "Claude and GPT models",
       buckets: [
@@ -282,13 +291,21 @@ describe("agy's quota from print mode", () => {
           remaining_fraction: 1,
           reset_time: "1970-01-01T00:00:00Z",
         },
-        { id: "3p-5h", remaining_fraction: 1, reset_time: "1970-01-01T00:00:00Z" },
+        { id: "3p-5h", window: "5h", remaining_fraction: 1, reset_time: "1970-01-01T00:00:00Z" },
+        // A window the table doesn't know leaves the length unknown.
+        {
+          id: "3p-2w",
+          window: "fortnightly",
+          remaining_fraction: 1,
+          reset_time: "1970-01-01T00:00:00Z",
+        },
       ],
     };
     const usage = { status: "SUCCESS", command: { name: "usage", data: { groups: [unused] } } };
     expect(quotaFromUsage(usage, null, AT).windows).toMatchObject([
       { key: "3p-weekly", usedPercent: 0, minutes: 10_080, resetsAt: null },
-      { key: "3p-5h", usedPercent: 0, minutes: null, resetsAt: null },
+      { key: "3p-5h", usedPercent: 0, minutes: 300, resetsAt: null },
+      { key: "3p-2w", usedPercent: 0, minutes: null, resetsAt: null },
     ]);
     // Spent with such a reset, the limit has no time to lift, rather than one long past.
     const spent = {

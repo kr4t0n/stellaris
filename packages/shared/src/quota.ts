@@ -16,7 +16,8 @@ export const QUOTA_WARNING_PERCENT = 80;
 export const QuotaWindowSchema = z.object({
   /**
    * The CLI's own name for the window: Claude's `five_hour`, `seven_day`, `seven_day_opus`, and
-   * `model:<label>` for a model's weekly window; Codex's `primary` and `secondary`.
+   * `model:<label>` for a model's weekly window; Codex's `primary` and `secondary`; Antigravity's
+   * bucket ids, as `gemini-5h` and `3p-weekly`.
    */
   key: z.string().min(1).max(80),
   /** What a scoped window counts, as the CLI labels it, such as a model's name. */
@@ -335,27 +336,30 @@ const WINDOW_NAMES: Readonly<Record<string, string>> = {
   overage: "extra usage",
 };
 
+/** A window's length as a name reads it, as `5h` or `7d`. */
+function lengthName(minutes: number): string {
+  return minutes % 1_440 === 0
+    ? `${minutes / 1_440}d`
+    : minutes % 60 === 0
+      ? `${minutes / 60}h`
+      : `${minutes}m`;
+}
+
 /**
- * A window's short name in lowercase: Claude's by its key or label, a model's name as `7d fable`,
- * and Codex's by its length, as `5h` or `7d`.
+ * A window's short name in lowercase: Claude's by its key, a labelled one by its length and label,
+ * as a model's `7d fable` or agy's `5h gemini models`, or its label alone when its length is
+ * unknown, and Codex's by its length, as `5h` or `7d`.
  */
 export function windowName(window: QuotaWindow): string {
   if (window.label !== undefined) {
     const label = window.label.toLowerCase();
-    return window.minutes === 10_080 ? `7d ${label}` : label;
+    return window.minutes === null ? label : `${lengthName(window.minutes)} ${label}`;
   }
   const named = WINDOW_NAMES[window.key];
   if (named !== undefined) {
     return named;
   }
-  if (window.minutes !== null) {
-    return window.minutes % 1_440 === 0
-      ? `${window.minutes / 1_440}d`
-      : window.minutes % 60 === 0
-        ? `${window.minutes / 60}h`
-        : `${window.minutes}m`;
-  }
-  return window.key;
+  return window.minutes === null ? window.key : lengthName(window.minutes);
 }
 
 /**

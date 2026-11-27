@@ -200,7 +200,7 @@ describe("readings", () => {
       words: "",
       tone: "text-fg-muted",
     });
-    expect(quotaLine(spent, NOON, "gemini")).toBe("7d gemini models 12% · gemini models 30%");
+    expect(quotaLine(spent, NOON, "gemini")).toBe("7d gemini models 12% · 5h gemini models 30%");
     // A pool spent with no reset reads as limited without a time, as long as it holds.
     const unknown = quota({
       status: "warning",

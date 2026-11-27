@@ -16,7 +16,8 @@ export const QUOTA_WARNING_PERCENT = 80;
 export const QuotaWindowSchema = z.object({
   /**
    * The CLI's own name for the window: Claude's `five_hour`, `seven_day`, `seven_day_opus`, and
-   * `model:<label>` for a model's weekly window; Codex's `primary` and `secondary`.
+   * `model:<label>` for a model's weekly window; Codex's `primary` and `secondary`; Antigravity's
+   * bucket ids, as `gemini-5h` and `3p-weekly`.
    */
   key: z.string().min(1).max(80),
   /** What a scoped window counts, as the CLI labels it, such as a model's name. */

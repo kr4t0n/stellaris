@@ -1,5 +1,11 @@
 import { PassThrough } from "node:stream";
-import { ResumeError, TransientError, TurnControl, type TurnRequest } from "@stellaris/runner-core";
+import {
+  ResumeError,
+  TransientError,
+  TurnControl,
+  type TurnRequest,
+  type TurnResult,
+} from "@stellaris/runner-core";
 import { turnStatusJsonSchema, type AgentEvent } from "@stellaris/shared";
 import { afterAll, beforeAll, describe, expect, it, onTestFinished, vi } from "vitest";
 import { AntigravityBackend } from "./backend.js";
@@ -695,6 +701,122 @@ describe("AntigravityBackend", () => {
     ]);
     expect(result.exitReason).toBe("stopped");
     expect(result.error).toBeUndefined();
+  });
+
+  it("sends no prompt when stopped while agy opens the session, and reports the session it opened", async () => {
+    // Where the turn is stopped: during a request of the open whose answer is held, cold or as a
+    // warm session's start, or before a warm session's turn begins; and all agy is sent.
+    const cases: [
+      string,
+      "cold" | "resident" | "warm",
+      string | null,
+      Partial<TurnRequest>,
+      string[],
+    ][] = [
+      ["new", "cold", "session/new", {}, ["initialize", "session/new"]],
+      [
+        "resume",
+        "cold",
+        "session/resume",
+        { session: SESSION, newSession: false },
+        ["initialize", "session/resume"],
+      ],
+      [
+        "model",
+        "cold",
+        "session/set_config_option",
+        { spec: { ...request().spec, model: "gemini-4-neon" } },
+        ["initialize", "session/new", "session/set_config_option"],
+      ],
+      ["resident new", "resident", "session/new", {}, ["initialize", "session/new"]],
+      [
+        "resident resume",
+        "resident",
+        "session/resume",
+        { session: SESSION, newSession: false },
+        ["initialize", "session/resume"],
+      ],
+      ["warm", "warm", null, {}, ["initialize", "session/new"]],
+    ];
+    const outcomes: unknown[] = [];
+    for (const [name, path, hold, overrides] of cases) {
+      const held = Promise.withResolvers<void>();
+      const heldIf = (method: string, answer: Answer) => (): Answer | Promise<Answer> =>
+        method === hold ? held.promise.then(() => answer) : answer;
+      const fake = fakeAgy({
+        ...completing(),
+        "session/new": heldIf("session/new", OPENED),
+        "session/resume": heldIf("session/resume", OPENED),
+        "session/set_config_option": heldIf("session/set_config_option", {
+          result: {
+            configOptions: [
+              {
+                id: "model",
+                type: "select",
+                currentValue: "gemini-4-neon",
+                options: [{ value: "gemini-4-neon", name: "Gemini 4 Neon" }],
+              },
+            ],
+          },
+        }),
+        "session/cancel": () => ({ result: null }),
+      });
+      const backend = new AntigravityBackend({ spawn: fake.spawn });
+      const control = new TurnControl();
+      const start = request(overrides);
+      let running: Promise<TurnResult>;
+      if (path === "cold") {
+        running = backend.runTurn(start, undefined, control);
+      } else {
+        // As the executor runs a warm session: its start, then each turn on it.
+        const starting = backend.startResident(
+          start.spec,
+          start,
+          path === "warm" ? undefined : control,
+        );
+        running = starting.then(async (session) => {
+          try {
+            return await session.runTurn("Do the thing.", undefined, control);
+          } finally {
+            await session.close();
+          }
+        });
+      }
+      if (hold !== null) {
+        await vi.waitFor(() => {
+          if (!methodsOf(fake.sent).includes(hold)) {
+            throw new Error(`agy was sent no ${hold} yet`);
+          }
+        });
+      }
+      control.stop();
+      held.resolve();
+      const releasedAt = Date.now();
+      const result = await running;
+      outcomes.push([
+        name,
+        methodsOf(fake.sent),
+        result.exitReason,
+        result.error,
+        result.status,
+        result.session,
+        // The turn ends as the open answers, with no wait for a reply to a cancel, 15 s at most.
+        Date.now() - releasedAt < 5_000,
+        await control.steer({ id: "steer-1", text: "late" }),
+      ]);
+    }
+    expect(outcomes).toEqual(
+      cases.map(([name, , , , sent]) => [
+        name,
+        sent,
+        "stopped",
+        undefined,
+        null,
+        SESSION,
+        true,
+        false,
+      ]),
+    );
   });
 
   it("cancels a turn at its time limit, and ends it as a timeout with no status asked", async () => {

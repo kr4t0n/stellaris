@@ -520,7 +520,8 @@ export class AntigravityAcpSession implements ResidentSession {
    * and initializes, then opens or resumes the session once the handshake is done, so a board out
    * of reach fails the turn before the session opens. The relay lives and closes with the session.
    * A stop until then ends the start at once, closing the relay and agy; one that comes once the
-   * session is opening goes to the turn, as before the relay.
+   * session is opening lets the open finish, so the session it opened is the turn's, and goes to
+   * the turn, which then sends no prompt.
    */
   static async start(
     options: AcpSessionOptions,
@@ -882,7 +883,11 @@ export class AntigravityAcpSession implements ResidentSession {
     });
     let status: TurnStatus | null = null;
     try {
-      this.prompt(turn, prompt);
+      // A stop handed over as the turn attached, as one that came while the session opened, has
+      // ended it already, so the model gets no request.
+      if (!turn.stopped) {
+        this.prompt(turn, prompt);
+      }
       await done.promise;
       this.endMessage(turn);
       status = parseTurnStatus(null, turn.finalText);
@@ -988,12 +993,19 @@ export class AntigravityAcpSession implements ResidentSession {
     return true;
   }
 
-  /** Cancels the running turn, whose prompt agy then ends as cancelled; the turn is `stopped`. */
+  /**
+   * Cancels the running turn, whose prompt agy then ends as cancelled; the turn is `stopped`. A turn
+   * that has sent no prompt yet ends at once, with nothing sent to agy.
+   */
   private stop(turn: TurnRun): void {
     if (this.active !== turn || turn.stopped) {
       return;
     }
     turn.stopped = true;
+    if (turn.seq === 0) {
+      turn.settle();
+      return;
+    }
     this.client.notify("session/cancel", { sessionId: this.session });
     setTimeout(() => turn.settle(), STOP_GRACE_MS).unref?.();
   }

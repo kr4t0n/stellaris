@@ -15,6 +15,7 @@ import {
   enrollRunner,
   readCredentials,
   ResumeError,
+  TransientError,
   RunnerLayout,
   saveCredentials,
   ZERO_USAGE,
@@ -2534,6 +2535,68 @@ describe("turns on a runner over the runner protocol", () => {
       ["turn.failed", true],
       ["turn.completed", null],
     ]);
+  });
+
+  it("records a turn transient whose adapter could not reach the board before its CLI opened the session, cold and warm, and no other start that threw", async () => {
+    const { board } = await Board.init(dir, { name: "unreached" });
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    const thread = await board.openThread(USER, { channel: "general", title: "a question" });
+    const words =
+      "the board's MCP handshake failed before agy opened the session, on each of 2 tries: no answer within 15000 ms";
+    const other = "agy acp offers no system prompt append for the instructions";
+    // What the next start throws, cold or warm.
+    const throws: Error[] = [];
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("s-1"),
+      runTurn: () => Promise.reject(throws.shift() ?? new Error("nothing scripted")),
+      startResident: () => Promise.reject(throws.shift() ?? new Error("nothing scripted")),
+    };
+    const { run } = await start(board, backend);
+    const inThread = { ...deskPost, thread: { id: thread.id, task: false } };
+    for (const post of [inThread, deskPost]) {
+      throws.push(new TransientError(words), new Error(other));
+      expect(await run(post)).toMatchObject({ exitReason: "error", error: words, transient: true });
+      const failed = await run(post);
+      expect(failed).toMatchObject({ exitReason: "error", error: other });
+      expect(failed.transient).toBeUndefined();
+    }
+    const ended = (await board.readEvents(null, 1_000)).filter(
+      (event) => event.type === "turn.failed",
+    );
+    expect(ended.map((event) => event.payload["transient"] ?? null)).toEqual([
+      true,
+      null,
+      true,
+      null,
+    ]);
+  });
+
+  it("hands a warm session's start the turn's control, so a stop ends a start that waits", async () => {
+    const { board } = await Board.init(dir, { name: "stopped-starting" });
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    const words = "the turn was stopped before agy opened the session";
+    let starts = 0;
+    const backend: AgentBackend = {
+      kind: "claude",
+      stops: true,
+      newSession: () => Promise.resolve("s-1"),
+      runTurn: () => Promise.resolve(completed("cold turn")),
+      // A start that waits, as on a board out of reach, until the turn is stopped.
+      startResident: (_spec, _start, control) => {
+        starts += 1;
+        return new Promise((_resolve, reject) => {
+          control?.attach({ stop: () => reject(new Error(words)) });
+        });
+      },
+    };
+    const { run, hub } = await start(board, backend);
+    const running = run(deskPost);
+    await vi.waitFor(() => expect(starts).toBe(1), TURN_START_WAIT);
+    expect(await hub.stop(hub.liveTurns()[0]?.turnId ?? "", "user")).toBe(true);
+    const stopped = await running;
+    expect(stopped).toMatchObject({ exitReason: "stopped", error: words });
+    expect(stopped.transient).toBeUndefined();
   });
 
   it("marks a turn transient whose runner could not reach the board before its CLI started, and no other failure there", async () => {

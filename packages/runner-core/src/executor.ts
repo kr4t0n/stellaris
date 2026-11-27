@@ -57,6 +57,7 @@ import { readTurnImage, TurnImageFolders, type ImagePlaces } from "./images.js";
 import type { RunnerLayout } from "./layout.js";
 import {
   ResumeError,
+  TransientError,
   ZERO_USAGE,
   type AgentBackend,
   type AgentSpec,
@@ -338,7 +339,8 @@ export class TurnExecutor {
         );
       }
     } catch (error) {
-      // An adapter throws when its CLI could not open the session, or had ended before the turn.
+      // An adapter throws when its CLI could not open the session, or had ended before the turn,
+      // and marks a failure a minute may cure, before any model call, as such.
       started = false;
       result = {
         events,
@@ -349,6 +351,7 @@ export class TurnExecutor {
         exitReason: "error",
         error: error instanceof Error ? error.message : String(error),
         ...(error instanceof ResumeError ? { resumeFailed: error.failure } : {}),
+        ...(error instanceof TransientError ? { transient: true } : {}),
       };
     }
     this.imagePlaces.delete(job.turnId);
@@ -1352,16 +1355,20 @@ export class TurnExecutor {
     }
     let current = this.residents.get(resident.key);
     if (current === undefined) {
-      const session = await backend.startResident(spec, {
-        session: input.session,
-        newSession: input.newSession,
-        instructions: input.instructions,
-        mcp: job.mcp,
-        limits: input.limits,
-        statusSchema: input.statusSchema,
-        costSoFarUsd: job.costSoFarUsd,
-        ...(job.usageSoFar === undefined ? {} : { usageSoFar: job.usageSoFar }),
-      });
+      const session = await backend.startResident(
+        spec,
+        {
+          session: input.session,
+          newSession: input.newSession,
+          instructions: input.instructions,
+          mcp: job.mcp,
+          limits: input.limits,
+          statusSchema: input.statusSchema,
+          costSoFarUsd: job.costSoFarUsd,
+          ...(job.usageSoFar === undefined ? {} : { usageSoFar: job.usageSoFar }),
+        },
+        input.control,
+      );
       current = {
         session,
         cli: job.cli,

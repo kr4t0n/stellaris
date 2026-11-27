@@ -40,6 +40,7 @@ import {
   type Dict,
   type SpawnAgy,
 } from "./rpc.js";
+import { BoardRelay } from "./relay.js";
 
 /**
  * An Antigravity session over `agy acp`: the Agent Client Protocol, version 1, as JSON-RPC 2.0
@@ -62,6 +63,8 @@ export interface AcpSessionOptions {
   readonly clientVersion?: string | undefined;
   /** The clock a refusal of the plan's quota is stamped by; tests inject one. */
   readonly now?: (() => Date) | undefined;
+  /** How long each try of the board's handshake, which the relay makes, may take; tests shorten it. */
+  readonly handshakeLimitMs?: number | undefined;
 }
 
 /** Sessions agy has not named yet start with this prefix; `session/new` gives the real id. */
@@ -82,7 +85,7 @@ const TOOL_SUMMARY = "toolSummary";
 
 /**
  * Every process runs one session in a worker of its own, so each session's MCP servers, with the
- * turn's own token in their headers, stay its own; skips every permission prompt, since nothing may
+ * session's relay and its secret, stay its own; skips every permission prompt, since nothing may
  * stop to ask a human; and sends no telemetry, which agy otherwise sends to Google.
  */
 const ACP_FLAGS = [
@@ -90,6 +93,9 @@ const ACP_FLAGS = [
   "--dangerously-skip-permissions",
   "--disable-telemetry",
 ];
+
+/** Why a start ended when the turn was stopped before agy opened the session. */
+const STOPPED_STARTING = "the turn was stopped before agy opened the session";
 
 /** How long a turn asked to stop may take to say so before it is ended without its report. */
 const STOP_GRACE_MS = 15_000;
@@ -480,6 +486,7 @@ export class AntigravityAcpSession implements ResidentSession {
   /** The model the session runs, as agy reported it when the session opened. */
   model: string | undefined;
   private readonly client: AcpClient;
+  private readonly relay: BoardRelay;
   private active: TurnRun | null = null;
   private closed = false;
   private readonly stderrTail: string[] = [];
@@ -490,8 +497,10 @@ export class AntigravityAcpSession implements ResidentSession {
     private readonly spec: AgentSpec,
     private readonly start: ResidentStart,
     process: AcpProcess,
+    relay: BoardRelay,
   ) {
     this.session = start.session;
+    this.relay = relay;
     this.client = new AcpClient(process, {
       notification: (method, params) => this.onNotification(method, params),
       stderr: (line) => {
@@ -506,24 +515,67 @@ export class AntigravityAcpSession implements ResidentSession {
     });
   }
 
-  /** Spawns `agy acp`, initializes it, and opens or resumes the session. */
+  /**
+   * Starts the session's relay to the board, which does the board's handshake while agy starts
+   * and initializes, then opens or resumes the session once the handshake is done, so a board out
+   * of reach fails the turn before the session opens. The relay lives and closes with the session.
+   * A stop until then ends the start at once, closing the relay and agy; one that comes once the
+   * session is opening goes to the turn, as before the relay.
+   */
   static async start(
     options: AcpSessionOptions,
     spec: AgentSpec,
     start: ResidentStart,
+    control?: TurnControl,
   ): Promise<AntigravityAcpSession> {
-    const spawn = options.spawn ?? defaultSpawnAgy(options.agyPath ?? "agy");
-    const child = spawn(acpArgs(options), { cwd: spec.cwd, env: agyEnv(options, start.mcp.token) });
-    const session = new AntigravityAcpSession(options, spec, start, child);
+    const relay = await BoardRelay.open({
+      url: start.mcp.url,
+      token: start.mcp.token,
+      limitMs: options.handshakeLimitMs,
+      clientVersion: options.clientVersion,
+    });
+    let session: AntigravityAcpSession | undefined;
+    let stopped = false;
+    const detach = control?.attach({
+      stop: () => {
+        stopped = true;
+        session?.client.close();
+        void relay.close();
+      },
+    });
     try {
+      const prefetched = relay.prefetch();
+      // A start that fails before it waits for the handshake closes the relay, which ends it.
+      prefetched.catch(() => undefined);
+      if (stopped) {
+        throw new Error(STOPPED_STARTING);
+      }
+      const spawn = options.spawn ?? defaultSpawnAgy(options.agyPath ?? "agy");
+      const child = spawn(acpArgs(options), {
+        cwd: spec.cwd,
+        env: agyEnv(options, start.mcp.token),
+      });
+      session = new AntigravityAcpSession(options, spec, start, child, relay);
       const initialized = await initialize(session.client, options);
       if (!appendsSystemPrompt(initialized)) {
         throw new Error("agy acp offers no system prompt append for the instructions");
       }
+      await prefetched;
+      detach?.();
+      if (stopped) {
+        throw new Error(STOPPED_STARTING);
+      }
       await session.open();
+      // agy opens a session whose MCP servers did not connect in time without them, saying
+      // nothing, so a session opened without the board's tools listed fails its turn.
+      if (!relay.listed) {
+        throw new Error("agy opened the session without listing the board's tools from the relay");
+      }
     } catch (error) {
-      session.client.close();
-      throw error;
+      detach?.();
+      session?.client.close();
+      await relay.close();
+      throw stopped ? new Error(STOPPED_STARTING) : error;
     }
     return session;
   }
@@ -531,13 +583,14 @@ export class AntigravityAcpSession implements ResidentSession {
   private sessionParams(): Dict {
     return {
       cwd: this.spec.cwd,
-      // The turn's own token travels in the header, over stdin, never on a command line.
+      // agy reaches the board through the session's relay with the relay's secret, which agy keeps
+      // with the conversation; the turn's own token stays with the relay and agy's environment.
       mcpServers: [
         {
           type: "http",
           name: BOARD_SERVER,
-          url: this.start.mcp.url,
-          headers: [{ name: "Authorization", value: `Bearer ${this.start.mcp.token}` }],
+          url: this.relay.url,
+          headers: [{ name: "Authorization", value: `Bearer ${this.relay.secret}` }],
         },
       ],
       // agy keeps no append with the session, so every open and resume sends the current one.
@@ -948,5 +1001,6 @@ export class AntigravityAcpSession implements ResidentSession {
   async close(): Promise<void> {
     this.closed = true;
     this.client.close();
+    await this.relay.close();
   }
 }

@@ -338,7 +338,8 @@ export const TurnOutcomeSchema = z.object({
   resumeFailed: ResumeFailureSchema.optional(),
   /**
    * Set when the turn failed for now: the model service turned it away or cut it off, or the runner
-   * could not reach the board before the CLI started. The scheduler answers it by sending the same
+   * or its adapter could not reach the board before the CLI started or opened the session. The
+   * scheduler answers it by sending the same
    * wake again within minutes. A runner from before never sends it.
    */
   transient: z.boolean().optional(),

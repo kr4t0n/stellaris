@@ -111,6 +111,15 @@ export class ResumeError extends Error {
   }
 }
 
+/**
+ * Thrown by an adapter whose turn failed before its CLI opened the session, so before any model
+ * call, in a way a minute may cure, as when the board was out of its reach: the turn is
+ * `transient`, so its wake goes again.
+ */
+export class TransientError extends Error {
+  override readonly name = "TransientError";
+}
+
 /** What a resident session needs at start: everything a turn needs except the prompt. */
 export interface ResidentStart {
   readonly session: SessionId;

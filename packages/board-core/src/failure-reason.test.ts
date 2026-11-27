@@ -10,7 +10,7 @@ function failed(error: string | null, marks: Partial<FailedTurnEnd> = {}): Faile
  * The shapes of the failed turns on a live board, ids, paths, times, and runner names replaced,
  * with the CLI each came from and the reason it counts under.
  */
-const SHAPES: readonly (readonly ["claude" | "codex", FailedTurnEnd, string])[] = [
+const SHAPES: readonly (readonly ["claude" | "codex" | "antigravity", FailedTurnEnd, string])[] = [
   ["claude", { exitReason: "timeout", error: null }, "timeout"],
   ["codex", { exitReason: "timeout", error: null, resumeFailed: "retry" }, "timeout"],
   [
@@ -167,6 +167,40 @@ const SHAPES: readonly (readonly ["claude" | "codex", FailedTurnEnd, string])[] 
       { transient: true },
     ),
     "network",
+  ],
+  // The Antigravity adapter's, for a relay whose handshake with the board was refused, cut, or
+  // left unanswered, or answered 401 or 5xx, which it marks `transient`, against a stub board.
+  [
+    "antigravity",
+    failed(
+      "the board's MCP handshake failed before agy opened the session, on each of 2 tries: TypeError: fetch failed, caused by Error: connect ECONNREFUSED 127.0.0.1:4700",
+      { transient: true },
+    ),
+    "network",
+  ],
+  [
+    "antigravity",
+    failed(
+      "the board's MCP handshake failed before agy opened the session, on each of 2 tries: no answer within 15000 ms",
+      { transient: true },
+    ),
+    "network",
+  ],
+  [
+    "antigravity",
+    failed(
+      "the board's MCP handshake failed before agy opened the session, on each of 2 tries: the board answered initialize with 401",
+      { transient: true },
+    ),
+    "network",
+  ],
+  // And one it answered otherwise, which the adapter does not mark.
+  [
+    "antigravity",
+    failed(
+      "the board's MCP handshake failed before agy opened the session, on each of 2 tries: the board answered initialize with 404",
+    ),
+    "other",
   ],
   [
     "claude",

@@ -38,6 +38,12 @@ const RUNNER_FAILED = /^the runner could not run the turn: /;
 const UNREACHABLE = /fetch failed|terminated|answered (5\d\d|429):/;
 
 /**
+ * The Antigravity adapter's words for a turn whose relay could not do the board's handshake
+ * before agy opened the session, which it marks `transient` when the board was out of its reach.
+ */
+const HANDSHAKE_FAILED = /^the board's MCP handshake failed before /;
+
+/**
  * What the error's words name, first match wins. A compaction comes before what failed it, so a
  * compaction a limit refused is a compaction. The words are the hub's and the CLIs', as the live
  * board logged them, or as the CLI gave them against a stub.
@@ -72,7 +78,8 @@ const WORDS: readonly (readonly [FailureReason, RegExp])[] = [
  * a session the CLI could not resume is that, by the adapter's mark or, before ends carried it,
  * the CLI's words. A turn the runner could not run is `network` when the runner marked it
  * `transient` (`unreachable`) or its words say so, before any other words, which a board's answer
- * may hold. Then the error's words decide. A `transient` mark they leave is the adapters', the model
+ * may hold, and so is one whose adapter could not reach the board before its CLI opened the
+ * session and marked it `transient`. Then the error's words decide. A `transient` mark they leave is the adapters', the model
  * service's (the hub's own marks are on words of `runner_dropped`); anything else is `other`.
  */
 export function failureReason(end: FailedTurnEnd): FailureReason {
@@ -83,7 +90,10 @@ export function failureReason(end: FailedTurnEnd): FailureReason {
   if (end.resumeFailed !== undefined || SESSION_REFUSED.test(error)) {
     return "resume_failed";
   }
-  if (RUNNER_FAILED.test(error) && (end.transient === true || UNREACHABLE.test(error))) {
+  if (
+    (RUNNER_FAILED.test(error) && (end.transient === true || UNREACHABLE.test(error))) ||
+    (end.transient === true && HANDSHAKE_FAILED.test(error))
+  ) {
     return "network";
   }
   for (const [reason, words] of WORDS) {

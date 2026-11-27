@@ -34,13 +34,17 @@ export interface AntigravityOptions {
   readonly runPrint?: RunPrint | undefined;
   /** The clock quota reports, a read's or a refused turn's, are stamped by; tests inject one. */
   readonly now?: (() => Date) | undefined;
+  /** How long each try of the board's handshake, which the relay makes, may take; tests shorten it. */
+  readonly handshakeLimitMs?: number | undefined;
 }
 
 /**
  * Google's Antigravity CLI through `agy acp`. A cold turn starts the server, opens or resumes the
  * pair's session, runs one turn, and stops the server; a resident session keeps both between
- * turns. The board's MCP endpoint and the turn's token travel in the session's `mcpServers`, the
- * instructions as the system prompt's append, both over stdin.
+ * turns. agy reaches the board through a relay of the session's own on 127.0.0.1, which has done
+ * the board's handshake with the turn's token before the session opens; the relay's address and
+ * secret travel in the session's `mcpServers`, the instructions as the system prompt's append,
+ * both over stdin.
  */
 export class AntigravityBackend implements AgentBackend {
   readonly kind = "antigravity" as const;
@@ -99,6 +103,9 @@ export class AntigravityBackend implements AgentBackend {
       ...(options.stderr === undefined ? {} : { stderr: options.stderr }),
       ...(options.recordDir === undefined ? {} : { recordDir: options.recordDir }),
       ...(options.now === undefined ? {} : { now: options.now }),
+      ...(options.handshakeLimitMs === undefined
+        ? {}
+        : { handshakeLimitMs: options.handshakeLimitMs }),
     };
   }
 }

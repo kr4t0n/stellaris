@@ -1,10 +1,31 @@
 import { PassThrough } from "node:stream";
-import { ResumeError, TurnControl, type TurnRequest } from "@stellaris/runner-core";
+import { ResumeError, TransientError, TurnControl, type TurnRequest } from "@stellaris/runner-core";
 import { turnStatusJsonSchema, type AgentEvent } from "@stellaris/shared";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, onTestFinished, vi } from "vitest";
 import { AntigravityBackend } from "./backend.js";
 import type { SpawnAgy } from "./rpc.js";
 import { isTransient, quotaRefusalOf, warningOf } from "./session.js";
+import {
+  callAsAgy,
+  closedUrl,
+  mcpEntryOf,
+  preloadAsAgy,
+  startStubBoard,
+  type BoardMode,
+  type McpEntry,
+  type StubBoard,
+} from "./testing/board.js";
+
+/** The board every turn's relay does its handshake with. */
+let board: StubBoard;
+
+beforeAll(async () => {
+  board = await startStubBoard("stl_turn");
+});
+
+afterAll(async () => {
+  await board.close();
+});
 
 const SESSION = "6b98cecf-cf82-4a72-a2bc-28d4b3331028";
 
@@ -80,10 +101,16 @@ const USAGE = { inputTokens: 600, outputTokens: 60, cachedReadTokens: 400, thoug
 
 /**
  * A scripted `agy acp`: each request goes to the script's handler for its method, which answers
- * now or later and may send updates first; every message the client sent is kept.
+ * now or later and may send updates first; every message the client sent is kept. Before it
+ * answers `session/new` or `session/resume`, it connects to the session's MCP server as agy 1.5.15
+ * does, unless told not to, and keeps the server's entry.
  */
-function fakeAgy(script: Script): { spawn: SpawnAgy; sent: Params[]; spawns: number } {
+function fakeAgy(
+  script: Script,
+  { preload = true }: { preload?: boolean } = {},
+): { spawn: SpawnAgy; sent: Params[]; spawns: number; entries: McpEntry[] } {
   const sent: Params[] = [];
+  const entries: McpEntry[] = [];
   const state = { spawns: 0 };
   const spawn: SpawnAgy = () => {
     state.spawns += 1;
@@ -116,11 +143,22 @@ function fakeAgy(script: Script): { spawn: SpawnAgy; sent: Params[]; spawns: num
           void handler?.(paramsOf(message["params"]), fake);
           continue;
         }
-        void Promise.resolve(
-          handler === undefined
+        const params = paramsOf(message["params"]);
+        const entry =
+          method === "session/new" || method === "session/resume" ? mcpEntryOf(params) : undefined;
+        if (entry !== undefined) {
+          entries.push(entry);
+        }
+        void (async (): Promise<Answer> => {
+          if (entry !== undefined && preload) {
+            await preloadAsAgy(entry);
+          }
+          return handler === undefined
             ? { error: { code: -32601, message: `no ${method}` } }
-            : handler(paramsOf(message["params"]), fake),
-        ).then((answer) => stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id, ...answer })}\n`));
+            : handler(params, fake);
+        })().then((answer) =>
+          stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id, ...answer })}\n`),
+        );
       }
     });
     return { stdin, stdout, stderr: new PassThrough(), exited, kill: () => exit(null) };
@@ -128,6 +166,7 @@ function fakeAgy(script: Script): { spawn: SpawnAgy; sent: Params[]; spawns: num
   return {
     spawn,
     sent,
+    entries,
     get spawns() {
       return state.spawns;
     },
@@ -150,7 +189,7 @@ function request(overrides: Partial<TurnRequest> = {}): TurnRequest {
     newSession: true,
     prompt: "Do the thing.",
     instructions: "# eng-1\nYou are an engineer.",
-    mcp: { url: "http://127.0.0.1:4700/mcp", token: "stl_turn" },
+    mcp: { url: board.url, token: board.token },
     limits: { timeoutMs: 5_000 },
     statusSchema: turnStatusJsonSchema(),
     ...overrides,
@@ -159,6 +198,32 @@ function request(overrides: Partial<TurnRequest> = {}): TurnRequest {
 
 const methodsOf = (sent: readonly Params[]): unknown[] =>
   sent.flatMap((message) => (typeof message["method"] === "string" ? [message["method"]] : []));
+
+/** A turn that would complete, once its session opened. */
+const completing = (): Script => ({
+  initialize: () => INITIALIZED,
+  "session/new": () => OPENED,
+  "session/resume": () => OPENED,
+  "session/prompt": (_, agent) => {
+    agent.update({
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: STATUS("done") },
+    });
+    return ended(USAGE);
+  },
+});
+
+/** The MCP server the fake agy was given first. */
+function firstEntry(entries: readonly McpEntry[]): McpEntry {
+  const [entry] = entries;
+  if (entry === undefined) {
+    throw new Error("agy was given no MCP server");
+  }
+  return entry;
+}
+
+/** How many handshakes the board has heard. */
+const handshakes = (): number => board.requests.filter((each) => each.rpc === "initialize").length;
 
 const prompts = (sent: readonly Params[]): unknown[] =>
   sent.flatMap((message) =>
@@ -199,7 +264,7 @@ describe("AntigravityBackend", () => {
         "/srv/agy",
       ],
     ]);
-    // The token is no argument; it travels in the session's MCP header and the agent's variable.
+    // The token is no argument; it travels in the agent's variable, and the relay sends it to the board.
     expect(args.flat().join(" ")).not.toContain("stl_turn");
     expect(envs[0]).toMatchObject({
       STELLARIS_AGENT_TOKEN: "stl_turn",
@@ -694,5 +759,137 @@ describe("AntigravityBackend", () => {
     expect(prompts(fake.sent)).toEqual(["first", "second"]);
     await session.close();
     await expect(session.runTurn("after")).rejects.toThrow("the resident session has ended");
+  });
+
+  describe("the board's relay", () => {
+    it("fails the turn as transient, before agy opens a session, when the board is out of reach or refuses the token", async () => {
+      onTestFinished(() => {
+        board.mode = {};
+      });
+      // Each case's board, and what the turn asks for.
+      const cases: [string, BoardMode, Partial<TurnRequest>][] = [
+        ["refused", {}, { mcp: { url: await closedUrl(), token: board.token } }],
+        ["401", { status: 401 }, {}],
+        ["reset", { reset: true }, {}],
+        ["stalled", { stall: true }, {}],
+        ["reset, resuming", { reset: true }, { session: SESSION, newSession: false }],
+      ];
+      const outcomes: unknown[] = [];
+      for (const [name, mode, overrides] of cases) {
+        const fake = fakeAgy(completing());
+        board.mode = mode;
+        const failure = await new AntigravityBackend({ spawn: fake.spawn, handshakeLimitMs: 100 })
+          .runTurn(request(overrides))
+          .then(
+            (result) => result,
+            (error: unknown) => error,
+          );
+        board.mode = {};
+        // agy started, and opened no session: no model call.
+        outcomes.push([
+          name,
+          failure instanceof TransientError,
+          failure instanceof Error ? failure.message : failure,
+          methodsOf(fake.sent),
+        ]);
+      }
+      const failed = expect.stringMatching(
+        /^the board's MCP handshake failed before agy opened the session, on each of 2 tries: /,
+      );
+      expect(outcomes).toEqual(cases.map(([name]) => [name, true, failed, ["initialize"]]));
+    });
+
+    it("gives agy the relay's address and secret, never the board's address or the turn's token", async () => {
+      const fake = fakeAgy(completing());
+      const result = await new AntigravityBackend({ spawn: fake.spawn }).runTurn(request());
+      expect(result.exitReason).toBe("completed");
+      const opened = paramsOf(
+        paramsOf(fake.sent.find((message) => message["method"] === "session/new"))["params"],
+      );
+      expect(opened["mcpServers"]).toEqual([
+        {
+          type: "http",
+          name: "board",
+          url: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/),
+          headers: [{ name: "Authorization", value: expect.stringMatching(/^Bearer [\w-]{43}$/) }],
+        },
+      ]);
+      expect(firstEntry(fake.entries).url).not.toBe(board.url);
+      const everything = JSON.stringify(fake.sent);
+      expect(everything).not.toContain(board.token);
+      expect(everything).not.toContain(board.url);
+    });
+
+    it("refuses a request to the relay without its secret, which never reaches the board", async () => {
+      const answers: unknown[] = [];
+      let reached = 0;
+      const fake = fakeAgy({
+        ...completing(),
+        "session/prompt": async (_, agent) => {
+          const entry = firstEntry(fake.entries);
+          const before = board.requests.length;
+          for (const authorization of [undefined, `Bearer ${board.token}`]) {
+            answers.push((await callAsAgy({ ...entry, authorization }, "post_message", {})).status);
+          }
+          reached = board.requests.length - before;
+          answers.push((await callAsAgy(entry, "post_message", { body: "hi" })).status);
+          agent.update({
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: STATUS("done") },
+          });
+          return ended(USAGE);
+        },
+      });
+      const result = await new AntigravityBackend({ spawn: fake.spawn }).runTurn(request());
+      expect(result.exitReason).toBe("completed");
+      expect(answers).toEqual([401, 401, 200]);
+      expect(reached).toBe(0);
+      expect(board.requests.at(-1)).toMatchObject({ rpc: "tools/call", authorized: true });
+    });
+
+    it("keeps one relay for a warm session's turns, and closes it with the session", async () => {
+      const calls: number[] = [];
+      const fake = fakeAgy({
+        ...completing(),
+        "session/prompt": async (params, agent) => {
+          const entry = firstEntry(fake.entries);
+          const body = String(promptTextOf(params));
+          calls.push((await callAsAgy(entry, "post_message", { body })).status);
+          agent.update({
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: STATUS("done") },
+          });
+          return ended(USAGE);
+        },
+      });
+      const before = handshakes();
+      const start = request();
+      const session = await new AntigravityBackend({ spawn: fake.spawn }).startResident(
+        start.spec,
+        start,
+      );
+      await session.runTurn("first");
+      await session.runTurn("second");
+      expect(calls).toEqual([200, 200]);
+      expect(fake.entries).toHaveLength(1);
+      expect(handshakes() - before).toBe(1);
+      const entry = firstEntry(fake.entries);
+      await session.close();
+      await expect(callAsAgy(entry, "post_message", {})).rejects.toThrow("fetch failed");
+    });
+
+    it("fails a turn whose agy opened the session without listing the board's tools", async () => {
+      const fake = fakeAgy(completing(), { preload: false });
+      const failure = await new AntigravityBackend({ spawn: fake.spawn }).runTurn(request()).then(
+        (result) => result,
+        (error: unknown) => error,
+      );
+      expect(failure).toBeInstanceOf(Error);
+      expect(failure).not.toBeInstanceOf(TransientError);
+      expect(failure).toMatchObject({
+        message: "agy opened the session without listing the board's tools from the relay",
+      });
+      expect(methodsOf(fake.sent)).toEqual(["initialize", "session/new"]);
+    });
   });
 });

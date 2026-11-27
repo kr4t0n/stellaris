@@ -15,6 +15,7 @@ import {
   enrollRunner,
   readCredentials,
   ResumeError,
+  TransientError,
   RunnerLayout,
   saveCredentials,
   ZERO_USAGE,
@@ -2533,6 +2534,41 @@ describe("turns on a runner over the runner protocol", () => {
     expect(ended.map((event) => [event.type, event.payload["transient"] ?? null])).toEqual([
       ["turn.failed", true],
       ["turn.completed", null],
+    ]);
+  });
+
+  it("records a turn transient whose adapter could not reach the board before its CLI opened the session, cold and warm, and no other start that threw", async () => {
+    const { board } = await Board.init(dir, { name: "unreached" });
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    const thread = await board.openThread(USER, { channel: "general", title: "a question" });
+    const words =
+      "the board's MCP handshake failed before agy opened the session, on each of 2 tries: no answer within 15000 ms";
+    const other = "agy acp offers no system prompt append for the instructions";
+    // What the next start throws, cold or warm.
+    const throws: Error[] = [];
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("s-1"),
+      runTurn: () => Promise.reject(throws.shift() ?? new Error("nothing scripted")),
+      startResident: () => Promise.reject(throws.shift() ?? new Error("nothing scripted")),
+    };
+    const { run } = await start(board, backend);
+    const inThread = { ...deskPost, thread: { id: thread.id, task: false } };
+    for (const post of [inThread, deskPost]) {
+      throws.push(new TransientError(words), new Error(other));
+      expect(await run(post)).toMatchObject({ exitReason: "error", error: words, transient: true });
+      const failed = await run(post);
+      expect(failed).toMatchObject({ exitReason: "error", error: other });
+      expect(failed.transient).toBeUndefined();
+    }
+    const ended = (await board.readEvents(null, 1_000)).filter(
+      (event) => event.type === "turn.failed",
+    );
+    expect(ended.map((event) => event.payload["transient"] ?? null)).toEqual([
+      true,
+      null,
+      true,
+      null,
     ]);
   });
 

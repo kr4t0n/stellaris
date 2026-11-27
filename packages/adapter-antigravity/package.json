@@ -17,5 +17,9 @@
     "@stellaris/runner-core": "workspace:*",
     "@stellaris/shared": "workspace:*",
     "execa": "10.0.1"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "zod": "4.6.7"
   }
 }

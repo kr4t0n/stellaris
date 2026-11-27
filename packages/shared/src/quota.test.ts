@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   CliQuotaSchema,
+  lapsedLimit,
   limitHold,
   limitLapsed,
   mergeQuota,
+  poolHolds,
   quotaChanged,
   quotaLevel,
+  quotaPool,
   sameQuotaNumbers,
   windowName,
+  windowPool,
   type CliQuota,
   type CliQuotaInput,
   type QuotaWindowInput,
@@ -214,12 +218,14 @@ describe("limitHold", () => {
       status: "connected",
       quotas: { claude: quota({ status: "limited", limitedUntil: "2026-10-13T13:00:00.000Z" }) },
     });
-    expect(heldOn([pod], "pod", "claude", NOW)).toBe(true);
-    expect(heldOn([pod], "pod", "codex", NOW)).toBe(false);
-    expect(heldOn([pod], "pod", "claude", new Date("2026-10-13T13:00:00.000Z"))).toBe(false);
-    expect(heldOn([pod], undefined, "claude", NOW)).toBe(false);
+    expect(heldOn([pod], "pod", { cli: "claude" }, NOW)).toBe(true);
+    expect(heldOn([pod], "pod", { cli: "codex" }, NOW)).toBe(false);
+    expect(heldOn([pod], "pod", { cli: "claude" }, new Date("2026-10-13T13:00:00.000Z"))).toBe(
+      false,
+    );
+    expect(heldOn([pod], undefined, { cli: "claude" }, NOW)).toBe(false);
     const paused = { ...pod, pausedClis: { codex: { at: AT, by: "user" } } };
-    expect(heldOn([paused], "pod", "codex", NOW)).toBe(true);
+    expect(heldOn([paused], "pod", { cli: "codex" }, NOW)).toBe(true);
   });
 
   it("holds every CLI of a connected runner while it syncs its board copy, and nothing once it is done or away", () => {
@@ -242,15 +248,15 @@ describe("limitHold", () => {
       sync,
     });
     expect(runnerSyncing(pod)).toEqual(sync);
-    expect(heldOn([pod], "pod", "claude", NOW)).toBe(true);
-    expect(heldOn([pod], "pod", "codex", NOW)).toBe(true);
+    expect(heldOn([pod], "pod", { cli: "claude" }, NOW)).toBe(true);
+    expect(heldOn([pod], "pod", { cli: "codex" }, NOW)).toBe(true);
     for (const settled of [
       { ...pod, sync: { ...sync, phase: "done" as const, finishedAt: AT } },
       { ...pod, status: "disconnected" as const },
       { ...pod, sync: undefined },
     ]) {
       expect(runnerSyncing(settled)).toBeUndefined();
-      expect(heldOn([settled], "pod", "claude", NOW)).toBe(false);
+      expect(heldOn([settled], "pod", { cli: "claude" }, NOW)).toBe(false);
     }
     expect(syncedFiles(sync)).toBe("6,200 / 15,152 files");
     expect(syncedFiles({ ...sync, files: 1_234_567, totalFiles: null })).toBe("1,234,567 files");
@@ -259,17 +265,205 @@ describe("limitHold", () => {
   });
 });
 
+/**
+ * Antigravity's pools as its read names them, and a turn's refusal of one: the shapes of one
+ * login on 2026-11-26, where a third-party refusal left the Gemini models running.
+ */
+describe("pools", () => {
+  const open = quota({
+    source: "read",
+    status: "allowed",
+    pools: [
+      { key: "gemini", label: "Gemini Models", limited: false, observedAt: AT },
+      { key: "3p", label: "Claude and GPT models", limited: false, observedAt: AT },
+    ],
+  });
+  const refused = (key: string, limitedUntil: string | null, at: string = AT): CliQuota =>
+    quota({
+      observedAt: at,
+      status: "warning",
+      pools: [{ key, limited: true, limitedUntil, observedAt: at }],
+    });
+  const RESET = "2026-10-13T15:50:00.000Z";
+
+  it("names Antigravity's pool by the citizen's model, Gemini's with none set, and none for the other CLIs", () => {
+    expect(quotaPool("antigravity", "gemini-4-neon")).toBe("gemini");
+    expect(quotaPool("antigravity", "gemini-3.8-flash")).toBe("gemini");
+    expect(quotaPool("antigravity", undefined)).toBe("gemini");
+    expect(quotaPool("antigravity", "claude-sonnet-4-6")).toBe("3p");
+    expect(quotaPool("antigravity", "gpt-oss-120b")).toBe("3p");
+    expect(quotaPool("claude", "opus")).toBeNull();
+    expect(quotaPool("codex", "gpt-6-astra")).toBeNull();
+    expect(quotaPool(null, undefined)).toBeNull();
+  });
+
+  it("holds a pool's turns until its reset while the other pool's go", () => {
+    const limited = mergeQuota(open, refused("3p", RESET));
+    expect(limitHold(limited, NOW, "3p")).toEqual({ until: RESET, known: true });
+    expect(limitHold(limited, NOW, "gemini")).toBeNull();
+    expect(limitHold(limited, NOW)).toBeNull();
+    expect(limitHold(limited, new Date(RESET), "3p")).toBeNull();
+    // The read's label stays on the pool the refusal named by its key alone.
+    expect(poolHolds(limited, NOW)).toEqual([
+      { pool: "3p", label: "Claude and GPT models", until: RESET, known: true },
+    ]);
+    expect(quotaChanged(open, limited)).toBe(true);
+    expect(quotaChanged(limited, mergeQuota(limited, refused("3p", RESET)))).toBe(false);
+  });
+
+  it("keeps a pool's limit through a read until a read finds that pool clear", () => {
+    const limited = mergeQuota(open, refused("3p", RESET));
+    // A read that names the other pool spent, or this one still spent, leaves it held.
+    const geminiSpent = quota({
+      source: "read",
+      status: "warning",
+      pools: [{ key: "gemini", limited: true, limitedUntil: RESET, observedAt: AT }],
+    });
+    expect(limitHold(mergeQuota(limited, geminiSpent), NOW, "3p")).toEqual({
+      until: RESET,
+      known: true,
+    });
+    const bothSpent = quota({
+      source: "read",
+      status: "limited",
+      limitedUntil: "2026-10-13T14:00:00.000Z",
+      pools: [
+        { key: "gemini", limited: true, limitedUntil: "2026-10-13T14:00:00.000Z", observedAt: AT },
+        { key: "3p", limited: true, limitedUntil: RESET, observedAt: AT },
+      ],
+    });
+    // The login frees with the first pool, while the other's stays held to its own reset.
+    const afterBoth = mergeQuota(limited, bothSpent);
+    expect(limitHold(afterBoth, new Date("2026-10-13T14:00:00.000Z"), "gemini")).toBeNull();
+    expect(limitHold(afterBoth, new Date("2026-10-13T14:00:00.000Z"), "3p")).toEqual({
+      until: RESET,
+      known: true,
+    });
+    // A read that finds the pool clear lifts it.
+    expect(limitHold(mergeQuota(limited, open), NOW, "3p")).toBeNull();
+  });
+
+  it("holds every pool while the whole login is limited, as a refusal naming no pool it knows reports", () => {
+    const login = quota({ status: "limited", limitedUntil: RESET });
+    expect(limitHold(login, NOW, "gemini")).toEqual({ until: RESET, known: true });
+    expect(limitHold(login, NOW, "3p")).toEqual({ until: RESET, known: true });
+    // While both hold, the later end does.
+    const later = mergeQuota(refused("3p", "2026-10-13T18:00:00.000Z"), login);
+    expect(limitHold(later, NOW, "3p")).toEqual({ until: "2026-10-13T18:00:00.000Z", known: true });
+  });
+
+  it("lets one turn try a pool's limit with no reset once its half hour is over, by that report", () => {
+    const limited = mergeQuota(open, refused("3p", null));
+    expect(limitHold(limited, NOW, "3p")).toEqual({
+      until: "2026-10-13T12:30:00.000Z",
+      known: false,
+    });
+    const lapsedAt = new Date("2026-10-13T12:30:00.000Z");
+    expect(lapsedLimit(limited, NOW, "3p")).toBeNull();
+    expect(lapsedLimit(limited, lapsedAt, "3p")).toEqual({ key: "3p", observedAt: AT });
+    expect(limitLapsed(limited, lapsedAt, "gemini")).toBe(false);
+    expect(limitLapsed(limited, lapsedAt)).toBe(false);
+    // The login's own lapse is keyed apart from any pool's.
+    expect(lapsedLimit(quota({ status: "limited" }), lapsedAt, "3p")).toEqual({
+      key: "",
+      observedAt: AT,
+    });
+  });
+
+  it("holds a citizen's turns on a runner by its model's pool", () => {
+    const pod: Runner = RunnerSchema.parse({
+      name: "pod",
+      os: "linux",
+      clis: ["claude", "antigravity"],
+      capabilities: [],
+      status: "connected",
+      quotas: { antigravity: mergeQuota(open, refused("3p", RESET)) },
+    });
+    expect(heldOn([pod], "pod", { cli: "antigravity", model: "claude-sonnet-4-6" }, NOW)).toBe(
+      true,
+    );
+    expect(heldOn([pod], "pod", { cli: "antigravity", model: "gemini-4-neon" }, NOW)).toBe(false);
+    expect(heldOn([pod], "pod", { cli: "antigravity" }, NOW)).toBe(false);
+    expect(heldOn([pod], "pod", { cli: "claude", model: "claude-sonnet-4-6" }, NOW)).toBe(false);
+    // A CLI with no pools holds every citizen on it, whatever its model, as before pools.
+    const claude = {
+      ...pod,
+      quotas: { claude: quota({ status: "limited", limitedUntil: RESET }) },
+    };
+    for (const model of [undefined, "opus", "gemini-4-neon"]) {
+      expect(heldOn([claude], "pod", { cli: "claude", model }, NOW)).toBe(true);
+    }
+  });
+
+  it("reads a citizen's level by its model's pool: its own limit, and only the login's windows and its own pool's", () => {
+    // A read with the third-party pool spent, which warns for the login as a whole.
+    const thirdPartySpent = (gemini5h: number): CliQuota =>
+      quota({
+        source: "read",
+        status: "warning",
+        windows: [
+          window({ key: "gemini-5h", usedPercent: gemini5h, resetsAt: "2026-10-13T14:00:00.000Z" }),
+          window({ key: "3p-5h", usedPercent: 100, resetsAt: RESET }),
+        ],
+        pools: [
+          { key: "gemini", limited: false, observedAt: AT },
+          { key: "3p", limited: true, limitedUntil: RESET, limitedBy: "3p-5h", observedAt: AT },
+        ],
+      });
+    const spent = thirdPartySpent(30);
+    expect(windowPool(spent, spent.windows[0]!)).toBe("gemini");
+    expect(windowPool(spent, spent.windows[1]!)).toBe("3p");
+    expect(quotaLevel(spent, NOW)).toBe("warning");
+    expect(quotaLevel(spent, NOW, "3p")).toBe("limited");
+    expect(quotaLevel(spent, NOW, "gemini")).toBe("ok");
+    expect(quotaLevel(thirdPartySpent(80), NOW, "gemini")).toBe("warning");
+    // A pool spent with no reset holds, and so reads, for half an hour from its report.
+    const unknown = mergeQuota(open, refused("3p", null));
+    expect(quotaLevel(unknown, new Date("2026-10-13T12:29:59.000Z"), "3p")).toBe("limited");
+    expect(quotaLevel(unknown, new Date("2026-10-13T12:30:00.000Z"), "3p")).toBe("warning");
+    expect(quotaLevel(unknown, NOW, "gemini")).toBe("ok");
+    // The login's own warning, with no pool spent, and its limit read for every pool.
+    expect(quotaLevel(quota({ status: "warning", pools: open.pools }), NOW, "gemini")).toBe(
+      "warning",
+    );
+    expect(quotaLevel(quota({ status: "limited", limitedUntil: RESET }), NOW, "gemini")).toBe(
+      "limited",
+    );
+    // A window whose stem names no pool the quota reports is the login's, as every window is of a
+    // report with no pools, such as a runner's from before pools.
+    const before = quota({ status: "warning", windows: spent.windows });
+    expect(windowPool(before, before.windows[1]!)).toBeNull();
+    expect(quotaLevel(before, NOW, "gemini")).toBe("warning");
+    const claude = quota({ windows: [window({ key: "five_hour" })] });
+    expect(windowPool(claude, claude.windows[0]!)).toBeNull();
+  });
+});
+
 function name(input: Partial<QuotaWindowInput> & { key: string }): string {
   return windowName(quota({ windows: [window(input)] }).windows[0]!);
 }
 
 describe("windowName", () => {
-  it("names Claude's windows by key and label, and Codex's by length", () => {
+  it("names Claude's windows by key and label, agy's by length and group, and Codex's by length", () => {
     expect(name({ key: "five_hour", minutes: 300 })).toBe("5h");
     expect(name({ key: "seven_day_opus", minutes: 10_080 })).toBe("7d opus");
     // A model's name, as the CLI gives it, reads in lowercase like the rest.
     expect(name({ key: "model:Fable", label: "Fable", minutes: 10_080 })).toBe("7d fable");
-    expect(name({ key: "model:Fable", label: "Fable", minutes: 1_440 })).toBe("fable");
+    // Any labelled window of a known length is named by it, so one of a day reads as one; Claude's
+    // model windows are all weekly, so only this table has it.
+    expect(name({ key: "model:Fable", label: "Fable", minutes: 1_440 })).toBe("1d fable");
+    // agy's buckets, labelled with their group, each of whose two windows reads by its length.
+    expect(name({ key: "gemini-weekly", label: "Gemini Models", minutes: 10_080 })).toBe(
+      "7d gemini models",
+    );
+    expect(name({ key: "gemini-5h", label: "Gemini Models", minutes: 300 })).toBe(
+      "5h gemini models",
+    );
+    expect(name({ key: "3p-5h", label: "Claude and GPT models", minutes: 300 })).toBe(
+      "5h claude and gpt models",
+    );
+    // A labelled window of no known length reads as its label alone.
+    expect(name({ key: "gemini-5h", label: "Gemini Models" })).toBe("gemini models");
     expect(name({ key: "primary", minutes: 10_080 })).toBe("7d");
     expect(name({ key: "secondary", minutes: 300 })).toBe("5h");
     expect(name({ key: "primary", minutes: 90 })).toBe("90m");

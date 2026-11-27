@@ -15,6 +15,7 @@ import {
   enrollRunner,
   readCredentials,
   ResumeError,
+  TransientError,
   RunnerLayout,
   saveCredentials,
   ZERO_USAGE,
@@ -50,6 +51,7 @@ import { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { z } from "zod";
 import {
+  JOB_ARRIVAL_WAIT,
   RECONNECT_WAIT,
   startTestSociety,
   TURN_START_WAIT,
@@ -2535,6 +2537,68 @@ describe("turns on a runner over the runner protocol", () => {
     ]);
   });
 
+  it("records a turn transient whose adapter could not reach the board before its CLI opened the session, cold and warm, and no other start that threw", async () => {
+    const { board } = await Board.init(dir, { name: "unreached" });
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    const thread = await board.openThread(USER, { channel: "general", title: "a question" });
+    const words =
+      "the board's MCP handshake failed before agy opened the session, on each of 2 tries: no answer within 15000 ms";
+    const other = "agy acp offers no system prompt append for the instructions";
+    // What the next start throws, cold or warm.
+    const throws: Error[] = [];
+    const backend: AgentBackend = {
+      kind: "claude",
+      newSession: () => Promise.resolve("s-1"),
+      runTurn: () => Promise.reject(throws.shift() ?? new Error("nothing scripted")),
+      startResident: () => Promise.reject(throws.shift() ?? new Error("nothing scripted")),
+    };
+    const { run } = await start(board, backend);
+    const inThread = { ...deskPost, thread: { id: thread.id, task: false } };
+    for (const post of [inThread, deskPost]) {
+      throws.push(new TransientError(words), new Error(other));
+      expect(await run(post)).toMatchObject({ exitReason: "error", error: words, transient: true });
+      const failed = await run(post);
+      expect(failed).toMatchObject({ exitReason: "error", error: other });
+      expect(failed.transient).toBeUndefined();
+    }
+    const ended = (await board.readEvents(null, 1_000)).filter(
+      (event) => event.type === "turn.failed",
+    );
+    expect(ended.map((event) => event.payload["transient"] ?? null)).toEqual([
+      true,
+      null,
+      true,
+      null,
+    ]);
+  });
+
+  it("hands a warm session's start the turn's control, so a stop ends a start that waits", async () => {
+    const { board } = await Board.init(dir, { name: "stopped-starting" });
+    await board.addAgent(USER, { name: "desk", role: "concierge", cli: "claude" });
+    const words = "the turn was stopped before agy opened the session";
+    let starts = 0;
+    const backend: AgentBackend = {
+      kind: "claude",
+      stops: true,
+      newSession: () => Promise.resolve("s-1"),
+      runTurn: () => Promise.resolve(completed("cold turn")),
+      // A start that waits, as on a board out of reach, until the turn is stopped.
+      startResident: (_spec, _start, control) => {
+        starts += 1;
+        return new Promise((_resolve, reject) => {
+          control?.attach({ stop: () => reject(new Error(words)) });
+        });
+      },
+    };
+    const { run, hub } = await start(board, backend);
+    const running = run(deskPost);
+    await vi.waitFor(() => expect(starts).toBe(1), TURN_START_WAIT);
+    expect(await hub.stop(hub.liveTurns()[0]?.turnId ?? "", "user")).toBe(true);
+    const stopped = await running;
+    expect(stopped).toMatchObject({ exitReason: "stopped", error: words });
+    expect(stopped.transient).toBeUndefined();
+  });
+
   it("marks a turn transient whose runner could not reach the board before its CLI started, and no other failure there", async () => {
     const { board } = await Board.init(dir, { name: "unreachable" });
     await board.addAgent(USER, { name: "concierge-1", role: "concierge", cli: "claude" });
@@ -4424,7 +4488,7 @@ describe("turns on a runner over the runner protocol", () => {
       priority: 2,
     };
     const first = run(dispatch);
-    await vi.waitFor(() => expect(lost).toHaveLength(1));
+    await vi.waitFor(() => expect(lost).toHaveLength(1), JOB_ARRIVAL_WAIT);
     const job = lost[0]?.type === "turn" ? lost[0].job : null;
     expect(job).not.toBeNull();
     const turnId = job?.turnId ?? "";
@@ -4457,7 +4521,7 @@ describe("turns on a runner over the runner protocol", () => {
     // A job that never arrived on a runner that then stays away is said to have never reached it,
     // and since nothing ran, the same wake may go again.
     const second = run(dispatch);
-    await vi.waitFor(() => expect(delivered).toHaveLength(2));
+    await vi.waitFor(() => expect(delivered).toHaveLength(2), JOB_ARRIVAL_WAIT);
     await detach();
     expect(await second).toMatchObject({
       exitReason: "error",
@@ -4530,7 +4594,7 @@ describe("turns on a runner over the runner protocol", () => {
     down = true;
     boardDown = true;
     const failed = run(dispatch);
-    await vi.waitFor(() => expect(runner.turns).toHaveLength(1));
+    await vi.waitFor(() => expect(runner.turns).toHaveLength(1), JOB_ARRIVAL_WAIT);
     const [turnId] = runner.turns;
     await new Promise((resolve) => setTimeout(resolve, 600));
     expect(hub.unacknowledged("pod")).toEqual([turnId]);
@@ -4605,7 +4669,7 @@ describe("turns on a runner over the runner protocol", () => {
     // 0.4.0 gave up on it.
     down = true;
     const long = run(manual("eng-1", "demo"));
-    await vi.waitFor(() => expect(runner.turns).toHaveLength(1));
+    await vi.waitFor(() => expect(runner.turns).toHaveLength(1), JOB_ARRIVAL_WAIT);
     const [turnId] = runner.turns;
     await new Promise((resolve) => setTimeout(resolve, 600));
     expect(await hub.assign({ ...manual("eng-2", "demo"), onboarding: false })).toBeNull();
@@ -4686,7 +4750,7 @@ describe("turns on a runner over the runner protocol", () => {
     // The conversation's next turn arrives while the stopped CLI winds down, and starts in the
     // workspace only once that CLI has ended.
     const next = run(manual("eng-1", "demo"));
-    await vi.waitFor(() => expect(runner.turns).toHaveLength(2));
+    await vi.waitFor(() => expect(runner.turns).toHaveLength(2), JOB_ARRIVAL_WAIT);
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(backend.log).toEqual(["start 1", "stop 1"]);
     backend.end(1);
@@ -4806,7 +4870,7 @@ describe("turns on a runner over the runner protocol", () => {
     // of the conversation means the board no longer holds the first, by whatever path it ended:
     // the runner stops it, and starts the second in the workspace only once its CLI has ended.
     const next = run(manual("eng-1", "demo"));
-    await vi.waitFor(() => expect(runner.turns).toHaveLength(2));
+    await vi.waitFor(() => expect(runner.turns).toHaveLength(2), JOB_ARRIVAL_WAIT);
     await vi.waitFor(() => expect(backend.log).toEqual(["start 1", "stop 1"]));
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(backend.log).toEqual(["start 1", "stop 1"]);
@@ -4903,7 +4967,7 @@ describe("turns on a runner over the runner protocol", () => {
     const first = run(manual("eng-1", "demo"));
     await vi.waitFor(() => expect(backend.log).toEqual(["start 1"]), TURN_START_WAIT);
     const next = run(manual("eng-1", "demo"));
-    await vi.waitFor(() => expect(runner.turns).toHaveLength(2));
+    await vi.waitFor(() => expect(runner.turns).toHaveLength(2), JOB_ARRIVAL_WAIT);
     await vi.waitFor(() => expect(backend.log).toEqual(["start 1", "stop 1"]));
     const waiting = runner.turns[1] ?? "";
 
@@ -5030,7 +5094,7 @@ describe("turns on a runner over the runner protocol", () => {
 
     // A step of the turn shows its job arrived, so the next turn goes there while it runs.
     const first = run(manual("eng-1", "demo"));
-    await vi.waitFor(() => expect(delivered).toHaveLength(1));
+    await vi.waitFor(() => expect(delivered).toHaveLength(1), JOB_ARRIVAL_WAIT);
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(await hub.assign({ ...manual("eng-2", "demo"), onboarding: false })).toBeNull();
     await hub.turnEvents("quiet", delivered[0] ?? "", [
@@ -5038,7 +5102,7 @@ describe("turns on a runner over the runner protocol", () => {
     ]);
     expect(hub.unacknowledged("quiet")).toEqual([]);
     const second = run(manual("eng-2", "demo"));
-    await vi.waitFor(() => expect(delivered).toHaveLength(2));
+    await vi.waitFor(() => expect(delivered).toHaveLength(2), JOB_ARRIVAL_WAIT);
     await hub.turnOutcome("quiet", delivered[0] ?? "", outcome);
     expect(await first).toMatchObject({ exitReason: "completed" });
 
@@ -5049,7 +5113,7 @@ describe("turns on a runner over the runner protocol", () => {
     expect(await second).toMatchObject({ exitReason: "completed" });
     expect(hub.unacknowledged("quiet")).toEqual([]);
     const third = run(manual("eng-1", "demo"));
-    await vi.waitFor(() => expect(delivered).toHaveLength(3));
+    await vi.waitFor(() => expect(delivered).toHaveLength(3), JOB_ARRIVAL_WAIT);
     await hub.turnOutcome("quiet", delivered[2] ?? "", outcome);
     expect(await third).toMatchObject({ exitReason: "completed" });
   });
@@ -5095,7 +5159,7 @@ describe("turns on a runner over the runner protocol", () => {
 
     // A runner that registers again without a turn it took: that turn ends as failed.
     const running = run(dispatch);
-    await vi.waitFor(() => expect(runner.turns).toHaveLength(1));
+    await vi.waitFor(() => expect(runner.turns).toHaveLength(1), JOB_ARRIVAL_WAIT);
     await vi.waitFor(() => expect(hub.unacknowledged("pod")).toEqual([]));
     await hub.register("pod", {
       protocol: RUNNER_PROTOCOL,

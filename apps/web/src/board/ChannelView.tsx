@@ -4,7 +4,7 @@ import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { BackLink } from "../components/BackLink.js";
 import { Button } from "../components/Button.js";
-import { namesNothing, type ThreadSummary } from "../lib/api.js";
+import { namesNothing, readNote, type ThreadSummary } from "../lib/api.js";
 import { ago } from "../lib/format.js";
 import { markSeen } from "../lib/seen.js";
 import {
@@ -132,7 +132,7 @@ function ChannelStream({ channel, target }: { channel: string; target: string | 
         {namesNothing(messages.error) ? (
           <PaneNote>There is no channel {channel}.</PaneNote>
         ) : messages.data === undefined ? (
-          <PaneNote>Reading the channel…</PaneNote>
+          <PaneNote>{readNote("the channel", messages.error)}</PaneNote>
         ) : items.length === 0 ? (
           <PaneNote>Nothing has been said here yet.</PaneNote>
         ) : (

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { BackLink } from "../components/BackLink.js";
 import { Button } from "../components/Button.js";
 import { Markdown } from "../components/Markdown.js";
+import { readNote } from "../lib/api.js";
 import { useSession, useSkillFiles, useSkills } from "../lib/session.js";
 import { skillText } from "./governance.js";
 import { Section } from "./Overview.js";
@@ -28,7 +29,9 @@ export function SkillView() {
   if (skill === undefined) {
     return (
       <PaneNote>
-        {skills.data === undefined ? "Reading…" : `The society has no skill ${name}.`}
+        {skills.data === undefined
+          ? readNote("the skills", skills.error, "Reading…")
+          : `The society has no skill ${name}.`}
       </PaneNote>
     );
   }

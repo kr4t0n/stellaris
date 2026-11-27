@@ -1,10 +1,37 @@
 import { PassThrough } from "node:stream";
-import { ResumeError, TurnControl, type TurnRequest } from "@stellaris/runner-core";
+import {
+  ResumeError,
+  TransientError,
+  TurnControl,
+  type TurnRequest,
+  type TurnResult,
+} from "@stellaris/runner-core";
 import { turnStatusJsonSchema, type AgentEvent } from "@stellaris/shared";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, onTestFinished, vi } from "vitest";
 import { AntigravityBackend } from "./backend.js";
 import type { SpawnAgy } from "./rpc.js";
-import { isTransient, warningOf } from "./session.js";
+import { isTransient, quotaRefusalOf, warningOf } from "./session.js";
+import {
+  callAsAgy,
+  closedUrl,
+  mcpEntryOf,
+  openAsAgy,
+  startStubBoard,
+  type BoardMode,
+  type McpEntry,
+  type StubBoard,
+} from "./testing/board.js";
+
+/** The board every turn's relay does its handshake with. */
+let board: StubBoard;
+
+beforeAll(async () => {
+  board = await startStubBoard("stl_turn");
+});
+
+afterAll(async () => {
+  await board.close();
+});
 
 const SESSION = "6b98cecf-cf82-4a72-a2bc-28d4b3331028";
 
@@ -80,10 +107,17 @@ const USAGE = { inputTokens: 600, outputTokens: 60, cachedReadTokens: 400, thoug
 
 /**
  * A scripted `agy acp`: each request goes to the script's handler for its method, which answers
- * now or later and may send updates first; every message the client sent is kept.
+ * now or later and may send updates first; every message the client sent is kept. Before it
+ * answers `session/new` or `session/resume`, it connects to the session's MCP server as agy 1.5.15
+ * does, giving it 5 s and opening the session whatever came of it, unless told not to connect, and
+ * keeps the server's entry.
  */
-function fakeAgy(script: Script): { spawn: SpawnAgy; sent: Params[]; spawns: number } {
+function fakeAgy(
+  script: Script,
+  { preload = true }: { preload?: boolean } = {},
+): { spawn: SpawnAgy; sent: Params[]; spawns: number; entries: McpEntry[] } {
   const sent: Params[] = [];
+  const entries: McpEntry[] = [];
   const state = { spawns: 0 };
   const spawn: SpawnAgy = () => {
     state.spawns += 1;
@@ -116,11 +150,22 @@ function fakeAgy(script: Script): { spawn: SpawnAgy; sent: Params[]; spawns: num
           void handler?.(paramsOf(message["params"]), fake);
           continue;
         }
-        void Promise.resolve(
-          handler === undefined
+        const params = paramsOf(message["params"]);
+        const entry =
+          method === "session/new" || method === "session/resume" ? mcpEntryOf(params) : undefined;
+        if (entry !== undefined) {
+          entries.push(entry);
+        }
+        void (async (): Promise<Answer> => {
+          if (entry !== undefined && preload) {
+            await openAsAgy(entry);
+          }
+          return handler === undefined
             ? { error: { code: -32601, message: `no ${method}` } }
-            : handler(paramsOf(message["params"]), fake),
-        ).then((answer) => stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id, ...answer })}\n`));
+            : handler(params, fake);
+        })().then((answer) =>
+          stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id, ...answer })}\n`),
+        );
       }
     });
     return { stdin, stdout, stderr: new PassThrough(), exited, kill: () => exit(null) };
@@ -128,6 +173,7 @@ function fakeAgy(script: Script): { spawn: SpawnAgy; sent: Params[]; spawns: num
   return {
     spawn,
     sent,
+    entries,
     get spawns() {
       return state.spawns;
     },
@@ -150,7 +196,7 @@ function request(overrides: Partial<TurnRequest> = {}): TurnRequest {
     newSession: true,
     prompt: "Do the thing.",
     instructions: "# eng-1\nYou are an engineer.",
-    mcp: { url: "http://127.0.0.1:4700/mcp", token: "stl_turn" },
+    mcp: { url: board.url, token: board.token },
     limits: { timeoutMs: 5_000 },
     statusSchema: turnStatusJsonSchema(),
     ...overrides,
@@ -159,6 +205,32 @@ function request(overrides: Partial<TurnRequest> = {}): TurnRequest {
 
 const methodsOf = (sent: readonly Params[]): unknown[] =>
   sent.flatMap((message) => (typeof message["method"] === "string" ? [message["method"]] : []));
+
+/** A turn that would complete, once its session opened. */
+const completing = (): Script => ({
+  initialize: () => INITIALIZED,
+  "session/new": () => OPENED,
+  "session/resume": () => OPENED,
+  "session/prompt": (_, agent) => {
+    agent.update({
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: STATUS("done") },
+    });
+    return ended(USAGE);
+  },
+});
+
+/** The MCP server the fake agy was given first. */
+function firstEntry(entries: readonly McpEntry[]): McpEntry {
+  const [entry] = entries;
+  if (entry === undefined) {
+    throw new Error("agy was given no MCP server");
+  }
+  return entry;
+}
+
+/** How many handshakes the board has heard. */
+const handshakes = (): number => board.requests.filter((each) => each.rpc === "initialize").length;
 
 const prompts = (sent: readonly Params[]): unknown[] =>
   sent.flatMap((message) =>
@@ -199,7 +271,7 @@ describe("AntigravityBackend", () => {
         "/srv/agy",
       ],
     ]);
-    // The token is no argument; it travels in the session's MCP header and the agent's variable.
+    // The token is no argument; it travels in the agent's variable, and the relay sends it to the board.
     expect(args.flat().join(" ")).not.toContain("stl_turn");
     expect(envs[0]).toMatchObject({
       STELLARIS_AGENT_TOKEN: "stl_turn",
@@ -394,6 +466,123 @@ describe("AntigravityBackend", () => {
     expect(prompts(fake.sent)).toHaveLength(1);
   });
 
+  /**
+   * The service's sentences for a refusal of the plan's quota, as two citizens' turns on one login
+   * failed with them on 2026-11-26, one for each of Antigravity's pools.
+   */
+  describe("a refusal of the plan's quota", () => {
+    // When those turns were refused.
+    const AT = new Date("2026-11-26T15:50:19.000Z");
+    const THIRD_PARTY_AT = new Date("2026-11-26T14:42:52.000Z");
+    const INDIVIDUAL =
+      "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h42m21s.";
+    const THIRD_PARTY =
+      "Third-party quota reached. Please switch to Gemini models or upgrade your subscription to increase your limits. Resets in 3h49m54s.";
+
+    /** A turn agy ends with `words` as its warning, on a clock stopped at `at`. */
+    async function refusedWith(words: string, at: Date = AT) {
+      const fake = fakeAgy({
+        initialize: () => INITIALIZED,
+        "session/new": () => OPENED,
+        "session/prompt": (_, agent) => {
+          agent.update({
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: `\n\u26a0 ${words}\n` },
+          });
+          return ended();
+        },
+      });
+      return new AntigravityBackend({ spawn: fake.spawn, now: () => at }).runTurn(request());
+    }
+
+    it("limits the pool each sentence names until its countdown ends, as the plan's limit, never transient", async () => {
+      for (const [words, pool, at, until] of [
+        [INDIVIDUAL, "gemini", AT, "2026-11-26T17:32:40.000Z"],
+        [THIRD_PARTY, "3p", THIRD_PARTY_AT, "2026-11-26T18:32:46.000Z"],
+      ] as const) {
+        const result = await refusedWith(words, at);
+        expect(result.exitReason).toBe("error");
+        expect(result.error).toBe(`usage limit reached: ${words}`);
+        expect(result.transient).toBeUndefined();
+        expect(result.quota).toEqual({
+          observedAt: at.toISOString(),
+          source: "turn",
+          status: "warning",
+          limitedUntil: null,
+          limitedBy: null,
+          plan: null,
+          windows: [],
+          credits: null,
+          extraUsage: null,
+          pools: [
+            {
+              key: pool,
+              limited: true,
+              limitedUntil: until,
+              limitedBy: null,
+              observedAt: at.toISOString(),
+            },
+          ],
+        });
+      }
+    });
+
+    it("limits the pool with no reset when its countdown does not read, for the half-hour hold", async () => {
+      const result = await refusedWith(
+        "Individual quota reached. Please upgrade your subscription to increase your limits. Resets soon.",
+      );
+      expect(result.error).toMatch(/^usage limit reached: Individual quota reached\./);
+      expect(result.quota?.pools).toMatchObject([
+        { key: "gemini", limited: true, limitedUntil: null },
+      ]);
+    });
+
+    it("limits the whole login for a pool it does not know, and reads days in a countdown", async () => {
+      const result = await refusedWith("Team quota reached. Resets in 2d3h.");
+      expect(result.quota).toMatchObject({
+        status: "limited",
+        limitedUntil: "2026-11-28T18:50:19.000Z",
+      });
+      expect(result.quota?.pools).toBeUndefined();
+      expect(result.transient).toBeUndefined();
+    });
+
+    it("reads the sentence wherever agy puts it: in its executor's 429, or as its answer to the prompt", async () => {
+      const wrapped = await refusedWith(
+        `agent executor error: generating and executing: Error 429, Message: ${THIRD_PARTY}, Status: RESOURCE_EXHAUSTED, Details: []`,
+        THIRD_PARTY_AT,
+      );
+      expect(wrapped.transient).toBeUndefined();
+      expect(wrapped.quota?.pools).toMatchObject([
+        { key: "3p", limitedUntil: "2026-11-26T18:32:46.000Z" },
+      ]);
+      const fake = fakeAgy({
+        initialize: () => INITIALIZED,
+        "session/new": () => OPENED,
+        "session/prompt": () => ({ error: { code: -32000, message: INDIVIDUAL } }),
+      });
+      const answered = await new AntigravityBackend({ spawn: fake.spawn, now: () => AT }).runTurn(
+        request(),
+      );
+      expect(answered.error).toBe(`usage limit reached: ${INDIVIDUAL}`);
+      expect(answered.quota?.pools).toMatchObject([
+        { key: "gemini", limitedUntil: "2026-11-26T17:32:40.000Z" },
+      ]);
+    });
+
+    it("reads no other failure as a refusal of the quota", () => {
+      expect(
+        quotaRefusalOf("There was a network issue connecting to the server, please try again.", AT),
+      ).toBeUndefined();
+      expect(
+        quotaRefusalOf(
+          "agent executor error: generating and executing: Error 429, Message: stub refusal 429, Status: RESOURCE_EXHAUSTED, Details: []",
+          AT,
+        ),
+      ).toBeUndefined();
+    });
+  });
+
   it("ends a turn whose agy exits mid-prompt with its last words", async () => {
     const fake = fakeAgy({
       initialize: () => INITIALIZED,
@@ -514,6 +703,122 @@ describe("AntigravityBackend", () => {
     expect(result.error).toBeUndefined();
   });
 
+  it("sends no prompt when stopped while agy opens the session, and reports the session it opened", async () => {
+    // Where the turn is stopped: during a request of the open whose answer is held, cold or as a
+    // warm session's start, or before a warm session's turn begins; and all agy is sent.
+    const cases: [
+      string,
+      "cold" | "resident" | "warm",
+      string | null,
+      Partial<TurnRequest>,
+      string[],
+    ][] = [
+      ["new", "cold", "session/new", {}, ["initialize", "session/new"]],
+      [
+        "resume",
+        "cold",
+        "session/resume",
+        { session: SESSION, newSession: false },
+        ["initialize", "session/resume"],
+      ],
+      [
+        "model",
+        "cold",
+        "session/set_config_option",
+        { spec: { ...request().spec, model: "gemini-4-neon" } },
+        ["initialize", "session/new", "session/set_config_option"],
+      ],
+      ["resident new", "resident", "session/new", {}, ["initialize", "session/new"]],
+      [
+        "resident resume",
+        "resident",
+        "session/resume",
+        { session: SESSION, newSession: false },
+        ["initialize", "session/resume"],
+      ],
+      ["warm", "warm", null, {}, ["initialize", "session/new"]],
+    ];
+    const outcomes: unknown[] = [];
+    for (const [name, path, hold, overrides] of cases) {
+      const held = Promise.withResolvers<void>();
+      const heldIf = (method: string, answer: Answer) => (): Answer | Promise<Answer> =>
+        method === hold ? held.promise.then(() => answer) : answer;
+      const fake = fakeAgy({
+        ...completing(),
+        "session/new": heldIf("session/new", OPENED),
+        "session/resume": heldIf("session/resume", OPENED),
+        "session/set_config_option": heldIf("session/set_config_option", {
+          result: {
+            configOptions: [
+              {
+                id: "model",
+                type: "select",
+                currentValue: "gemini-4-neon",
+                options: [{ value: "gemini-4-neon", name: "Gemini 4 Neon" }],
+              },
+            ],
+          },
+        }),
+        "session/cancel": () => ({ result: null }),
+      });
+      const backend = new AntigravityBackend({ spawn: fake.spawn });
+      const control = new TurnControl();
+      const start = request(overrides);
+      let running: Promise<TurnResult>;
+      if (path === "cold") {
+        running = backend.runTurn(start, undefined, control);
+      } else {
+        // As the executor runs a warm session: its start, then each turn on it.
+        const starting = backend.startResident(
+          start.spec,
+          start,
+          path === "warm" ? undefined : control,
+        );
+        running = starting.then(async (session) => {
+          try {
+            return await session.runTurn("Do the thing.", undefined, control);
+          } finally {
+            await session.close();
+          }
+        });
+      }
+      if (hold !== null) {
+        await vi.waitFor(() => {
+          if (!methodsOf(fake.sent).includes(hold)) {
+            throw new Error(`agy was sent no ${hold} yet`);
+          }
+        });
+      }
+      control.stop();
+      held.resolve();
+      const releasedAt = Date.now();
+      const result = await running;
+      outcomes.push([
+        name,
+        methodsOf(fake.sent),
+        result.exitReason,
+        result.error,
+        result.status,
+        result.session,
+        // The turn ends as the open answers, with no wait for a reply to a cancel, 15 s at most.
+        Date.now() - releasedAt < 5_000,
+        await control.steer({ id: "steer-1", text: "late" }),
+      ]);
+    }
+    expect(outcomes).toEqual(
+      cases.map(([name, , , , sent]) => [
+        name,
+        sent,
+        "stopped",
+        undefined,
+        null,
+        SESSION,
+        true,
+        false,
+      ]),
+    );
+  });
+
   it("cancels a turn at its time limit, and ends it as a timeout with no status asked", async () => {
     const prompt = Promise.withResolvers<Answer>();
     const fake = fakeAgy({
@@ -577,5 +882,175 @@ describe("AntigravityBackend", () => {
     expect(prompts(fake.sent)).toEqual(["first", "second"]);
     await session.close();
     await expect(session.runTurn("after")).rejects.toThrow("the resident session has ended");
+  });
+
+  describe("the board's relay", () => {
+    it("fails the turn as transient, before agy opens a session, when the board is out of reach or refuses the token", async () => {
+      onTestFinished(() => {
+        board.mode = {};
+      });
+      // Each case's board, and what the turn asks for.
+      const cases: [string, BoardMode, Partial<TurnRequest>][] = [
+        ["refused", {}, { mcp: { url: await closedUrl(), token: board.token } }],
+        ["401", { status: 401 }, {}],
+        ["reset", { reset: true }, {}],
+        ["stalled", { stall: true }, {}],
+        ["reset, resuming", { reset: true }, { session: SESSION, newSession: false }],
+      ];
+      const outcomes: unknown[] = [];
+      for (const [name, mode, overrides] of cases) {
+        const fake = fakeAgy(completing());
+        board.mode = mode;
+        const failure = await new AntigravityBackend({ spawn: fake.spawn, handshakeLimitMs: 100 })
+          .runTurn(request(overrides))
+          .then(
+            (result) => result,
+            (error: unknown) => error,
+          );
+        board.mode = {};
+        // agy started, and opened no session: no model call.
+        outcomes.push([
+          name,
+          failure instanceof TransientError,
+          failure instanceof Error ? failure.message : failure,
+          methodsOf(fake.sent),
+        ]);
+      }
+      const failed = expect.stringMatching(
+        /^the board's MCP handshake failed before agy opened the session, on each of 2 tries: /,
+      );
+      expect(outcomes).toEqual(cases.map(([name]) => [name, true, failed, ["initialize"]]));
+    });
+
+    it("gives agy the relay's address and secret, never the board's address or the turn's token", async () => {
+      const fake = fakeAgy(completing());
+      const result = await new AntigravityBackend({ spawn: fake.spawn }).runTurn(request());
+      expect(result.exitReason).toBe("completed");
+      const opened = paramsOf(
+        paramsOf(fake.sent.find((message) => message["method"] === "session/new"))["params"],
+      );
+      expect(opened["mcpServers"]).toEqual([
+        {
+          type: "http",
+          name: "board",
+          url: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/),
+          headers: [{ name: "Authorization", value: expect.stringMatching(/^Bearer [\w-]{43}$/) }],
+        },
+      ]);
+      expect(firstEntry(fake.entries).url).not.toBe(board.url);
+      const everything = JSON.stringify(fake.sent);
+      expect(everything).not.toContain(board.token);
+      expect(everything).not.toContain(board.url);
+    });
+
+    it("refuses a request to the relay without its secret, which never reaches the board", async () => {
+      const answers: unknown[] = [];
+      let reached = 0;
+      const fake = fakeAgy({
+        ...completing(),
+        "session/prompt": async (_, agent) => {
+          const entry = firstEntry(fake.entries);
+          const before = board.requests.length;
+          for (const authorization of [undefined, `Bearer ${board.token}`]) {
+            answers.push((await callAsAgy({ ...entry, authorization }, "post_message", {})).status);
+          }
+          reached = board.requests.length - before;
+          answers.push((await callAsAgy(entry, "post_message", { body: "hi" })).status);
+          agent.update({
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: STATUS("done") },
+          });
+          return ended(USAGE);
+        },
+      });
+      const result = await new AntigravityBackend({ spawn: fake.spawn }).runTurn(request());
+      expect(result.exitReason).toBe("completed");
+      expect(answers).toEqual([401, 401, 200]);
+      expect(reached).toBe(0);
+      expect(board.requests.at(-1)).toMatchObject({ rpc: "tools/call", authorized: true });
+    });
+
+    it("keeps one relay for a warm session's turns, and closes it with the session", async () => {
+      const calls: number[] = [];
+      const fake = fakeAgy({
+        ...completing(),
+        "session/prompt": async (params, agent) => {
+          const entry = firstEntry(fake.entries);
+          const body = String(promptTextOf(params));
+          calls.push((await callAsAgy(entry, "post_message", { body })).status);
+          agent.update({
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: STATUS("done") },
+          });
+          return ended(USAGE);
+        },
+      });
+      const before = handshakes();
+      const start = request();
+      const session = await new AntigravityBackend({ spawn: fake.spawn }).startResident(
+        start.spec,
+        start,
+      );
+      await session.runTurn("first");
+      await session.runTurn("second");
+      expect(calls).toEqual([200, 200]);
+      expect(fake.entries).toHaveLength(1);
+      expect(handshakes() - before).toBe(1);
+      const entry = firstEntry(fake.entries);
+      await session.close();
+      await expect(callAsAgy(entry, "post_message", {})).rejects.toThrow("fetch failed");
+    });
+
+    it("ends a start the board's handshake holds as soon as the turn is stopped, cold and warm", async () => {
+      onTestFinished(() => {
+        board.mode = {};
+      });
+      board.mode = { stall: true };
+      const outcomes: unknown[] = [];
+      for (const warm of [false, true]) {
+        const fake = fakeAgy(completing());
+        const backend = new AntigravityBackend({ spawn: fake.spawn, handshakeLimitMs: 20_000 });
+        const control = new TurnControl();
+        const before = handshakes();
+        const start = request();
+        const starting: Promise<unknown> = warm
+          ? backend.startResident(start.spec, start, control)
+          : backend.runTurn(start, undefined, control);
+        await vi.waitFor(() => expect(handshakes()).toBe(before + 1));
+        const stoppedAt = Date.now();
+        control.stop();
+        const failure = await starting.then(
+          (result) => result,
+          (error: unknown) => error,
+        );
+        // Well inside one try of the handshake, which would have held the start for 20 s.
+        const waitedMs = Date.now() - stoppedAt;
+        outcomes.push([
+          warm,
+          failure instanceof Error ? failure.message : failure,
+          waitedMs < 5_000,
+          methodsOf(fake.sent),
+        ]);
+      }
+      const stopped = "the turn was stopped before agy opened the session";
+      expect(outcomes).toEqual([
+        [false, stopped, true, ["initialize"]],
+        [true, stopped, true, ["initialize"]],
+      ]);
+    });
+
+    it("fails a turn whose agy opened the session without listing the board's tools", async () => {
+      const fake = fakeAgy(completing(), { preload: false });
+      const failure = await new AntigravityBackend({ spawn: fake.spawn }).runTurn(request()).then(
+        (result) => result,
+        (error: unknown) => error,
+      );
+      expect(failure).toBeInstanceOf(Error);
+      expect(failure).not.toBeInstanceOf(TransientError);
+      expect(failure).toMatchObject({
+        message: "agy opened the session without listing the board's tools from the relay",
+      });
+      expect(methodsOf(fake.sent)).toEqual(["initialize", "session/new"]);
+    });
   });
 });

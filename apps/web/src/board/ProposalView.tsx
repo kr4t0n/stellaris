@@ -5,7 +5,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { BackLink } from "../components/BackLink.js";
 import { Markdown } from "../components/Markdown.js";
-import { ApiError, namesNothing } from "../lib/api.js";
+import { ApiError, namesNothing, readNote } from "../lib/api.js";
 import { ago } from "../lib/format.js";
 import {
   useMembers,
@@ -227,7 +227,7 @@ export function ProposalView() {
       <PaneNote>
         {namesNothing(proposal.error)
           ? `There is no proposal ${proposalId}.`
-          : "Reading the proposal…"}
+          : readNote("the proposal", proposal.error)}
       </PaneNote>
     );
   }

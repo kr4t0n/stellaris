@@ -361,6 +361,12 @@ test("a turn in flight takes a post into its conversation, and stops on a second
   // The turn is no longer in flight, so its controls go.
   await expect(view.getByRole("button", { name: "Stop…" })).toBeHidden();
   await expect(view.getByLabel("Message desk while it works")).toBeHidden();
+  // The box goes only once a read finds the turn stopped, which takes a stop the fake recorded.
+  // One stop, from the second click: the first only asked.
+  expect(board.writes.map((write) => write.path)).toEqual([
+    "/api/verbs/post_message",
+    `/api/turns/${DESK_TURN_IN_FLIGHT}/stop`,
+  ]);
 });
 
 test("after a restart the Now tab shows the last turn from its transcript", async ({ page }) => {
@@ -510,10 +516,13 @@ test("a citizen's CLI is switched from its mark by keyboard alone", async ({ pag
   const mark = view.getByRole("button", { name: /^Switch CLI/ });
   await mark.focus();
   await page.keyboard.press("Enter");
-  // The list opens on the CLI desk runs on; the arrow moves to the next.
+  // The list opens on the CLI desk runs on, and holds the others once the runners have answered;
+  // the arrow moves to the next.
+  const codex = view.getByRole("button", { name: "codex", exact: true });
   await expect(view.getByRole("button", { name: "claude", exact: true })).toBeFocused();
+  await expect(codex).toBeVisible();
   await page.keyboard.press("ArrowDown");
-  await expect(view.getByRole("button", { name: "codex", exact: true })).toBeFocused();
+  await expect(codex).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(mark).toHaveAccessibleName("Switch CLI (codex)");
   await expect(mark).toBeFocused();
@@ -859,6 +868,34 @@ test("a citizen's view and the citizens list say when its CLI's quota is at its 
   await expect(
     page.getByRole("region", { name: "Plan quota" }).getByText(/^limited for (39|40)m · as of/),
   ).toBeVisible();
+});
+
+test("a citizen's view and the citizens list read Antigravity's quota for the citizen's own pool", async ({
+  page,
+}) => {
+  await fakeBoard(page, { pooled: true });
+  await page.goto("/citizens");
+  const view = page.getByRole("region", { name: "Board content" });
+  const row = (name: string) =>
+    view.getByRole("listitem").filter({ has: page.getByText(name, { exact: true }) });
+  // rig's third-party pool is spent and its Gemini pool is not: bo, on a Claude model, is held
+  // there until the pool's reset, in words for readers too, and cy, on a Gemini model, is unmarked.
+  const mark = row("bo").getByTitle(/^antigravity limited for (1h 59m|2h 0m) on rig$/);
+  await expect(mark).toBeVisible();
+  await expect(mark).toHaveText(/antigravity limited for (1h 59m|2h 0m) on rig/);
+  await expect(row("cy")).toBeVisible();
+  await expect(row("cy").getByTitle(/^antigravity /)).toHaveCount(0);
+
+  // Each line names the windows of the citizen's own pool alone.
+  await page.goto("/citizen/bo");
+  const quota = view.locator("p", { hasText: /^antigravity quota/ });
+  await expect(quota).toHaveText(/^antigravity quota · rig limited for (1h 59m|2h 0m)$/);
+  await expect(quota.getByText(/^limited for/)).toHaveClass(/text-red-300/);
+  await page.goto("/citizen/cy");
+  await expect(quota).toHaveText(
+    "antigravity quota · rig 7d gemini models 12% · 5h gemini models 30%",
+  );
+  await expect(quota.getByText(/^7d gemini models/)).toHaveClass(/text-fg-muted/);
 });
 
 test("the citizens list shows each citizen's tokens over a window, retired ones apart", async ({

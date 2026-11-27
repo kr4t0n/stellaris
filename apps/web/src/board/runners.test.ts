@@ -101,7 +101,7 @@ describe("runnerState", () => {
       quotas: { claude: limited("2026-11-06T04:59:59.574Z") },
     });
     expect(heldClis(held, NOW)).toEqual([
-      { cli: "claude", until: "2026-11-06T04:59:59.574Z", paused: false },
+      { cli: "claude", pool: null, label: null, until: "2026-11-06T04:59:59.574Z", paused: false },
     ]);
     expect(runnerState(held, NOW)).toEqual({
       label: "codex paused · claude held",
@@ -112,6 +112,39 @@ describe("runnerState", () => {
     expect(runnerState(runner({ quotas: { claude: limited(null) } }), NOW)).toMatchObject({
       label: "claude held",
       detail: "connected; claude held by its limit for 20m",
+    });
+  });
+
+  it("names a pool a limit holds in the detail, and its CLI once in the label", () => {
+    const pools = runner({
+      clis: ["antigravity"],
+      quotas: {
+        antigravity: CliQuotaSchema.parse({
+          observedAt: "2026-11-04T07:50:00.000Z",
+          source: "turn",
+          status: "warning",
+          pools: [
+            {
+              key: "gemini",
+              label: "Gemini Models",
+              limited: true,
+              limitedUntil: "2026-11-04T09:00:00.000Z",
+              observedAt: "2026-11-04T07:50:00.000Z",
+            },
+            { key: "3p", limited: true, observedAt: "2026-11-04T07:50:00.000Z" },
+          ],
+        }),
+      },
+    });
+    expect(heldClis(pools, NOW).map((hold) => [hold.cli, hold.pool, hold.until])).toEqual([
+      ["antigravity", "gemini", "2026-11-04T09:00:00.000Z"],
+      ["antigravity", "3p", "2026-11-04T08:20:00.000Z"],
+    ]);
+    expect(runnerState(pools, NOW)).toEqual({
+      label: "antigravity held",
+      detail:
+        "connected; antigravity's Gemini Models held by their limit for 1h 0m; antigravity's 3p held by their limit for 20m",
+      tone: "text-amber-300",
     });
   });
 

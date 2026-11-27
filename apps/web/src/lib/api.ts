@@ -101,6 +101,44 @@ export function namesNothing(error: unknown): boolean {
   return error instanceof ApiError && (error.status === 404 || error.code === "VALIDATION");
 }
 
+/**
+ * Whether a read failed for want of an answer from the board server: none came, or a gateway in
+ * front of it, as Vite's proxy while the board is down, answered 502, 503, or 504 without the
+ * board's own reason, which every refusal of the board's carries.
+ */
+export function unanswered(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    (error.status === 0 || (error.code === null && [502, 503, 504].includes(error.status)))
+  );
+}
+
+/**
+ * A failed read's words for a note: the board's own, or for an answer the schemas refuse, its
+ * first issue and where it is, since Zod's own message is every issue as indented JSON.
+ */
+export function failureOf(error: Error): string {
+  const issue = error instanceof z.ZodError ? error.issues[0] : undefined;
+  if (issue === undefined) {
+    return error.message;
+  }
+  const path = issue.path
+    .map((key) => (typeof key === "number" ? `[${key}]` : `.${String(key)}`))
+    .join("")
+    .replace(/^\./, "");
+  return path === "" ? issue.message : `${path}: ${issue.message}`;
+}
+
+/**
+ * What a view says while a read has given it nothing: that the read is under way, or once it has
+ * failed, that it could not read what, with the failure's words. A read asked again starts over
+ * with no error, so one that polls says it is reading while it asks, and the note goes with the
+ * first answer. A caller says first what a read that names nothing means.
+ */
+export function readNote(what: string, error: Error | null, reading = `Reading ${what}…`): string {
+  return error === null ? reading : `Could not read ${what}: ${failureOf(error)}`;
+}
+
 const ActorSchema = z.object({
   name: NameSchema,
   role: NameSchema,

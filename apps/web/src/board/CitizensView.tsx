@@ -2,7 +2,7 @@ import type { CitizenTokens, Member, MetricsWindow, Runner } from "@stellaris/sh
 import { Link, useSearch } from "@tanstack/react-router";
 import { useId } from "react";
 import { CliIcon } from "../components/CliIcon.js";
-import { pairsOf } from "../lib/api.js";
+import { failureOf, pairsOf, readNote } from "../lib/api.js";
 import { ago } from "../lib/format.js";
 import {
   useMembers,
@@ -161,9 +161,10 @@ function CitizenRow({
 
 /**
  * Every citizen at a glance, one row each in columns, ordered by role: its CLI, marked when its
- * quota is near or at its limit on a runner its turns use, role, model, the runners its turns run
- * on, projects, and the tokens its turns counted over the window the header picks beside what it
- * is doing, or under the row in an island too narrow for them; each opens the citizen's own view.
+ * quota, read for its model's pool, is near or at its limit on a runner its turns use, role, model,
+ * the runners its turns run on, projects, and the tokens its turns counted over the window the
+ * header picks beside what it is doing, or under the row in an island too narrow for them; each
+ * opens the citizen's own view.
  * Retired citizens follow in a section of their own.
  */
 export function CitizensView() {
@@ -177,7 +178,7 @@ export function CitizensView() {
   const switcherLabel = useId();
   const retiredHeading = useId();
   if (members.data === undefined) {
-    return <PaneNote>Reading the roster…</PaneNote>;
+    return <PaneNote>{readNote("the roster", members.error)}</PaneNote>;
   }
   // The user takes no turns and has no CLI; it is not a citizen here.
   const citizens = members.data.filter((member) => member.cli !== null);
@@ -226,7 +227,7 @@ export function CitizensView() {
     }
     return tokenUse.error === null
       ? { label: "counting…", counts: null, detail: undefined, spoken: null }
-      : { label: "tokens unknown", counts: null, detail: tokenUse.error.message, spoken: null };
+      : { label: "tokens unknown", counts: null, detail: failureOf(tokenUse.error), spoken: null };
   };
 
   // Every out count the list shows, so each row's is drawn as wide as the widest.

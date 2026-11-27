@@ -2,6 +2,7 @@ import { SOCIETY_SCOPE, USER_ROLE, type Skill } from "@stellaris/shared";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { Button } from "../components/Button.js";
+import { readNote } from "../lib/api.js";
 import {
   useChannels,
   useKnowledge,
@@ -32,7 +33,7 @@ export function SocietyView() {
   const [opening, setOpening] = useState(false);
 
   if (society.data === undefined || members.data === undefined) {
-    return <PaneNote>Reading the society…</PaneNote>;
+    return <PaneNote>{readNote("the society", society.error ?? members.error)}</PaneNote>;
   }
   const citizens = members.data.filter((member) => member.cli !== null);
   const active = citizens.filter((member) => member.status === "active");
@@ -87,11 +88,16 @@ export function SocietyView() {
           </ul>
         </Section>
         <Section title="Knowledge">
-          <TopicList scope={SOCIETY_SCOPE} topics={knowledge.data} now={now} />
+          <TopicList
+            scope={SOCIETY_SCOPE}
+            topics={knowledge.data}
+            error={knowledge.error}
+            now={now}
+          />
         </Section>
         <Section title="Skills">
           {skills.data === undefined ? (
-            <p className="text-meta">Reading…</p>
+            <p className="text-meta">{readNote("the skills", skills.error, "Reading…")}</p>
           ) : skills.data.length === 0 ? (
             <p className="text-meta">None yet.</p>
           ) : (

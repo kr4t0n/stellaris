@@ -49,6 +49,8 @@ export const TriggerSchema = z.object({
   channel: ChannelRefSchema.optional(),
   /** The cron that came due, for a `cron` wake. */
   cronId: UlidSchema.optional(),
+  /** The proposal decided, for a `proposal_decided` wake. */
+  proposalId: UlidSchema.optional(),
   /** What a `heartbeat` woke for; absent on records from before the board kept it. */
   heartbeat: HeartbeatCauseSchema.optional(),
 });
@@ -80,6 +82,16 @@ export const TurnDispatchSchema = z.object({
   onboarding: z.boolean().default(false),
   /** Every cron that came due for this turn, whatever wake it merged into; its prompt quotes each. */
   crons: z.array(UlidSchema).optional(),
+  /**
+   * Every task the agent created that finished for this turn, whatever wake it merged into; its
+   * prompt names each.
+   */
+  tasksDone: z.array(UlidSchema).optional(),
+  /**
+   * Every proposal the agent made that was decided for this turn, whatever wake it merged into;
+   * its prompt points at each one's thread.
+   */
+  proposalsDecided: z.array(UlidSchema).optional(),
 });
 export type TurnDispatch = z.infer<typeof TurnDispatchSchema>;
 
@@ -212,8 +224,8 @@ export const TurnRecordSchema = z.object({
   resumeFailed: ResumeFailureSchema.optional(),
   /**
    * Whether the turn failed for now, which the same wake may get past in a minute: the model service
-   * turned it away or cut it off, the runner could not reach the board before the CLI started, or
-   * the job never reached the runner.
+   * turned it away or cut it off, the runner or its adapter could not reach the board before the
+   * CLI started or opened the session, or the job never reached the runner.
    */
   transient: z.boolean().optional(),
   /** How many turns in a row, this one included, could not resume the session for a `retry`. */

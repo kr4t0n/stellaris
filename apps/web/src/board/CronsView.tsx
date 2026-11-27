@@ -6,7 +6,7 @@ import { Button } from "../components/Button.js";
 import { CliIcon } from "../components/CliIcon.js";
 import { Markdown } from "../components/Markdown.js";
 import { Picker, type Choice } from "../components/Picker.js";
-import type { CronRecord } from "../lib/api.js";
+import { readNote, type CronRecord } from "../lib/api.js";
 import { ago } from "../lib/format.js";
 import {
   useCrons,
@@ -566,10 +566,8 @@ export function CronsView() {
             Show every citizen's crons
           </Link>
         )}
-        {crons.error !== null && crons.data === undefined ? (
-          <PaneNote>Could not read the crons: {crons.error.message}</PaneNote>
-        ) : crons.data === undefined ? (
-          <PaneNote>Reading the crons…</PaneNote>
+        {crons.data === undefined ? (
+          <PaneNote>{readNote("the crons", crons.error)}</PaneNote>
         ) : groups.active.length + groups.paused.length + groups.ended.length === 0 ? (
           <p className="px-2 py-2 text-meta">No crons yet.</p>
         ) : null}

@@ -4,6 +4,7 @@ import { Link, useParams } from "@tanstack/react-router";
 import { useState } from "react";
 import { Button } from "../components/Button.js";
 import { Markdown } from "../components/Markdown.js";
+import { readNote } from "../lib/api.js";
 import { ago } from "../lib/format.js";
 import {
   useChannels,
@@ -105,7 +106,9 @@ export function ProjectView() {
   if (project === undefined) {
     return (
       <PaneNote>
-        {projects.data === undefined ? "Reading the project…" : `There is no project ${slug}.`}
+        {projects.data === undefined
+          ? readNote("the project", projects.error)
+          : `There is no project ${slug}.`}
       </PaneNote>
     );
   }
@@ -168,7 +171,7 @@ export function ProjectView() {
         </Section>
         <Section title="Tasks">
           {tasks.data === undefined ? (
-            <p className="text-meta">Reading…</p>
+            <p className="text-meta">{readNote("the tasks", tasks.error, "Reading…")}</p>
           ) : groups.length === 0 ? (
             <p className="text-meta">No tasks yet.</p>
           ) : (
@@ -208,7 +211,7 @@ export function ProjectView() {
           }
         >
           {dashboard.data === undefined ? (
-            <p className="text-meta">Reading…</p>
+            <p className="text-meta">{readNote("the dashboard", dashboard.error, "Reading…")}</p>
           ) : body === "" ? (
             <p className="text-meta">Empty.</p>
           ) : (
@@ -216,7 +219,7 @@ export function ProjectView() {
           )}
         </Section>
         <Section title="Knowledge">
-          <TopicList scope={slug} topics={knowledge.data} now={now} />
+          <TopicList scope={slug} topics={knowledge.data} error={knowledge.error} now={now} />
         </Section>
         {/* Keyed by the project, since the view stays mounted when only the slug changes. */}
         <ProjectFiles key={slug} project={project} now={now} />

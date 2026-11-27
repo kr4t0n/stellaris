@@ -1,7 +1,9 @@
 import {
   QUOTA_WARNING_PERCENT,
+  limitHold,
   quotaLevel,
   sameQuotaNumbers,
+  windowCounts,
   windowCurrent,
   windowName,
   type CliKind,
@@ -97,19 +99,22 @@ export function windowReading(window: QuotaWindow, now: number): WindowReading {
   };
 }
 
-/** What a quota says as a whole, in words, and the tone it reads in. */
+/**
+ * What a quota says as a whole, in words, and the tone it reads in: for the CLI, or for a citizen
+ * whose model draws from `pool` (`quotaPool`), limited for as long as its turns are held.
+ */
 export function quotaWords(
   quota: CliQuota,
   now: number,
+  pool: string | null = null,
 ): { readonly level: QuotaLevel; readonly words: string; readonly tone: string } {
-  const level = quotaLevel(quota, new Date(now));
+  const level = quotaLevel(quota, new Date(now), pool);
   if (level === "limited") {
+    const hold = pool === null ? null : limitHold(quota, new Date(now), pool);
+    const end = hold === null ? quota.limitedUntil : hold.known ? hold.until : null;
     return {
       level,
-      words:
-        quota.limitedUntil === null
-          ? "limited"
-          : `limited for ${until(Date.parse(quota.limitedUntil) - now)}`,
+      words: end === null ? "limited" : `limited for ${until(Date.parse(end) - now)}`,
       tone: "text-red-300",
     };
   }
@@ -123,16 +128,24 @@ export function quotaWords(
   };
 }
 
-/** A CLI's quota on one runner in a line, as a citizen's view shows it. */
-export function quotaLine(quota: CliQuota | undefined, now: number): string {
+/**
+ * A CLI's quota on one runner in a line, as a citizen's view shows it: the windows of the login and
+ * of the citizen's own pool, when its model draws from one.
+ */
+export function quotaLine(
+  quota: CliQuota | undefined,
+  now: number,
+  pool: string | null = null,
+): string {
   if (quota === undefined) {
     return "unknown";
   }
-  const { level, words } = quotaWords(quota, now);
+  const { level, words } = quotaWords(quota, now, pool);
   if (level === "limited" || level === "none") {
     return words;
   }
   const windows = quota.windows
+    .filter((window) => windowCounts(quota, window, pool))
     .map((window) => windowReading(window, now))
     .map((reading) => `${reading.name} ${reading.label}`);
   return [...windows, ...(words === "" ? [] : [words])].join(" · ") || "no windows reported";

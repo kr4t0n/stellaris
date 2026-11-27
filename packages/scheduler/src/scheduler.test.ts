@@ -15,7 +15,7 @@ import {
   type Ulid,
   type WorkspaceConversation,
 } from "@stellaris/shared";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
   parseTimings,
@@ -183,6 +183,35 @@ const cronTurns = (runner: FakeRunner) =>
   runner.dispatches
     .filter((d) => (d.crons ?? []).length > 0)
     .map((d) => [d.agent, d.project, d.channel ?? null, d.trigger.kind, d.crons]);
+
+/** eng-1 creates a task in demo, which `by` takes and finishes, with a tick to read the events. */
+async function finish(
+  board: Board,
+  scheduler: Scheduler,
+  title: string,
+  by: Actor = REV,
+): Promise<Ulid> {
+  const task = await board.createTask(ENG, { project: "demo", title });
+  await board.claimTask(by, { task_id: task.id });
+  await board.advanceTask(by, { task_id: task.id });
+  await scheduler.tick();
+  return task.id;
+}
+
+/** eng-1 files a channel proposal from its home in demo. */
+async function propose(board: Board, name: string): Promise<Ulid> {
+  const proposal = await board.propose(
+    { ...ENG, scope: "demo" },
+    { kind: "channel", charter: { project: "demo", name, purpose: "Ideas." } },
+  );
+  return proposal.id;
+}
+
+/** eng-1's turns in its home conversation: each trigger's kind, sender, and task, and the tasks done. */
+const homeTurns = (runner: FakeRunner) =>
+  runner.dispatches
+    .filter((d) => d.agent === "eng-1" && d.thread === undefined)
+    .map((d) => [d.trigger.kind, d.trigger.from, d.trigger.taskId, d.tasksDone]);
 
 describe("Scheduler", () => {
   let dir: string;
@@ -474,6 +503,376 @@ describe("Scheduler", () => {
     expect(runner.dispatches.at(-1)).toMatchObject({
       agent: "eng-1",
       trigger: { kind: "task_done", taskId: task.id },
+    });
+  });
+
+  /** Within a heartbeat, the user wakes eng-1's home by hand, which leaves nothing unread. */
+  const wakeLater = async (board: Board, scheduler: Scheduler): Promise<void> => {
+    advance(5_000);
+    await scheduler.tick();
+    await board.requestWake(USER, { agent: "eng-1", project: "demo", reason: "later" });
+    await scheduler.tick();
+    await scheduler.drain();
+  };
+
+  /** Lets `count` heartbeats of 10 s pass, running what comes due. */
+  const heartbeatsPass = async (scheduler: Scheduler, count: number): Promise<void> => {
+    for (let i = 0; i < count; i += 1) {
+      advance(10_000);
+      await scheduler.tick();
+      await scheduler.drain();
+    }
+  };
+
+  describe("a wake for finished tasks", () => {
+    const timings = { debounceMs: 30_000, heartbeatMs: 10_000 };
+
+    /** Waits out the debounce, then runs what is due. */
+    const settle = async (scheduler: Scheduler): Promise<void> => {
+      advance(timings.debounceMs);
+      await scheduler.tick();
+      await scheduler.drain();
+    };
+
+    it("names every task done within the debounce in its one turn", async () => {
+      const { board, runner, scheduler } = await setup({ timings });
+      const first = await finish(board, scheduler, "first");
+      advance(9_000);
+      const second = await finish(board, scheduler, "second");
+      await settle(scheduler);
+      expect(homeTurns(runner)).toEqual([["task_done", "rev-1", first, [first, second]]]);
+      expect(runner.dispatches.at(-1)?.trigger.reason).toBe(
+        `tasks ${first}, ${second} you created are done`,
+      );
+
+      // Finished by rev-1 and by the user, the turn names neither as the sender.
+      runner.dispatches.length = 0;
+      const third = await finish(board, scheduler, "third");
+      advance(9_000);
+      const fourth = await finish(board, scheduler, "fourth", USER);
+      await settle(scheduler);
+      expect(homeTurns(runner)).toEqual([["task_done", undefined, third, [third, fourth]]]);
+      expect(runner.dispatches.at(-1)?.trigger.reason).toBe(
+        `tasks ${third}, ${fourth} you created are done`,
+      );
+    });
+
+    it("keeps a finished task under a mention it merges with, either way round", async () => {
+      const { board, runner, scheduler } = await setup({ timings });
+      // A task done, then the user's mention, which runs at once on its higher priority.
+      const first = await finish(board, scheduler, "first");
+      await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 a question" });
+      await scheduler.tick();
+      await scheduler.drain();
+      expect(homeTurns(runner)).toEqual([["mention", "user", undefined, [first]]]);
+
+      // A citizen's mention, then a task done: the first wake's trigger stays.
+      runner.dispatches.length = 0;
+      await board.postMessage(REV, { channel: "demo/general", body: "@eng-1 when you can" });
+      await scheduler.tick();
+      advance(9_000);
+      const second = await finish(board, scheduler, "second");
+      await settle(scheduler);
+      expect(homeTurns(runner)).toEqual([["mention", "rev-1", undefined, [second]]]);
+    });
+
+    it("keeps the tasks done of a queued wake across a restart", async () => {
+      const { board, runner, scheduler } = await setup({ timings });
+      const first = await finish(board, scheduler, "first");
+      advance(9_000);
+      const second = await finish(board, scheduler, "second");
+      const restarted = new Scheduler({ board, runner, now, timings });
+      await settle(restarted);
+      expect(homeTurns(runner)).toEqual([["task_done", "rev-1", first, [first, second]]]);
+    });
+
+    /** A turn the plan's usage limit cut off, as the runner reports one: not transient. */
+    const LIMITED: Partial<TurnRecord> = {
+      exitReason: "error",
+      error: "usage limit reached: You've hit your 5-hour limit",
+    };
+
+    /** A turn the user stopped. */
+    const STOPPED: Partial<TurnRecord> = { exitReason: "stopped", stoppedBy: "user" };
+
+    it("wakes for a task done again a heartbeat after the turn naming it failed, until one completes", async () => {
+      const { board, runner, scheduler } = await setup({ timings });
+      runner.outcomes.push(LIMITED);
+      const first = await finish(board, scheduler, "first");
+      await settle(scheduler);
+      // Nothing is queued before the heartbeat has passed.
+      advance(9_000);
+      await scheduler.tick();
+      expect(scheduler.pendingPairs).toEqual([]);
+      advance(1_000);
+      await scheduler.tick();
+      await settle(scheduler);
+      await wakeLater(board, scheduler);
+      expect(homeTurns(runner)).toEqual([
+        ["task_done", "rev-1", first, [first]],
+        ["task_done", undefined, first, [first]],
+        ["manual", "user", undefined, undefined],
+      ]);
+    });
+
+    it("names every task done a failed turn named, in the next turn there", async () => {
+      const { board, runner, scheduler } = await setup({ timings });
+      runner.outcomes.push(LIMITED, LIMITED);
+      const first = await finish(board, scheduler, "first");
+      advance(9_000);
+      const second = await finish(board, scheduler, "second");
+      await settle(scheduler);
+      // The next turn there names both, and failing too, leaves both owed.
+      await wakeLater(board, scheduler);
+      advance(10_000);
+      await scheduler.tick();
+      await settle(scheduler);
+      expect(homeTurns(runner)).toEqual([
+        ["task_done", "rev-1", first, [first, second]],
+        ["manual", "user", undefined, [first, second]],
+        ["task_done", undefined, first, [first, second]],
+      ]);
+      expect(runner.dispatches.at(-1)?.trigger.reason).toBe(
+        `tasks ${first}, ${second} you created are done`,
+      );
+    });
+
+    it("names a task done in the wake queued behind its turn when that turn fails for now", async () => {
+      const { board, runner, scheduler } = await setup({ timings });
+      runner.hold = true;
+      const first = await finish(board, scheduler, "first");
+      advance(timings.debounceMs);
+      await scheduler.tick();
+      await board.postMessage(REV, { channel: "demo/general", body: "@eng-1 a question" });
+      await scheduler.tick();
+      runner.outcomes.push({ ...LIMITED, error: "API Error: 529 overloaded", transient: true });
+      runner.hold = false;
+      runner.releaseHeld();
+      await scheduler.drain();
+      await settle(scheduler);
+      expect(homeTurns(runner)).toEqual([
+        ["task_done", "rev-1", first, [first]],
+        ["mention", "rev-1", undefined, [first]],
+      ]);
+    });
+
+    it("names a task done in no turn after one that named it completed, across a stop", async () => {
+      const { board, runner, scheduler } = await setup({ timings });
+      const first = await finish(board, scheduler, "first");
+      await settle(scheduler);
+      await wakeLater(board, scheduler);
+      expect(homeTurns(runner)).toEqual([
+        ["task_done", "rev-1", first, [first]],
+        ["manual", "user", undefined, undefined],
+      ]);
+
+      // A stop waits for the turn under way and runs no pass after it, so its end is saved then.
+      runner.dispatches.length = 0;
+      runner.hold = true;
+      const second = await finish(board, scheduler, "second");
+      advance(timings.debounceMs);
+      await scheduler.tick();
+      const stopping = scheduler.stop();
+      runner.hold = false;
+      runner.releaseHeld();
+      await stopping;
+      const restarted = new Scheduler({ board, runner, now, timings });
+      await wakeLater(board, restarted);
+      expect(homeTurns(runner)).toEqual([
+        ["task_done", "rev-1", second, [second]],
+        ["manual", "user", undefined, undefined],
+      ]);
+    });
+
+    it("keeps a task done owed across a restart that cut its turn off", async () => {
+      const { board, runner, scheduler } = await setup({ timings });
+      runner.hold = true;
+      const first = await finish(board, scheduler, "first");
+      advance(timings.debounceMs);
+      await scheduler.tick();
+      // The turn's end never reaches the scheduler, as when the server stops hard.
+      const after = new FakeRunner(null, now);
+      const restarted = new Scheduler({ board, runner: after, now, timings });
+      advance(10_000);
+      await restarted.tick();
+      await settle(restarted);
+      expect(homeTurns(after)).toEqual([["task_done", undefined, first, [first]]]);
+    });
+
+    it("sees a task done through when the user stops its turn, not one an earlier turn left", async () => {
+      const { board, runner, scheduler } = await setup({ timings });
+      runner.outcomes.push(STOPPED);
+      const first = await finish(board, scheduler, "first");
+      await settle(scheduler);
+      await wakeLater(board, scheduler);
+      expect(homeTurns(runner)).toEqual([
+        ["task_done", "rev-1", first, [first]],
+        ["manual", "user", undefined, undefined],
+      ]);
+
+      // Owed from a failed turn, a task done stays owed past a stopped one that named it again.
+      runner.dispatches.length = 0;
+      runner.outcomes.push(LIMITED, STOPPED);
+      const second = await finish(board, scheduler, "second");
+      await settle(scheduler);
+      await wakeLater(board, scheduler);
+      advance(10_000);
+      await scheduler.tick();
+      await settle(scheduler);
+      expect(homeTurns(runner)).toEqual([
+        ["task_done", "rev-1", second, [second]],
+        ["manual", "user", undefined, [second]],
+        ["task_done", undefined, second, [second]],
+      ]);
+    });
+
+    it("comes for a task done no more once the user stops the turn the wake for it brought", async () => {
+      const { board, runner, scheduler } = await setup({ timings });
+      runner.outcomes.push(LIMITED, STOPPED);
+      const first = await finish(board, scheduler, "first");
+      await settle(scheduler);
+      advance(10_000);
+      await scheduler.tick();
+      await settle(scheduler);
+      await heartbeatsPass(scheduler, 6);
+      expect(homeTurns(runner)).toEqual([
+        ["task_done", "rev-1", first, [first]],
+        ["task_done", undefined, first, [first]],
+      ]);
+      expect(scheduler.pendingPairs).toEqual([]);
+    });
+
+    it("comes for a task done no more once the user stops a failed turn's retry", async () => {
+      const { board, runner, scheduler } = await setup({ timings });
+      runner.outcomes.push(
+        { ...LIMITED, error: "API Error: 529 overloaded", transient: true },
+        STOPPED,
+      );
+      const first = await finish(board, scheduler, "first");
+      await settle(scheduler);
+      // The retry waits out the first delay of `transientRetryMs`, a minute.
+      advance(60_000);
+      await scheduler.tick();
+      await scheduler.drain();
+      await heartbeatsPass(scheduler, 6);
+      expect(homeTurns(runner)).toEqual([
+        ["task_done", "rev-1", first, [first]],
+        ["task_done", "rev-1", first, [first]],
+      ]);
+      expect(scheduler.pendingPairs).toEqual([]);
+    });
+
+    it("holds a stop until the save of what an ended turn saw through has landed", async () => {
+      const { board, runner, scheduler } = await setup({ timings });
+      runner.hold = true;
+      const first = await finish(board, scheduler, "first");
+      advance(timings.debounceMs);
+      await scheduler.tick();
+      // The turn ends before the stop, and its save waits until it is let go.
+      const write = board.writeState.bind(board);
+      const saving = Promise.withResolvers<void>();
+      const held = Promise.withResolvers<void>();
+      vi.spyOn(board, "writeState").mockImplementationOnce(async (name, value) => {
+        saving.resolve();
+        await held.promise;
+        await write(name, value);
+      });
+      runner.hold = false;
+      runner.releaseHeld();
+      await saving.promise;
+      let stopped = false;
+      const stopping = (async (): Promise<void> => {
+        await scheduler.stop();
+        stopped = true;
+      })();
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(stopped).toBe(false);
+      held.resolve();
+      await stopping;
+      const restarted = new Scheduler({ board, runner, now, timings });
+      await wakeLater(board, restarted);
+      await heartbeatsPass(restarted, 2);
+      expect(homeTurns(runner)).toEqual([
+        ["task_done", "rev-1", first, [first]],
+        ["manual", "user", undefined, undefined],
+      ]);
+    });
+
+    it("logs a save that fails as a turn naming a task done ends, and the next pass saves it", async () => {
+      const { board, runner } = await setup({ timings });
+      const errors: string[] = [];
+      const log = {
+        info() {},
+        warn() {},
+        error: (_: object, message: string) => errors.push(message),
+      };
+      const scheduler = new Scheduler({ board, runner, now, timings, log });
+      runner.hold = true;
+      const first = await finish(board, scheduler, "first");
+      advance(timings.debounceMs);
+      await scheduler.tick();
+      vi.spyOn(board, "writeState").mockRejectedValueOnce(new Error("disk full"));
+      runner.hold = false;
+      runner.releaseHeld();
+      await scheduler.drain();
+      expect(errors).toEqual(["could not save the tasks a turn named"]);
+      await scheduler.tick();
+      const restarted = new Scheduler({ board, runner, now, timings });
+      await wakeLater(board, restarted);
+      expect(homeTurns(runner)).toEqual([
+        ["task_done", "rev-1", first, [first]],
+        ["manual", "user", undefined, undefined],
+      ]);
+    });
+
+    it("drops the tasks done owed to a citizen once it is retired", async () => {
+      const { board, runner, scheduler } = await setup({ timings });
+      runner.outcomes.push(LIMITED);
+      await finish(board, scheduler, "first");
+      await settle(scheduler);
+      await board.retireAgent(USER, { name: "eng-1", reason: "done" });
+      advance(10_000);
+      await scheduler.tick();
+      await settle(scheduler);
+      expect(homeTurns(runner)).toHaveLength(1);
+      expect(scheduler.pendingPairs).toEqual([]);
+    });
+  });
+
+  describe("a wake for decided proposals", () => {
+    const timings = { debounceMs: 30_000 };
+
+    it("names every proposal decided within the debounce in its one turn", async () => {
+      const { board, runner, scheduler } = await setup({ timings });
+      const first = await propose(board, "one");
+      const second = await propose(board, "two");
+      await board.approve(USER, { proposal_id: first });
+      await scheduler.tick();
+      advance(10_000);
+      await board.reject(USER, { proposal_id: second, reason: "no" });
+      await scheduler.tick();
+      advance(timings.debounceMs);
+      await scheduler.tick();
+      await scheduler.drain();
+      expect(
+        runner.dispatches.map((d) => [d.trigger.kind, d.trigger.from, d.proposalsDecided]),
+      ).toEqual([["proposal_decided", "user", [first, second]]]);
+      expect(runner.dispatches[0]?.trigger.reason).toBe(
+        `your channel proposal ${first} was approved by user; your channel proposal ${second} was rejected by user`,
+      );
+    });
+
+    it("keeps a decided proposal under a mention it merges with", async () => {
+      const { board, runner, scheduler } = await setup({ timings });
+      const first = await propose(board, "one");
+      await board.approve(USER, { proposal_id: first });
+      await scheduler.tick();
+      await board.postMessage(USER, { channel: "demo/general", body: "@eng-1 a question" });
+      await scheduler.tick();
+      await scheduler.drain();
+      expect(
+        runner.dispatches.map((d) => [d.trigger.kind, d.trigger.from, d.proposalsDecided]),
+      ).toEqual([["mention", "user", [first]]]);
     });
   });
 
@@ -952,6 +1351,79 @@ describe("Scheduler", () => {
     await scheduler.drain();
     expect(await keys()).toContain(`waiting_stage:${held.id}:s1`);
     expect(await keys()).not.toContain("idle_member:eng-1");
+  });
+
+  /**
+   * Antigravity on pod with its third-party pool spent until `reset` and its login and Gemini pool
+   * clear, as agy's read reports it, and two engineers there in demo: eng-3, on a Claude model,
+   * which draws from that pool, and eng-4, on a Gemini model.
+   */
+  async function thirdPartySpent(board: Board, reset: number): Promise<void> {
+    await board.addRunner(USER, "pod");
+    await board.markRunner("pod", { status: "connected", clis: ["claude", "antigravity"] });
+    await board.placeProject("demo", "pod");
+    for (const [name, model] of [
+      ["eng-3", "claude-sonnet-4-6"],
+      ["eng-4", "gemini-3.1-pro"],
+    ] as const) {
+      await board.addAgent(USER, {
+        name,
+        role: "engineer",
+        cli: "antigravity",
+        model,
+        memberships: ["demo"],
+      });
+    }
+    const observedAt = now().toISOString();
+    await board.recordQuota(
+      "pod",
+      "antigravity",
+      CliQuotaSchema.parse({
+        observedAt,
+        source: "read",
+        status: "warning",
+        pools: [
+          { key: "gemini", limited: false, observedAt },
+          { key: "3p", limited: true, limitedUntil: new Date(reset).toISOString(), observedAt },
+        ],
+      }),
+    );
+  }
+
+  it("signals no waiting stage its taker's pool's limit holds, and a stage for the other pool's taker", async () => {
+    const { board, scheduler } = await setup({ timings: OFF_REFLECTION });
+    await thirdPartySpent(board, now().getTime() + 2 * 60 * 60_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    const held = await board.createTask(USER, {
+      project: "demo",
+      title: "eng-3's alone",
+      stages: [{ name: "build", agent: "eng-3" }],
+    });
+    const free = await board.createTask(USER, {
+      project: "demo",
+      title: "eng-4's alone",
+      stages: [{ name: "build", agent: "eng-4" }],
+    });
+    advance(10_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    const keys = (await board.listSignals()).map((record) => record.signal.key);
+    expect(keys).toContain(`waiting_stage:${free.id}:s1`);
+    expect(keys).not.toContain(`waiting_stage:${held.id}:s1`);
+  });
+
+  it("signals no idle member its pool's limit holds, and the other pool's citizen on the same CLI", async () => {
+    const { board, scheduler } = await setup({ timings: OFF_REFLECTION });
+    await thirdPartySpent(board, now().getTime() + 3 * DAY + 10 * 60_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    advance(3 * DAY + 5 * 60_000);
+    await scheduler.tick();
+    await scheduler.drain();
+    const keys = (await board.listSignals()).map((record) => record.signal.key);
+    expect(keys).toContain("idle_member:eng-4");
+    expect(keys).not.toContain("idle_member:eng-3");
   });
 
   it("signals no stage open to anyone while the pause holds every citizen, the user aside", async () => {

@@ -164,7 +164,7 @@ export function loadRunnerConfig(env: Readonly<Record<string, string | undefined
     dataDir: env["STELLARIS_RUNNER_DIR"] ?? "./runner-data",
     logLevel: env["STELLARIS_LOG_LEVEL"] ?? "info",
     slots: limit(env["STELLARIS_CONCURRENCY"], 2),
-    clis: clis.length === 0 ? ["claude", "codex"] : clis,
+    clis: clis.length === 0 ? ["claude", "codex", "antigravity"] : clis,
     capabilities: list(env["STELLARIS_CAPABILITIES"]),
   });
 }

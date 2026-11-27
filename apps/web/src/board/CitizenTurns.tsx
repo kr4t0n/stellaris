@@ -1,6 +1,7 @@
 import type { TurnHistoryEntry } from "@stellaris/shared";
 import { useEffect, useRef, useState } from "react";
 import { LinkedText, useEntities } from "../components/Entities.js";
+import { readNote } from "../lib/api.js";
 import { ago } from "../lib/format.js";
 import { useNow, useTurnHistory } from "../lib/session.js";
 import {
@@ -131,6 +132,8 @@ function TurnBody({
           <p className="text-meta">This turn ran before turns kept their steps.</p>
         ) : stored.loading ? (
           <p className="text-meta">Reading the steps…</p>
+        ) : stored.error !== null ? (
+          <p className="text-meta">{readNote("the steps", stored.error)}</p>
         ) : stored.turn === undefined ? (
           <p className="text-meta">No steps were kept for this turn.</p>
         ) : (
@@ -155,7 +158,7 @@ export function CitizenTurns({ name, opened }: { name: string; opened: string | 
   const history = useTurnHistory(name, limit);
   const now = useNow(30_000);
   if (history.data === undefined) {
-    return <PaneNote>Reading the turns…</PaneNote>;
+    return <PaneNote>{readNote("the turns", history.error)}</PaneNote>;
   }
   const entries = history.data.toReversed();
   if (entries.length === 0) {

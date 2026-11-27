@@ -27,7 +27,9 @@ import {
   SOCIETY_SCOPE,
   TriggerSchema,
   TurnDispatchSchema,
+  TurnThreadSchema,
   UlidSchema,
+  NameSchema,
   WAKING_SIGNAL_KINDS,
   wakeScope,
   wakesOnMention,
@@ -267,6 +269,21 @@ const PendingSchema = z.object({
   onlyCrons: z.boolean().optional(),
 });
 
+/**
+ * The finished tasks a conversation's turn named and no turn there has seen through yet, with the
+ * conversation beside the scope's home: from when that turn was dispatched until one there that
+ * names them completes. `at` is when the latest turn naming them began, or ended without
+ * finishing; the conversation is woken for them a heartbeat later when nothing else has.
+ */
+const TasksOwedSchema = z.object({
+  tasks: z.array(UlidSchema),
+  at: z.string(),
+  thread: TurnThreadSchema.optional(),
+  channel: NameSchema.optional(),
+  place: NameSchema.optional(),
+});
+type TasksOwed = z.infer<typeof TasksOwedSchema>;
+
 const StateSchema = z.object({
   cursor: z.string().nullable(),
   lastHeartbeat: z.record(z.string(), z.string()),
@@ -286,6 +303,8 @@ const StateSchema = z.object({
   idleHeld: z.record(z.string(), z.string()).default({}),
   /** Queued dispatches survive a restart; the cursor has already moved past the events that made them. */
   pending: z.record(z.string(), PendingSchema).default({}),
+  /** The finished tasks each conversation is owed, by session key (`TasksOwed`). */
+  tasksOwed: z.record(z.string(), TasksOwedSchema).default({}),
   opsReported: z.record(z.string(), z.string()).default({}),
   /**
    * When each condition of a waking kind that still holds last woke the readers of signals, and
@@ -341,6 +360,77 @@ interface PendingTurn {
 /** The message a wake was caused by, for the wakes a post makes: a mention, or a post by the user. */
 function messageOf(trigger: Trigger): Ulid | undefined {
   return trigger.kind === "mention" || trigger.kind === "user_post" ? trigger.messageId : undefined;
+}
+
+/** A `task_done` wake's reason, naming each task done. */
+function tasksDoneReason(tasks: readonly Ulid[]): string {
+  const ids = tasks.join(", ");
+  return tasks.length === 1
+    ? `task ${ids} you created is done`
+    : `tasks ${ids} you created are done`;
+}
+
+/**
+ * The trigger a merge keeps: a `task_done` one names every task done the wake holds, and its
+ * sender only while each of them came from the same one.
+ */
+function namingTasksDone(kept: Trigger, merged: Trigger, tasksDone: readonly Ulid[]): Trigger {
+  if (kept.kind !== "task_done" || tasksDone.length < 2) {
+    return kept;
+  }
+  const { from, ...rest } = kept;
+  const sameSender = merged.kind !== "task_done" || merged.from === from;
+  return {
+    ...rest,
+    ...(from !== undefined && sameSender ? { from } : {}),
+    reason: tasksDoneReason(tasksDone),
+  };
+}
+
+/**
+ * A dispatch with the finished tasks its conversation is owed (`TasksOwed`) among its own, those
+ * first. A `task_done` trigger then names each, and no sender once it names one it did not bring.
+ */
+function withTasksOwed(dispatch: TurnDispatch, owed: readonly Ulid[]): TurnDispatch {
+  const own = dispatch.tasksDone ?? [];
+  if (owed.every((id) => own.includes(id))) {
+    return dispatch;
+  }
+  const tasksDone = [...owed, ...own.filter((id) => !owed.includes(id))];
+  if (dispatch.trigger.kind !== "task_done") {
+    return { ...dispatch, tasksDone };
+  }
+  const { from: _from, ...trigger } = dispatch.trigger;
+  return { ...dispatch, tasksDone, trigger: { ...trigger, reason: tasksDoneReason(tasksDone) } };
+}
+
+/**
+ * The trigger a merge keeps when another decision joins a `proposal_decided` one: its reason lists
+ * each decision in its own words, and its sender stays only while every decision was theirs.
+ */
+function namingProposalsDecided(kept: Trigger, decision: Trigger): Trigger {
+  if (kept.kind !== "proposal_decided" || decision.kind !== "proposal_decided") {
+    return kept;
+  }
+  const { from, fromUser, ...rest } = kept;
+  const sameSender = decision.from === from;
+  return {
+    ...rest,
+    ...(from !== undefined && sameSender ? { from } : {}),
+    fromUser: fromUser && sameSender,
+    reason: `${kept.reason}; ${decision.reason}`,
+  };
+}
+
+/** The conversation beside its scope's home that owed tasks were named in. */
+function besideOwed(owed: TasksOwed): Beside | undefined {
+  if (owed.thread !== undefined) {
+    return { thread: owed.thread };
+  }
+  if (owed.channel !== undefined) {
+    return { channel: owed.channel };
+  }
+  return owed.place === undefined ? undefined : { place: owed.place };
 }
 
 function later(a: Ulid | undefined, b: Ulid | undefined): Ulid | undefined {
@@ -456,6 +546,8 @@ export class Scheduler {
   private readonly landing = new Set<Ulid>();
   /** Sweeps of ended conversations' workspaces under way, which `drain` and `stop` wait for. */
   private readonly sweeping = new Set<Promise<void>>();
+  /** Saves of the tasks a turn saw through as it ended, which `drain` and `stop` wait for. */
+  private readonly saving = new Set<Promise<void>>();
   /** Crons whose fire's turn is running; a cron's next time passes while one is. */
   private readonly cronsInFlight = new Set<Ulid>();
   /** Turns in a row that failed for now, by session key, which `retryRefused` counts. */
@@ -522,6 +614,7 @@ export class Scheduler {
       ...this.completing,
       ...this.steering.values(),
       ...this.sweeping,
+      ...this.saving,
     ]);
   }
 
@@ -551,6 +644,7 @@ export class Scheduler {
     if (!paused) {
       await this.checkCrons(now);
       await this.checkHeartbeats(now);
+      await this.wakeForTasksOwed(now);
       await this.checkWaitingStages(now);
       await this.checkReflections(now);
       if (
@@ -580,6 +674,7 @@ export class Scheduler {
       ...this.running.values(),
       ...this.completing,
       ...this.sweeping,
+      ...this.saving,
     ]);
   }
 
@@ -798,6 +893,11 @@ export class Scheduler {
         for (const key of this.pending.keys()) {
           if (key.startsWith(`${name}/`)) {
             this.pending.delete(key);
+          }
+        }
+        for (const key of Object.keys(this.state.tasksOwed)) {
+          if (key.startsWith(`${name}/`)) {
+            delete this.state.tasksOwed[key];
           }
         }
         return;
@@ -1230,7 +1330,7 @@ export class Scheduler {
     this.enqueue(
       agent.name,
       scope,
-      { kind: "task_done", from, reason: `task ${taskId} you created is done`, taskId },
+      { kind: "task_done", from, reason: tasksDoneReason([taskId]), taskId },
       now,
     );
   }
@@ -1323,6 +1423,7 @@ export class Scheduler {
         from: event.actor,
         fromUser: event.actor === USER_NAME,
         reason: `your ${kind} proposal ${proposalId} was ${outcome} by ${event.actor}`,
+        proposalId,
       },
       now,
       beside,
@@ -1444,6 +1545,8 @@ export class Scheduler {
     const existing = this.pending.get(key);
     const message = messageOf(trigger);
     const cron = trigger.kind === "cron" ? trigger.cronId : undefined;
+    const done = trigger.kind === "task_done" ? trigger.taskId : undefined;
+    const decided = trigger.kind === "proposal_decided" ? trigger.proposalId : undefined;
     if (existing === undefined) {
       this.pending.set(key, {
         dispatch: {
@@ -1454,6 +1557,8 @@ export class Scheduler {
           priority: decision.priority,
           onboarding: trigger.kind === "onboarding",
           ...(cron === undefined ? {} : { crons: [cron] }),
+          ...(done === undefined ? {} : { tasksDone: [done] }),
+          ...(decided === undefined ? {} : { proposalsDecided: [decided] }),
         },
         readyAt,
         ...(trigger.kind === "stage" ? { stageWakes: [trigger] } : {}),
@@ -1469,13 +1574,24 @@ export class Scheduler {
     const crons = [
       ...new Set([...(existing.dispatch.crons ?? []), ...(cron === undefined ? [] : [cron])]),
     ];
+    // A finished task is named in the turn whichever trigger the merge keeps.
+    const tasksDone = [
+      ...new Set([...(existing.dispatch.tasksDone ?? []), ...(done === undefined ? [] : [done])]),
+    ];
+    // So is every proposal decided, and a kept decision's reason lists each.
+    const earlier = existing.dispatch.proposalsDecided ?? [];
+    const newDecision = decided !== undefined && !earlier.includes(decided);
+    const proposalsDecided = newDecision ? [...earlier, decided] : earlier;
+    const kept = namingTasksDone(keepNew ? trigger : existing.dispatch.trigger, trigger, tasksDone);
     this.pending.set(key, {
       dispatch: {
         ...existing.dispatch,
-        trigger: keepNew ? trigger : existing.dispatch.trigger,
+        trigger: newDecision && !keepNew ? namingProposalsDecided(kept, trigger) : kept,
         priority,
         onboarding: existing.dispatch.onboarding || trigger.kind === "onboarding",
         ...(crons.length === 0 ? {} : { crons }),
+        ...(tasksDone.length === 0 ? {} : { tasksDone }),
+        ...(proposalsDecided.length === 0 ? {} : { proposalsDecided }),
       },
       readyAt: Math.min(existing.readyAt, readyAt),
       ...(existing.stageWakes !== undefined && trigger.kind === "stage"
@@ -1907,15 +2023,16 @@ export class Scheduler {
         if (this.state.waitingSeen[key] !== undefined) {
           continue;
         }
-        // While the user's pause, or their CLI's limit, holds the turns of every citizen who may take
-        // the stage, it waits on that, not on them. The user takes no turns, so counts as none of them.
+        // While the user's pause, or the limit of their CLI or their model's pool, holds the turns of
+        // every citizen who may take the stage, it waits on that, not on them. The user takes no
+        // turns, so counts as none of them.
         members ??= await this.board.projectMembers(project.slug);
         const takers = members.filter(
           (member) => member.cli !== null && mayHoldStage(member, task),
         );
         if (
           takers.length > 0 &&
-          takers.every((taker) => heldOn(runners, project.runner, taker.cli, new Date(now)))
+          takers.every((taker) => heldOn(runners, project.runner, taker, new Date(now)))
         ) {
           this.state.waitingHeld[key] = iso(now);
           continue;
@@ -2157,15 +2274,14 @@ export class Scheduler {
           last = Math.max(last, Date.parse(ended));
         }
       }
-      // A citizen the user's pause, or its CLI's limit, holds anywhere it works may be idle for that
-      // alone, so it is idle only from the last pass that held it.
+      // A citizen the user's pause, or the limit of its CLI or its model's pool, holds anywhere it
+      // works may be idle for that alone, so it is idle only from the last pass that held it.
       const at = new Date(now);
       const held =
-        heldOn(runners, agent.homeRunner, agent.cli, at) ||
+        heldOn(runners, agent.homeRunner, agent, at) ||
         projects.some(
           (project) =>
-            agent.memberships.includes(project.slug) &&
-            heldOn(runners, project.runner, agent.cli, at),
+            agent.memberships.includes(project.slug) && heldOn(runners, project.runner, agent, at),
         );
       if (held) {
         this.state.idleHeld[agent.name] = iso(now);
@@ -2412,6 +2528,10 @@ export class Scheduler {
         }
         dispatch = { ...dispatch, trigger: current };
       }
+      // What an earlier turn here named and did not finish is named again, beside what this
+      // wake brought itself.
+      const own = item.dispatch.tasksDone ?? [];
+      dispatch = withTasksOwed(dispatch, this.state.tasksOwed[key]?.tasks ?? []);
       const assignment = await this.runner.assign(dispatch);
       if (assignment === null) {
         // No runner can take it now: the one it would run on, its project's or the citizen's pinned
@@ -2434,9 +2554,22 @@ export class Scheduler {
       for (const id of crons) {
         this.cronsInFlight.add(id);
       }
+      // Owed from now, so a turn a restart cuts off leaves them owed.
+      const named = dispatch.tasksDone ?? [];
+      if (named.length > 0) {
+        this.state.tasksOwed[key] = {
+          tasks: named,
+          at: iso(now),
+          ...(dispatch.thread === undefined ? {} : { thread: dispatch.thread }),
+          ...(dispatch.channel === undefined ? {} : { channel: dispatch.channel }),
+          ...(dispatch.place === undefined ? {} : { place: dispatch.place }),
+        };
+      }
       const promise = (async (): Promise<void> => {
+        let ended: TurnRecord["exitReason"] = null;
         try {
           const record = await this.runner.runTurn(dispatch, assignment);
+          ended = record.exitReason;
           this.log.info(
             {
               agent: dispatch.agent,
@@ -2458,6 +2591,21 @@ export class Scheduler {
           for (const id of crons) {
             this.cronsInFlight.delete(id);
           }
+          if (named.length > 0) {
+            this.settleTasksOwed(key, named, own, ended);
+            // Saved now, since a stop runs no pass after the turns it waits for, and kept where a
+            // stop waits for it, since the turn no longer counts as running; a save that fails is
+            // left to the next pass's.
+            const saved = this.save().catch((error: unknown) => {
+              this.log.error(
+                { agent: dispatch.agent, project: dispatch.project, error: String(error) },
+                "could not save the tasks a turn named",
+              );
+            });
+            this.saving.add(saved);
+            await saved;
+            this.saving.delete(saved);
+          }
         }
       })();
       this.running.set(key, promise);
@@ -2476,8 +2624,81 @@ export class Scheduler {
   }
 
   /**
+   * Sees through the finished tasks a turn named, by how it ended: a turn that completed sees each
+   * through; one the user stopped, those its own wake brought, as a stopped cron fire is no
+   * failure, leaving owed those it was given beside them; any other end, or none, leaves them all
+   * owed, from now. A wake for owed tasks, and a failed turn's retry, brings every task it names.
+   */
+  private settleTasksOwed(
+    key: string,
+    named: readonly Ulid[],
+    own: readonly Ulid[],
+    ended: TurnRecord["exitReason"],
+  ): void {
+    const owed = this.state.tasksOwed[key];
+    if (owed === undefined) {
+      return;
+    }
+    const seen =
+      ended === "completed" || ended === "blocked" ? named : ended === "stopped" ? own : [];
+    const tasks = owed.tasks.filter((id) => !seen.includes(id));
+    if (tasks.length === 0) {
+      delete this.state.tasksOwed[key];
+      return;
+    }
+    this.state.tasksOwed[key] = { ...owed, tasks, at: this.now().toISOString() };
+  }
+
+  /**
+   * Wakes a conversation for the finished tasks it is owed once a heartbeat has passed since the
+   * turn that left them owed began or ended, unless a wake is queued there or a turn runs, which
+   * names them: a `task_done` wake, which a limited CLI's hold, or its model's pool's, keeps queued until its reset. The
+   * owed tasks of a citizen no longer active, or no longer in the scope, are dropped.
+   */
+  private async wakeForTasksOwed(now: number): Promise<void> {
+    for (const [key, owed] of Object.entries(this.state.tasksOwed)) {
+      if (
+        this.pending.has(key) ||
+        this.running.has(key) ||
+        now - Date.parse(owed.at) < this.timings.heartbeatMs
+      ) {
+        continue;
+      }
+      const conversation = parseSessionKey(key);
+      const agent = conversation === null ? null : await this.tryReadAgent(conversation.agent);
+      const [first] = owed.tasks;
+      if (
+        conversation === null ||
+        agent === null ||
+        agent.status !== "active" ||
+        (conversation.scope !== SOCIETY_SCOPE && !agent.memberships.includes(conversation.scope)) ||
+        first === undefined
+      ) {
+        delete this.state.tasksOwed[key];
+        continue;
+      }
+      this.enqueue(
+        agent.name,
+        conversation.scope,
+        { kind: "task_done", reason: tasksDoneReason(owed.tasks), taskId: first },
+        now,
+        besideOwed(owed),
+      );
+      // The wake brings every owed task, so a stop sees them through as it would its own.
+      const queued = this.pending.get(key);
+      if (queued !== undefined) {
+        this.pending.set(key, {
+          ...queued,
+          dispatch: { ...queued.dispatch, tasksDone: [...owed.tasks] },
+        });
+      }
+    }
+  }
+
+  /**
    * A turn that failed for now is sent again: the model service turned it away or cut it off, the
-   * runner could not reach the board before its CLI started, or its job never reached the runner.
+   * runner or its adapter could not reach the board before its CLI started or opened the session,
+   * or its job never reached the runner.
    * The same wake goes in the same conversation, after the next delay of `transientRetryMs`, with
    * every check a queued wake gets at dispatch. A wake already queued there, as a heartbeat's or a
    * new post's, runs the conversation instead. Once the delays are spent the heartbeat takes over,

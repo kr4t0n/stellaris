@@ -4,7 +4,7 @@ import { Fragment, useEffect, useMemo, useRef, type ReactElement } from "react";
 import { BackLink } from "../components/BackLink.js";
 import { FileLink, FolderList, useFileUrl } from "../components/BranchFile.js";
 import { Markdown } from "../components/Markdown.js";
-import { ApiError } from "../lib/api.js";
+import { ApiError, failureOf } from "../lib/api.js";
 import {
   bytesOf,
   citedLine,
@@ -225,7 +225,7 @@ function BranchFileView({ source, path, line, where, parent, missing, away, read
   } else if (file.error instanceof ApiError && file.error.status === 503) {
     body = <p className="mt-3 text-sm text-fg-secondary">{away}</p>;
   } else if (file.error !== null) {
-    body = <p className="mt-3 text-sm text-fg-secondary">{file.error.message}</p>;
+    body = <p className="mt-3 text-sm text-fg-secondary">{failureOf(file.error)}</p>;
   } else {
     body = (
       <PaneNote>

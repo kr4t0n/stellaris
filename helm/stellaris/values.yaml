@@ -199,8 +199,8 @@ ingress:
     secretName: ""
 
 # Runners in the cluster, which run the turns: a StatefulSet of the runner image, which brings
-# Claude Code, Codex, and the toolchains agents use, each pod a runner of its own with a volume of
-# its own. Runners on other machines connect as before, with or without these.
+# Claude Code, Codex, Antigravity's agy, and the toolchains agents use, each pod a runner of its
+# own with a volume of its own. Runners on other machines connect as before, with or without these.
 #
 # Agents run with every permission and no sandbox, so a runner pod runs whatever they decide with
 # the pod's network. The pod gets no service-account token unless automountServiceAccountToken
@@ -244,7 +244,8 @@ runner:
     logLevel: info
     # Turns each runner runs at once: a number, or `unlimited`; empty is 2.
     concurrency: ""
-    # The CLIs it runs turns with, of claude, codex, and antigravity; empty is claude and codex.
+    # The CLIs it runs turns with, of claude, codex, and antigravity; empty is all three, and
+    # [claude, codex] leaves Antigravity out.
     clis: []
     # What it offers, matched against what projects and tasks require, such as `gpu`.
     capabilities: []

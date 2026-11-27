@@ -111,6 +111,15 @@ export class ResumeError extends Error {
   }
 }
 
+/**
+ * Thrown by an adapter whose turn failed before its CLI opened the session, so before any model
+ * call, in a way a minute may cure, as when the board was out of its reach: the turn is
+ * `transient`, so its wake goes again.
+ */
+export class TransientError extends Error {
+  override readonly name = "TransientError";
+}
+
 /** What a resident session needs at start: everything a turn needs except the prompt. */
 export interface ResidentStart {
   readonly session: SessionId;
@@ -151,8 +160,15 @@ export interface AgentBackend {
     control?: TurnControl,
   ): Promise<TurnResult>;
   interrupt?(session: SessionId): Promise<void>;
-  /** Backends that can keep a session warm implement this; the runner uses it for resident roles. */
-  startResident?(spec: AgentSpec, start: ResidentStart): Promise<ResidentSession>;
+  /**
+   * Backends that can keep a session warm implement this; the runner uses it for resident roles.
+   * The turn that starts the session hands over its control, so a stop may end a start that waits.
+   */
+  startResident?(
+    spec: AgentSpec,
+    start: ResidentStart,
+    control?: TurnControl,
+  ): Promise<ResidentSession>;
   /** The models the CLI offers, from its own listing, for choosing a citizen's model. */
   listModels?(): Promise<ModelOption[]>;
   /**

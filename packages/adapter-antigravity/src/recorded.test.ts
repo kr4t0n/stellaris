@@ -4,10 +4,22 @@ import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { ResumeError, TurnControl, type TurnRequest } from "@stellaris/runner-core";
 import { turnStatusJsonSchema, type AgentEvent } from "@stellaris/shared";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { AntigravityBackend } from "./backend.js";
-import type { SpawnAgy } from "./rpc.js";
+import { isDict, type SpawnAgy } from "./rpc.js";
 import { modelsOf } from "./session.js";
+import { mcpEntryOf, openAsAgy, startStubBoard, type StubBoard } from "./testing/board.js";
+
+/** The board every turn's relay does its handshake with. */
+let board: StubBoard;
+
+beforeAll(async () => {
+  board = await startStubBoard("probe-token");
+});
+
+afterAll(async () => {
+  await board.close();
+});
 
 const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "fixtures");
 
@@ -32,7 +44,8 @@ type Holds = Readonly<Record<number, (sent: readonly Record<string, unknown>[]) 
 /**
  * Replays what a real `agy acp` wrote: each recorded reply goes out, with the notifications recorded
  * before it, once the client has sent its request and whatever `holds` names for it, as agy ended a
- * steered prompt only once the steer's prompt came and a stopped one once `session/cancel` came.
+ * steered prompt only once the steer's prompt came and a stopped one once `session/cancel` came,
+ * and a session's opening only once its MCP server answered agy's handshake, as agy waits for it.
  * The client numbers its requests the same way on every run, so the ids line up.
  */
 async function replay(
@@ -46,6 +59,7 @@ async function replay(
     const stdout = new PassThrough();
     const { promise: exited, resolve: exit } = Promise.withResolvers<number | null>();
     let at = 0;
+    const preloading = new Set<unknown>();
     const flush = (): void => {
       for (;;) {
         const reply = lines.findIndex((each, index) => index >= at && replyId(each) !== undefined);
@@ -53,7 +67,7 @@ async function replay(
         const id = replyId(lines[reply] ?? "");
         const asked = sent.some((message) => "method" in message && message["id"] === id);
         const held = typeof id === "number" ? holds[id] : undefined;
-        if (!asked || (held !== undefined && !held(sent))) return;
+        if (!asked || preloading.has(id) || (held !== undefined && !held(sent))) return;
         stdout.write(`${lines.slice(at, reply + 1).join("\n")}\n`);
         at = reply + 1;
       }
@@ -62,7 +76,21 @@ async function replay(
       for (const line of chunk.toString("utf8").trim().split("\n")) {
         const message: unknown = JSON.parse(line);
         if (typeof message !== "object" || message === null) continue;
-        sent.push(Object.fromEntries(Object.entries(message)));
+        const kept = Object.fromEntries(Object.entries(message));
+        sent.push(kept);
+        const params = kept["params"];
+        const entry =
+          (kept["method"] === "session/new" || kept["method"] === "session/resume") &&
+          isDict(params)
+            ? mcpEntryOf(params)
+            : undefined;
+        if (entry !== undefined) {
+          preloading.add(kept["id"]);
+          void openAsAgy(entry).finally(() => {
+            preloading.delete(kept["id"]);
+            flush();
+          });
+        }
       }
       flush();
     });
@@ -101,7 +129,7 @@ function request(overrides: Partial<TurnRequest>): TurnRequest {
     newSession: true,
     prompt: "MARK_TEXT",
     instructions: "You are a probe for an adapter test.",
-    mcp: { url: "http://127.0.0.1:9/mcp", token: "probe-token" },
+    mcp: { url: board.url, token: board.token },
     limits: { timeoutMs: 60_000 },
     statusSchema: turnStatusJsonSchema(),
     ...overrides,
@@ -143,18 +171,19 @@ describe("recorded agy acp turns", () => {
     expect(result.transient).toBeUndefined();
   });
 
-  it("puts the board in the session's MCP servers and the instructions in the append", async () => {
+  it("puts the session's relay to the board in its MCP servers and the instructions in the append", async () => {
     const { spawn, sent } = await replay("acp-start-recorded.jsonl");
     await new AntigravityBackend({ spawn }).runTurn(request({}));
     const opened = sent.find((message) => message["method"] === "session/new");
+    expect(JSON.stringify(opened)).not.toContain(board.token);
     expect(opened?.["params"]).toMatchObject({
       cwd: "/tmp/agy-fixture/ws",
       mcpServers: [
         {
           type: "http",
           name: "board",
-          url: "http://127.0.0.1:9/mcp",
-          headers: [{ name: "Authorization", value: "Bearer probe-token" }],
+          url: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/),
+          headers: [{ name: "Authorization", value: expect.stringMatching(/^Bearer [\w-]{43}$/) }],
         },
       ],
       _meta: {
@@ -238,6 +267,45 @@ describe("recorded agy acp turns", () => {
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
     });
+  });
+
+  /**
+   * agy 1.5.15 against a stub that refused each prompt with a 429 carrying the sentence a signed-in
+   * account met on 2026-11-26, the Third-party one with `QUOTA_EXHAUSTED` as its reason: agy asked
+   * once, with no retry, and put the sentence in its executor's words.
+   */
+  it("reads a recorded refusal of each pool's quota as the plan's limit on that pool, never transient", async () => {
+    const at = new Date("2026-11-26T16:26:47.000Z");
+    for (const [fixture, pool, until, words] of [
+      [
+        "acp-quota-individual-recorded.jsonl",
+        "gemini",
+        "2026-11-26T18:09:08.000Z",
+        "Message: Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h42m21s., Status: RESOURCE_EXHAUSTED",
+      ],
+      [
+        "acp-quota-third-party-recorded.jsonl",
+        "3p",
+        "2026-11-26T20:16:41.000Z",
+        "Message: Third-party quota reached. Please switch to Gemini models or upgrade your subscription to increase your limits. Resets in 3h49m54s., Status: RESOURCE_EXHAUSTED",
+      ],
+    ] as const) {
+      const { spawn, sent } = await replay(fixture);
+      const result = await new AntigravityBackend({ spawn, now: () => at }).runTurn(request({}));
+      expect(methodsOf(sent)).toEqual(["initialize", "session/new", "session/prompt"]);
+      expect(result.exitReason).toBe("error");
+      expect(result.error).toMatch(
+        /^usage limit reached: agent executor error: generating and executing: Error 429, /,
+      );
+      expect(result.error).toContain(words);
+      expect(result.transient).toBeUndefined();
+      expect(result.quota).toMatchObject({
+        source: "turn",
+        status: "warning",
+        limitedUntil: null,
+        pools: [{ key: pool, limited: true, limitedUntil: until }],
+      });
+    }
   });
 
   it("fails a turn whose key the service refused, never as transient", async () => {

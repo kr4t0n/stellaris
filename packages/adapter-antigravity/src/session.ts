@@ -16,10 +16,13 @@ import {
 import {
   addUsage,
   AGENT_TOKEN_ENV,
+  ANTIGRAVITY_POOLS,
   capOutput,
+  CliQuotaSchema,
   ModelOptionSchema,
   RUNNER_TOKEN_ENV,
   type AgentEvent,
+  type CliQuota,
   type ModelOption,
   type ResumeFailure,
   type TurnExitReason,
@@ -37,6 +40,7 @@ import {
   type Dict,
   type SpawnAgy,
 } from "./rpc.js";
+import { BoardRelay } from "./relay.js";
 
 /**
  * An Antigravity session over `agy acp`: the Agent Client Protocol, version 1, as JSON-RPC 2.0
@@ -57,6 +61,10 @@ export interface AcpSessionOptions {
   /** Directory to append agy's raw output to, one file per turn, for fixtures. */
   readonly recordDir?: string | undefined;
   readonly clientVersion?: string | undefined;
+  /** The clock a refusal of the plan's quota is stamped by; tests inject one. */
+  readonly now?: (() => Date) | undefined;
+  /** How long each try of the board's handshake, which the relay makes, may take; tests shorten it. */
+  readonly handshakeLimitMs?: number | undefined;
 }
 
 /** Sessions agy has not named yet start with this prefix; `session/new` gives the real id. */
@@ -77,7 +85,7 @@ const TOOL_SUMMARY = "toolSummary";
 
 /**
  * Every process runs one session in a worker of its own, so each session's MCP servers, with the
- * turn's own token in their headers, stay its own; skips every permission prompt, since nothing may
+ * session's relay and its secret, stay its own; skips every permission prompt, since nothing may
  * stop to ask a human; and sends no telemetry, which agy otherwise sends to Google.
  */
 const ACP_FLAGS = [
@@ -85,6 +93,9 @@ const ACP_FLAGS = [
   "--dangerously-skip-permissions",
   "--disable-telemetry",
 ];
+
+/** Why a start ended when the turn was stopped before agy opened the session. */
+const STOPPED_STARTING = "the turn was stopped before agy opened the session";
 
 /** How long a turn asked to stop may take to say so before it is ended without its report. */
 const STOP_GRACE_MS = 15_000;
@@ -298,6 +309,74 @@ const TRANSIENT_WORDS: readonly RegExp[] = [
   /\bnetwork issue connecting to the server\b/,
 ];
 
+/**
+ * The service's sentence for a turn the plan's quota refused, which agy passes on: it names the
+ * pool the model draws from and when that pool starts afresh. A signed-in account met
+ * `Individual quota reached. Please upgrade your subscription to increase your limits. Resets in
+ * 1h42m21s.` on its Gemini models and `Third-party quota reached. Please switch to Gemini models or
+ * upgrade your subscription to increase your limits. Resets in 3h49m54s.` on Claude, on 2026-11-26;
+ * against a stub, agy 1.5.15 put the same sentence in its executor's words, after `Error 429,
+ * Message: `, so it is read wherever it stands.
+ */
+const QUOTA_REACHED = /\b([A-Za-z][A-Za-z-]*) quota reached\b/;
+
+/** The countdown to the pool's reset in the service's sentence, in days, hours, minutes, and seconds. */
+const RESETS_IN = /\bResets in ((?:\d+[dhms])+)(?![A-Za-z0-9])/;
+
+const UNIT_MS: Readonly<Record<string, number>> = {
+  d: 86_400_000,
+  h: 3_600_000,
+  m: 60_000,
+  s: 1_000,
+};
+
+/** The pool each of the service's words names, as `quotaPool` keys a model's. */
+const POOL_WORDS: Readonly<Record<string, string>> = {
+  Individual: ANTIGRAVITY_POOLS.gemini,
+  "Third-party": ANTIGRAVITY_POOLS.thirdParty,
+};
+
+/** How long a countdown such as `1h42m21s` runs, or null for one that doesn't read. */
+function countdownMs(countdown: string): number | null {
+  let total = 0;
+  for (const [, amount = "", unit = ""] of countdown.matchAll(/(\d+)([dhms])/g)) {
+    const ms = UNIT_MS[unit];
+    if (ms === undefined) {
+      return null;
+    }
+    total += Number(amount) * ms;
+  }
+  return Number.isSafeInteger(total) && total > 0 ? total : null;
+}
+
+/**
+ * The quota a refusal of the plan's quota reports, from agy's words for the failed turn and when
+ * they came, or undefined for any other failure. The pool the words name is limited until the
+ * countdown's end, or with no reset when the countdown doesn't read, so the board holds that pool's
+ * models alone; words naming a pool `quotaPool` doesn't know limit the whole login the same way.
+ */
+export function quotaRefusalOf(words: string, at: Date): CliQuota | undefined {
+  const reached = QUOTA_REACHED.exec(words);
+  if (reached === null) {
+    return undefined;
+  }
+  const countdown = RESETS_IN.exec(words.slice(reached.index))?.[1];
+  const ms = countdown === undefined ? null : countdownMs(countdown);
+  const observedAt = at.toISOString();
+  const limitedUntil = ms === null ? null : new Date(at.getTime() + ms).toISOString();
+  const pool = POOL_WORDS[reached[1] ?? ""];
+  return CliQuotaSchema.parse(
+    pool === undefined
+      ? { observedAt, source: "turn", status: "limited", limitedUntil }
+      : {
+          observedAt,
+          source: "turn",
+          status: "warning",
+          pools: [{ key: pool, limited: true, limitedUntil, observedAt }],
+        },
+  );
+}
+
 /** A tool call's name as the board's steps show it: a board verb as Claude names it, a command as `Bash`. */
 function toolNameOf(update: Dict): string {
   const name = str(update["name"]) ?? "";
@@ -384,6 +463,8 @@ interface TurnRun {
   error: Error | undefined;
   /** The failure agy reported in the turn's messages, in its words. */
   failure: string | undefined;
+  /** When agy answered with the error or reported the failure. */
+  failedAt: Date | undefined;
   usage: Usage;
   /** The text of the message being said, gathered from its chunks until a step or the reply ends it. */
   message: string;
@@ -405,6 +486,7 @@ export class AntigravityAcpSession implements ResidentSession {
   /** The model the session runs, as agy reported it when the session opened. */
   model: string | undefined;
   private readonly client: AcpClient;
+  private readonly relay: BoardRelay;
   private active: TurnRun | null = null;
   private closed = false;
   private readonly stderrTail: string[] = [];
@@ -415,8 +497,10 @@ export class AntigravityAcpSession implements ResidentSession {
     private readonly spec: AgentSpec,
     private readonly start: ResidentStart,
     process: AcpProcess,
+    relay: BoardRelay,
   ) {
     this.session = start.session;
+    this.relay = relay;
     this.client = new AcpClient(process, {
       notification: (method, params) => this.onNotification(method, params),
       stderr: (line) => {
@@ -431,24 +515,68 @@ export class AntigravityAcpSession implements ResidentSession {
     });
   }
 
-  /** Spawns `agy acp`, initializes it, and opens or resumes the session. */
+  /**
+   * Starts the session's relay to the board, which does the board's handshake while agy starts
+   * and initializes, then opens or resumes the session once the handshake is done, so a board out
+   * of reach fails the turn before the session opens. The relay lives and closes with the session.
+   * A stop until then ends the start at once, closing the relay and agy; one that comes once the
+   * session is opening lets the open finish, so the session it opened is the turn's, and goes to
+   * the turn, which then sends no prompt.
+   */
   static async start(
     options: AcpSessionOptions,
     spec: AgentSpec,
     start: ResidentStart,
+    control?: TurnControl,
   ): Promise<AntigravityAcpSession> {
-    const spawn = options.spawn ?? defaultSpawnAgy(options.agyPath ?? "agy");
-    const child = spawn(acpArgs(options), { cwd: spec.cwd, env: agyEnv(options, start.mcp.token) });
-    const session = new AntigravityAcpSession(options, spec, start, child);
+    const relay = await BoardRelay.open({
+      url: start.mcp.url,
+      token: start.mcp.token,
+      limitMs: options.handshakeLimitMs,
+      clientVersion: options.clientVersion,
+    });
+    let session: AntigravityAcpSession | undefined;
+    let stopped = false;
+    const detach = control?.attach({
+      stop: () => {
+        stopped = true;
+        session?.client.close();
+        void relay.close();
+      },
+    });
     try {
+      const prefetched = relay.prefetch();
+      // A start that fails before it waits for the handshake closes the relay, which ends it.
+      prefetched.catch(() => undefined);
+      if (stopped) {
+        throw new Error(STOPPED_STARTING);
+      }
+      const spawn = options.spawn ?? defaultSpawnAgy(options.agyPath ?? "agy");
+      const child = spawn(acpArgs(options), {
+        cwd: spec.cwd,
+        env: agyEnv(options, start.mcp.token),
+      });
+      session = new AntigravityAcpSession(options, spec, start, child, relay);
       const initialized = await initialize(session.client, options);
       if (!appendsSystemPrompt(initialized)) {
         throw new Error("agy acp offers no system prompt append for the instructions");
       }
+      await prefetched;
+      detach?.();
+      if (stopped) {
+        throw new Error(STOPPED_STARTING);
+      }
       await session.open();
+      // agy opens a session whose MCP servers did not connect in time without them, saying
+      // nothing, so a session opened without the board's tools listed fails its turn.
+      if (!relay.listed) {
+        throw new Error("agy opened the session without listing the board's tools from the relay");
+      }
     } catch (error) {
-      session.client.close();
-      throw error;
+      detach?.();
+      session?.client.close();
+      await relay.close();
+      throw stopped ? new Error(STOPPED_STARTING) : error;
     }
     return session;
   }
@@ -456,13 +584,14 @@ export class AntigravityAcpSession implements ResidentSession {
   private sessionParams(): Dict {
     return {
       cwd: this.spec.cwd,
-      // The turn's own token travels in the header, over stdin, never on a command line.
+      // agy reaches the board through the session's relay with the relay's secret, which agy keeps
+      // with the conversation; the turn's own token stays with the relay and agy's environment.
       mcpServers: [
         {
           type: "http",
           name: BOARD_SERVER,
-          url: this.start.mcp.url,
-          headers: [{ name: "Authorization", value: `Bearer ${this.start.mcp.token}` }],
+          url: this.relay.url,
+          headers: [{ name: "Authorization", value: `Bearer ${this.relay.secret}` }],
         },
       ],
       // agy keeps no append with the session, so every open and resume sends the current one.
@@ -601,6 +730,7 @@ export class AntigravityAcpSession implements ResidentSession {
         if (failure !== undefined) {
           this.endMessage(turn);
           turn.failure = failure;
+          turn.failedAt = this.now();
           return;
         }
         // The model said more after a warning, so the warning did not end the turn.
@@ -668,6 +798,7 @@ export class AntigravityAcpSession implements ResidentSession {
     } catch (error) {
       if (seq === turn.seq) {
         turn.error = error instanceof Error ? error : new Error(String(error));
+        turn.failedAt = this.now();
         turn.settle();
       }
       return;
@@ -709,6 +840,7 @@ export class AntigravityAcpSession implements ResidentSession {
       stopReason: null,
       error: undefined,
       failure: undefined,
+      failedAt: undefined,
       usage: ZERO_USAGE,
       message: "",
       messageId: undefined,
@@ -751,7 +883,11 @@ export class AntigravityAcpSession implements ResidentSession {
     });
     let status: TurnStatus | null = null;
     try {
-      this.prompt(turn, prompt);
+      // A stop handed over as the turn attached, as one that came while the session opened, has
+      // ended it already, so the model gets no request.
+      if (!turn.stopped) {
+        this.prompt(turn, prompt);
+      }
       await done.promise;
       this.endMessage(turn);
       status = parseTurnStatus(null, turn.finalText);
@@ -801,13 +937,24 @@ export class AntigravityAcpSession implements ResidentSession {
     if (exitReason === "completed" && status === null) {
       error = "the turn ended without a parsable status object";
     }
+    // A refusal of the plan's quota, whichever way agy said it, holds the pool it names until its
+    // reset, and reads as the plan's limit, as Claude's and Codex's do.
+    const quota =
+      exitReason === "error" && error !== undefined
+        ? quotaRefusalOf(error, turn.failedAt ?? this.now())
+        : undefined;
+    if (quota !== undefined) {
+      error = `usage limit reached: ${error}`;
+    }
     if (error !== undefined) {
       emit({ type: "error", message: error });
     }
     // A failure agy reports in a message is the model service's; one it answers a prompt with,
-    // such as a sign-in it lacks, is the client's or the account's, and never transient.
+    // such as a sign-in it lacks, is the client's or the account's, and never transient. Nor is
+    // the plan's quota, though agy may say it with a 429's words.
     const transient =
       exitReason === "error" &&
+      quota === undefined &&
       turn.error === undefined &&
       turn.failure !== undefined &&
       isTransient(turn.failure);
@@ -823,8 +970,13 @@ export class AntigravityAcpSession implements ResidentSession {
       session: this.session,
       ...(this.model === undefined ? {} : { model: this.model }),
       ...(turn.contextTokens === undefined ? {} : { contextTokens: turn.contextTokens }),
+      ...(quota === undefined ? {} : { quota }),
       ...(transient ? { transient: true } : {}),
     };
+  }
+
+  private now(): Date {
+    return this.options.now?.() ?? new Date();
   }
 
   /**
@@ -841,12 +993,19 @@ export class AntigravityAcpSession implements ResidentSession {
     return true;
   }
 
-  /** Cancels the running turn, whose prompt agy then ends as cancelled; the turn is `stopped`. */
+  /**
+   * Cancels the running turn, whose prompt agy then ends as cancelled; the turn is `stopped`. A turn
+   * that has sent no prompt yet ends at once, with nothing sent to agy.
+   */
   private stop(turn: TurnRun): void {
     if (this.active !== turn || turn.stopped) {
       return;
     }
     turn.stopped = true;
+    if (turn.seq === 0) {
+      turn.settle();
+      return;
+    }
     this.client.notify("session/cancel", { sessionId: this.session });
     setTimeout(() => turn.settle(), STOP_GRACE_MS).unref?.();
   }
@@ -854,5 +1013,6 @@ export class AntigravityAcpSession implements ResidentSession {
   async close(): Promise<void> {
     this.closed = true;
     this.client.close();
+    await this.relay.close();
   }
 }

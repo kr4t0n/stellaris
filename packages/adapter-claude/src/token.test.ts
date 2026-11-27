@@ -12,26 +12,43 @@ const TURN_TOKEN = "stl_turn_token_of_this_test";
 
 /**
  * A stand-in for Claude Code, which the SDK starts as it would the CLI: it writes down its command
- * line and the two tokens its environment holds, then exits, so the turn fails.
+ * line, the first line the SDK writes to its input, and the two tokens its environment holds, then
+ * exits, so the turn fails.
  */
 const STAND_IN = `import { writeFileSync } from "node:fs";
-writeFileSync(process.env.STAND_IN_OUT, JSON.stringify({
-  args: process.argv.slice(2),
-  agentToken: process.env.STELLARIS_AGENT_TOKEN ?? null,
-  runnerToken: process.env.STELLARIS_RUNNER_TOKEN ?? null,
-}));
-process.exit(1);
+let input = "";
+const done = () => {
+  writeFileSync(process.env.STAND_IN_OUT, JSON.stringify({
+    args: process.argv.slice(2),
+    input: input.split("\\n")[0],
+    agentToken: process.env.STELLARIS_AGENT_TOKEN ?? null,
+    runnerToken: process.env.STELLARIS_RUNNER_TOKEN ?? null,
+  }));
+  process.exit(1);
+};
+process.stdin.on("data", (chunk) => {
+  input += chunk;
+  if (input.includes("\\n")) done();
+});
+process.stdin.on("end", done);
 `;
 
 const StartedSchema = z.object({
   args: z.array(z.string()),
+  input: z.string(),
   agentToken: z.string().nullable(),
   runnerToken: z.string().nullable(),
 });
 
-const McpConfigSchema = z.object({
-  mcpServers: z.object({
-    board: z.object({ url: z.string(), headers: z.object({ Authorization: z.string() }) }),
+const InitializeSchema = z.object({
+  type: z.literal("control_request"),
+  request: z.object({
+    subtype: z.literal("initialize"),
+    mcpServers: z
+      .object({
+        board: z.object({ url: z.string(), headers: z.object({ Authorization: z.string() }) }),
+      })
+      .optional(),
   }),
 });
 
@@ -46,7 +63,8 @@ describe("the board token a Claude turn starts with", () => {
     }
   });
 
-  it("reaches the CLI through its environment, never its command line, and the runner's token not at all", async () => {
+  /** Starts a turn on the stand-in and reads back how the SDK started it. */
+  async function startStandIn(): Promise<z.infer<typeof StartedSchema>> {
     dir = await mkdtemp(path.join(os.tmpdir(), "stellaris-claude-token-"));
     const cli = path.join(dir, "claude.mjs");
     const out = path.join(dir, "started.json");
@@ -77,15 +95,27 @@ describe("the board token a Claude turn starts with", () => {
       .runTurn(request)
       .catch(() => undefined);
 
-    const started = StartedSchema.parse(JSON.parse(await readFile(out, "utf8")));
+    return StartedSchema.parse(JSON.parse(await readFile(out, "utf8")));
+  }
+
+  it("reaches the CLI through its environment, never its command line or input, and the runner's token not at all", async () => {
+    const started = await startStandIn();
     expect(started.args.join(" ")).not.toContain(TURN_TOKEN);
-    const config = McpConfigSchema.parse(
-      JSON.parse(started.args[started.args.indexOf("--mcp-config") + 1] ?? "null"),
-    );
-    // Claude Code fills the variable in as it connects (checked against 2.1.312).
-    expect(config.mcpServers.board.headers.Authorization).toBe("Bearer ${STELLARIS_AGENT_TOKEN}");
+    expect(started.input).not.toContain(TURN_TOKEN);
     expect(started.agentToken).toBe(TURN_TOKEN);
     expect(started.runnerToken).toBeNull();
+  });
+
+  it("names the board's server in the initialize request on the CLI's input, never its command line", async () => {
+    const started = await startStandIn();
+    expect(started.args).not.toContain("--mcp-config");
+    expect(started.args.join(" ")).not.toContain("127.0.0.1:4700");
+    const initialize = InitializeSchema.parse(JSON.parse(started.input));
+    expect(initialize.request.mcpServers?.board.url).toBe("http://127.0.0.1:4700/mcp");
+    // Claude Code fills the variable in as it connects (checked against 2.1.332).
+    expect(initialize.request.mcpServers?.board.headers.Authorization).toBe(
+      "Bearer ${STELLARIS_AGENT_TOKEN}",
+    );
   });
 });
 

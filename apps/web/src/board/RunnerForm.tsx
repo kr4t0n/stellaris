@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "../components/Button.js";
 import { Picker, type Choice } from "../components/Picker.js";
+import { readNote } from "../lib/api.js";
 import { useRunners, useSession } from "../lib/session.js";
 import { Failure } from "./ThreadForms.js";
 
@@ -67,7 +68,9 @@ export function RunnerForm({ member, onDone }: { member: Member; onDone: () => v
     >
       <div className="flex items-center gap-2">
         {runners.data === undefined ? (
-          <p className="min-w-0 flex-1 truncate text-meta">Reading the runners…</p>
+          <p className="min-w-0 flex-1 truncate text-meta">
+            {readNote("the runners", runners.error)}
+          </p>
         ) : (
           <Picker
             label="Runner"

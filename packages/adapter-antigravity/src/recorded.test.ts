@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { AntigravityBackend } from "./backend.js";
 import { isDict, type SpawnAgy } from "./rpc.js";
 import { modelsOf } from "./session.js";
-import { mcpEntryOf, preloadAsAgy, startStubBoard, type StubBoard } from "./testing/board.js";
+import { mcpEntryOf, openAsAgy, startStubBoard, type StubBoard } from "./testing/board.js";
 
 /** The board every turn's relay does its handshake with. */
 let board: StubBoard;
@@ -86,7 +86,7 @@ async function replay(
             : undefined;
         if (entry !== undefined) {
           preloading.add(kept["id"]);
-          void preloadAsAgy(entry).finally(() => {
+          void openAsAgy(entry).finally(() => {
             preloading.delete(kept["id"]);
             flush();
           });

@@ -300,6 +300,26 @@ export async function preloadAsAgy(entry: McpEntry): Promise<PreloadStep[]> {
   return steps;
 }
 
+/** How long agy 1.5.15 gives a session's MCP servers to connect, in all. */
+export const AGY_PRELOAD_MS = 5_000;
+
+/**
+ * agy 1.5.15 opening a session: its handshake with the session's MCP server, given 5 s in all,
+ * after which, or after any failure, it opens the session anyway and says nothing. The steps, or
+ * what became of them.
+ */
+export async function openAsAgy(entry: McpEntry): Promise<PreloadStep[] | "failed" | "timed out"> {
+  let timer: NodeJS.Timeout | undefined;
+  const budget = new Promise<"timed out">((resolve) => {
+    timer = setTimeout(() => resolve("timed out"), AGY_PRELOAD_MS);
+  });
+  try {
+    return await Promise.race([preloadAsAgy(entry).catch(() => "failed" as const), budget]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** A `tools/call` as agy sends one, and what it was answered. */
 export async function callAsAgy(
   entry: McpEntry,

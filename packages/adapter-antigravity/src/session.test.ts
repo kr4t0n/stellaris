@@ -9,7 +9,7 @@ import {
   callAsAgy,
   closedUrl,
   mcpEntryOf,
-  preloadAsAgy,
+  openAsAgy,
   startStubBoard,
   type BoardMode,
   type McpEntry,
@@ -103,7 +103,8 @@ const USAGE = { inputTokens: 600, outputTokens: 60, cachedReadTokens: 400, thoug
  * A scripted `agy acp`: each request goes to the script's handler for its method, which answers
  * now or later and may send updates first; every message the client sent is kept. Before it
  * answers `session/new` or `session/resume`, it connects to the session's MCP server as agy 1.5.15
- * does, unless told not to, and keeps the server's entry.
+ * does, giving it 5 s and opening the session whatever came of it, unless told not to connect, and
+ * keeps the server's entry.
  */
 function fakeAgy(
   script: Script,
@@ -151,7 +152,7 @@ function fakeAgy(
         }
         void (async (): Promise<Answer> => {
           if (entry !== undefined && preload) {
-            await preloadAsAgy(entry);
+            await openAsAgy(entry);
           }
           return handler === undefined
             ? { error: { code: -32601, message: `no ${method}` } }

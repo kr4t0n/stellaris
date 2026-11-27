@@ -58,8 +58,12 @@ export class AntigravityBackend implements AgentBackend {
     return Promise.resolve(`${PENDING_SESSION_PREFIX}${randomUUID()}`);
   }
 
-  startResident(spec: AgentSpec, start: ResidentStart): Promise<ResidentSession> {
-    return AntigravityAcpSession.start(this.sessionOptions(), spec, start);
+  startResident(
+    spec: AgentSpec,
+    start: ResidentStart,
+    control?: TurnControl,
+  ): Promise<ResidentSession> {
+    return AntigravityAcpSession.start(this.sessionOptions(), spec, start, control);
   }
 
   /** The models agy offers, asked of a server started for the question. */
@@ -84,7 +88,12 @@ export class AntigravityBackend implements AgentBackend {
     onEvent?: (event: AgentEvent) => void,
     control?: TurnControl,
   ): Promise<TurnResult> {
-    const session = await AntigravityAcpSession.start(this.sessionOptions(), request.spec, request);
+    const session = await AntigravityAcpSession.start(
+      this.sessionOptions(),
+      request.spec,
+      request,
+      control,
+    );
     try {
       return await session.runTurn(request.prompt, onEvent, control);
     } finally {

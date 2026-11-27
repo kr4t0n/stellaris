@@ -1355,16 +1355,20 @@ export class TurnExecutor {
     }
     let current = this.residents.get(resident.key);
     if (current === undefined) {
-      const session = await backend.startResident(spec, {
-        session: input.session,
-        newSession: input.newSession,
-        instructions: input.instructions,
-        mcp: job.mcp,
-        limits: input.limits,
-        statusSchema: input.statusSchema,
-        costSoFarUsd: job.costSoFarUsd,
-        ...(job.usageSoFar === undefined ? {} : { usageSoFar: job.usageSoFar }),
-      });
+      const session = await backend.startResident(
+        spec,
+        {
+          session: input.session,
+          newSession: input.newSession,
+          instructions: input.instructions,
+          mcp: job.mcp,
+          limits: input.limits,
+          statusSchema: input.statusSchema,
+          costSoFarUsd: job.costSoFarUsd,
+          ...(job.usageSoFar === undefined ? {} : { usageSoFar: job.usageSoFar }),
+        },
+        input.control,
+      );
       current = {
         session,
         cli: job.cli,

@@ -94,6 +94,9 @@ const ACP_FLAGS = [
   "--disable-telemetry",
 ];
 
+/** Why a start ended when the turn was stopped before agy opened the session. */
+const STOPPED_STARTING = "the turn was stopped before agy opened the session";
+
 /** How long a turn asked to stop may take to say so before it is ended without its report. */
 const STOP_GRACE_MS = 15_000;
 const STDERR_TAIL = 20;
@@ -516,11 +519,14 @@ export class AntigravityAcpSession implements ResidentSession {
    * Starts the session's relay to the board, which does the board's handshake while agy starts
    * and initializes, then opens or resumes the session once the handshake is done, so a board out
    * of reach fails the turn before the session opens. The relay lives and closes with the session.
+   * A stop until then ends the start at once, closing the relay and agy; one that comes once the
+   * session is opening goes to the turn, as before the relay.
    */
   static async start(
     options: AcpSessionOptions,
     spec: AgentSpec,
     start: ResidentStart,
+    control?: TurnControl,
   ): Promise<AntigravityAcpSession> {
     const relay = await BoardRelay.open({
       url: start.mcp.url,
@@ -529,10 +535,21 @@ export class AntigravityAcpSession implements ResidentSession {
       clientVersion: options.clientVersion,
     });
     let session: AntigravityAcpSession | undefined;
+    let stopped = false;
+    const detach = control?.attach({
+      stop: () => {
+        stopped = true;
+        session?.client.close();
+        void relay.close();
+      },
+    });
     try {
       const prefetched = relay.prefetch();
       // A start that fails before it waits for the handshake closes the relay, which ends it.
       prefetched.catch(() => undefined);
+      if (stopped) {
+        throw new Error(STOPPED_STARTING);
+      }
       const spawn = options.spawn ?? defaultSpawnAgy(options.agyPath ?? "agy");
       const child = spawn(acpArgs(options), {
         cwd: spec.cwd,
@@ -544,6 +561,10 @@ export class AntigravityAcpSession implements ResidentSession {
         throw new Error("agy acp offers no system prompt append for the instructions");
       }
       await prefetched;
+      detach?.();
+      if (stopped) {
+        throw new Error(STOPPED_STARTING);
+      }
       await session.open();
       // agy opens a session whose MCP servers did not connect in time without them, saying
       // nothing, so a session opened without the board's tools listed fails its turn.
@@ -551,9 +572,10 @@ export class AntigravityAcpSession implements ResidentSession {
         throw new Error("agy opened the session without listing the board's tools from the relay");
       }
     } catch (error) {
+      detach?.();
       session?.client.close();
       await relay.close();
-      throw error;
+      throw stopped ? new Error(STOPPED_STARTING) : error;
     }
     return session;
   }

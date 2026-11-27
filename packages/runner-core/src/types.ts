@@ -160,8 +160,15 @@ export interface AgentBackend {
     control?: TurnControl,
   ): Promise<TurnResult>;
   interrupt?(session: SessionId): Promise<void>;
-  /** Backends that can keep a session warm implement this; the runner uses it for resident roles. */
-  startResident?(spec: AgentSpec, start: ResidentStart): Promise<ResidentSession>;
+  /**
+   * Backends that can keep a session warm implement this; the runner uses it for resident roles.
+   * The turn that starts the session hands over its control, so a stop may end a start that waits.
+   */
+  startResident?(
+    spec: AgentSpec,
+    start: ResidentStart,
+    control?: TurnControl,
+  ): Promise<ResidentSession>;
   /** The models the CLI offers, from its own listing, for choosing a citizen's model. */
   listModels?(): Promise<ModelOption[]>;
   /**

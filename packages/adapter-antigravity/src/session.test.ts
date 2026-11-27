@@ -879,6 +879,44 @@ describe("AntigravityBackend", () => {
       await expect(callAsAgy(entry, "post_message", {})).rejects.toThrow("fetch failed");
     });
 
+    it("ends a start the board's handshake holds as soon as the turn is stopped, cold and warm", async () => {
+      onTestFinished(() => {
+        board.mode = {};
+      });
+      board.mode = { stall: true };
+      const outcomes: unknown[] = [];
+      for (const warm of [false, true]) {
+        const fake = fakeAgy(completing());
+        const backend = new AntigravityBackend({ spawn: fake.spawn, handshakeLimitMs: 20_000 });
+        const control = new TurnControl();
+        const before = handshakes();
+        const start = request();
+        const starting: Promise<unknown> = warm
+          ? backend.startResident(start.spec, start, control)
+          : backend.runTurn(start, undefined, control);
+        await vi.waitFor(() => expect(handshakes()).toBe(before + 1));
+        const stoppedAt = Date.now();
+        control.stop();
+        const failure = await starting.then(
+          (result) => result,
+          (error: unknown) => error,
+        );
+        // Well inside one try of the handshake, which would have held the start for 20 s.
+        const waitedMs = Date.now() - stoppedAt;
+        outcomes.push([
+          warm,
+          failure instanceof Error ? failure.message : failure,
+          waitedMs < 5_000,
+          methodsOf(fake.sent),
+        ]);
+      }
+      const stopped = "the turn was stopped before agy opened the session";
+      expect(outcomes).toEqual([
+        [false, stopped, true, ["initialize"]],
+        [true, stopped, true, ["initialize"]],
+      ]);
+    });
+
     it("fails a turn whose agy opened the session without listing the board's tools", async () => {
       const fake = fakeAgy(completing(), { preload: false });
       const failure = await new AntigravityBackend({ spawn: fake.spawn }).runTurn(request()).then(

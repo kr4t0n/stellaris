@@ -143,8 +143,12 @@ function printEnv(options: PrintQuotaOptions, guard: string): Record<string, str
 /** agy's words when the login has no plan quota to report, as an API key's. */
 const NO_PLAN = /not available with a Gemini API key/;
 
-/** A window's length in minutes, from the bucket's `window`. */
+/**
+ * A window's length in minutes, from the bucket's `window`: agy 1.5.15 gave each group's weekly
+ * bucket `weekly` and its 5-hour one `5h` (2026-11-27).
+ */
 const WINDOW_MINUTES: Readonly<Record<string, number>> = {
+  "5h": 300,
   hourly: 60,
   daily: 1_440,
   weekly: 10_080,

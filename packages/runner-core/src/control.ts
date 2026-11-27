@@ -42,7 +42,10 @@ export class TurnControl {
     return handler(steer);
   }
 
-  /** Asks the turn to stop; the adapter interrupts its CLI, now or once it attaches. */
+  /**
+   * Asks the turn to stop; the adapter ends it, interrupting its CLI if it is working, now or once
+   * it attaches.
+   */
   stop(): void {
     if (this.stopRequested) {
       return;

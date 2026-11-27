@@ -146,10 +146,12 @@ test("the user approves a stage that names them from the thread's box, its text 
   await page.keyboard.press("Tab");
   await expect(approve).toBeFocused();
   await approve.click();
-  expect(board.writes.at(-1)).toEqual({
-    path: "/api/verbs/advance_task",
-    body: { task_id: STAGE_TASK, note: "LGTM" },
-  });
+  await expect
+    .poll(() => board.writes.at(-1))
+    .toEqual({
+      path: "/api/verbs/advance_task",
+      body: { task_id: STAGE_TASK, note: "LGTM" },
+    });
   // Landing, the task no longer waits on the user: the check goes, and the keyboard stays in the box.
   await expect(approve).toHaveCount(0);
   await expect(view.locator("header").first()).toContainText("landing");
@@ -245,10 +247,12 @@ test("Enter in the box posts and never approves, and Approve with the box empty 
 
   await expect(box).toHaveValue("");
   await view.getByRole("button", { name: "Approve", exact: true }).click();
-  expect(board.writes.at(-1)).toEqual({
-    path: "/api/verbs/advance_task",
-    body: { task_id: STAGE_TASK },
-  });
+  await expect
+    .poll(() => board.writes.at(-1))
+    .toEqual({
+      path: "/api/verbs/advance_task",
+      body: { task_id: STAGE_TASK },
+    });
 });
 
 test("on a ghpr task's last stage with no pull request linked, Approve waits greyed with its reason in its tooltip and nothing under the box", async ({
@@ -269,7 +273,7 @@ test("on a ghpr task's last stage with no pull request linked, Approve waits gre
   // Send still posts.
   await view.getByRole("textbox", { name: "Write in the task's thread" }).fill("Link it, please.");
   await view.getByRole("button", { name: "Send" }).click();
-  expect(board.writes.at(-1)?.path).toBe("/api/verbs/post_message");
+  await expect.poll(() => board.writes.at(-1)?.path).toBe("/api/verbs/post_message");
 });
 
 test("Approve before a ghpr task's last stage says nothing of its pull request", async ({
@@ -298,10 +302,12 @@ test("a stage that names the user but isn't a gate is finished with Advance", as
     "Advance Check, with what the box holds as its note",
   );
   await advance.click();
-  expect(board.writes.at(-1)).toEqual({
-    path: "/api/verbs/advance_task",
-    body: { task_id: STAGE_TASK },
-  });
+  await expect
+    .poll(() => board.writes.at(-1))
+    .toEqual({
+      path: "/api/verbs/advance_task",
+      body: { task_id: STAGE_TASK },
+    });
 });
 
 test("a task's thread shows without waiting for the list of every thread", async ({ page }) => {
@@ -341,10 +347,12 @@ test("a task with no thread to write in still gets Approve, alone", async ({ pag
   await expect(view).toContainText("No thread on this task.");
   await expect(view.getByRole("textbox", { name: "Write in the task's thread" })).toHaveCount(0);
   await view.getByRole("button", { name: "Approve", exact: true }).click();
-  expect(board.writes.at(-1)).toEqual({
-    path: "/api/verbs/advance_task",
-    body: { task_id: STAGE_TASK },
-  });
+  await expect
+    .poll(() => board.writes.at(-1))
+    .toEqual({
+      path: "/api/verbs/advance_task",
+      body: { task_id: STAGE_TASK },
+    });
 });
 
 test("a task whose thread can't be read says so, and can still be approved, alone", async ({

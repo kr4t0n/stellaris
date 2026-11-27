@@ -1,4 +1,10 @@
-import type { CliKind, CliQuota, Member, Runner } from "@stellaris/shared";
+import {
+  quotaPool,
+  type CliKind,
+  type CliQuota,
+  type Member,
+  type Runner,
+} from "@stellaris/shared";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
@@ -254,7 +260,10 @@ export function PlanQuota({ runners, now }: { runners: readonly Runner[]; now: n
   );
 }
 
-/** A citizen's CLI quota on each runner its turns run on, in one line under its header. */
+/**
+ * A citizen's CLI quota on each runner its turns run on, in one line under its header, read for
+ * the pool its model draws from on a CLI that meters pools apart.
+ */
 export function CitizenQuota({
   member,
   runners,
@@ -271,6 +280,7 @@ export function CitizenQuota({
   if (cli === null || names.length === 0) {
     return null;
   }
+  const pool = quotaPool(cli, member.model);
   return (
     <p className="border-b border-line px-4 py-1.5 text-meta">
       <Link to="/runners" className="hover:text-fg-primary">
@@ -278,7 +288,7 @@ export function CitizenQuota({
       </Link>
       {names.map((name) => {
         const quota = runners.find((runner) => runner.name === name)?.quotas?.[cli];
-        const tone = quota === undefined ? "" : quotaWords(quota, now).tone;
+        const tone = quota === undefined ? "" : quotaWords(quota, now, pool).tone;
         return (
           <span key={name}>
             {" · "}
@@ -287,7 +297,7 @@ export function CitizenQuota({
               className={tone}
               title={quota === undefined ? "nothing reported yet" : `as of ${quota.observedAt}`}
             >
-              {quotaLine(quota, now)}
+              {quotaLine(quota, now, pool)}
             </span>
           </span>
         );
@@ -296,7 +306,10 @@ export function CitizenQuota({
   );
 }
 
-/** A mark beside a citizen's CLI when its quota is near or at its limit on a runner its turns use. */
+/**
+ * A mark beside a citizen's CLI when its quota, read for its model's pool as the line reads it, is
+ * near or at its limit on a runner its turns use.
+ */
 export function QuotaMark({
   member,
   runners,
@@ -312,12 +325,13 @@ export function QuotaMark({
   if (cli === null) {
     return null;
   }
+  const pool = quotaPool(cli, member.model);
   const marks = turnRunners(member, placed).flatMap((name) => {
     const quota = runners.find((runner) => runner.name === name)?.quotas?.[cli];
     if (quota === undefined) {
       return [];
     }
-    const { level, words } = quotaWords(quota, now);
+    const { level, words } = quotaWords(quota, now, pool);
     return level === "limited" || level === "warning" ? [{ name, level, words }] : [];
   });
   if (marks.length === 0) {

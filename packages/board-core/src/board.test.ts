@@ -2608,6 +2608,69 @@ describe("Board", () => {
     expect(await holder(built.id)).toBeUndefined();
   });
 
+  it("keeps the lease of a holder its model's pool's limit holds, and lets the other pool's holder's lapse", async () => {
+    const { board } = await society({});
+    await board.addRunner(USER, "pod");
+    await board.markRunner("pod", { status: "connected", clis: ["antigravity"] });
+    await board.placeProject("demo", "pod");
+    // Two engineers on Antigravity: eng-3 on a Claude model, which draws from its third-party pool,
+    // and eng-4 on a Gemini model.
+    for (const [name, model] of [
+      ["eng-3", "claude-sonnet-4-6"],
+      ["eng-4", "gemini-3.1-pro"],
+    ] as const) {
+      await board.addAgent(USER, {
+        name,
+        role: "engineer",
+        cli: "antigravity",
+        model,
+        memberships: ["demo"],
+      });
+    }
+    const sweep = async (minutes: number): Promise<void> => {
+      for (let i = 0; i < minutes; i += 1) {
+        clock = new Date(clock.getTime() + 60_000);
+        await board.expireLeases();
+      }
+    };
+    const holder = async (id: Ulid) => (await board.getTask(USER, { task_id: id })).claimedBy;
+    const thirdParty = await board.createTask(USER, { project: "demo", title: "build" });
+    const gemini = await board.createTask(USER, { project: "demo", title: "review" });
+    await board.claimTask({ name: "eng-3", role: "engineer" }, { task_id: thirdParty.id });
+    await board.claimTask({ name: "eng-4", role: "engineer" }, { task_id: gemini.id });
+
+    // agy's third-party pool on the project's runner is spent for two hours, while its login and
+    // its Gemini pool are not, as its read reports it.
+    const observedAt = clock.toISOString();
+    await board.recordQuota(
+      "pod",
+      "antigravity",
+      CliQuotaSchema.parse({
+        observedAt,
+        source: "read",
+        status: "warning",
+        pools: [
+          { key: "gemini", limited: false, observedAt },
+          {
+            key: "3p",
+            limited: true,
+            limitedUntil: new Date(clock.getTime() + 120 * 60_000).toISOString(),
+            observedAt,
+          },
+        ],
+      }),
+    );
+    await sweep(119);
+    expect(await holder(thirdParty.id)).toBe("eng-3");
+    expect(await holder(gemini.id)).toBeUndefined();
+
+    // The pool's limit lifts at its reset, and the claim lapses from at least half a lease on.
+    await sweep(15);
+    expect(await holder(thirdParty.id)).toBe("eng-3");
+    await sweep(16);
+    expect(await holder(thirdParty.id)).toBeUndefined();
+  });
+
   it("enforces role charters and the lifecycle's ends", async () => {
     const { board } = await society();
     await expect(

@@ -161,9 +161,10 @@ function CitizenRow({
 
 /**
  * Every citizen at a glance, one row each in columns, ordered by role: its CLI, marked when its
- * quota is near or at its limit on a runner its turns use, role, model, the runners its turns run
- * on, projects, and the tokens its turns counted over the window the header picks beside what it
- * is doing, or under the row in an island too narrow for them; each opens the citizen's own view.
+ * quota, read for its model's pool, is near or at its limit on a runner its turns use, role, model,
+ * the runners its turns run on, projects, and the tokens its turns counted over the window the
+ * header picks beside what it is doing, or under the row in an island too narrow for them; each
+ * opens the citizen's own view.
  * Retired citizens follow in a section of their own.
  */
 export function CitizensView() {

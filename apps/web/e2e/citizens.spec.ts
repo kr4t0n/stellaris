@@ -870,6 +870,34 @@ test("a citizen's view and the citizens list say when its CLI's quota is at its 
   ).toBeVisible();
 });
 
+test("a citizen's view and the citizens list read Antigravity's quota for the citizen's own pool", async ({
+  page,
+}) => {
+  await fakeBoard(page, { pooled: true });
+  await page.goto("/citizens");
+  const view = page.getByRole("region", { name: "Board content" });
+  const row = (name: string) =>
+    view.getByRole("listitem").filter({ has: page.getByText(name, { exact: true }) });
+  // rig's third-party pool is spent and its Gemini pool is not: bo, on a Claude model, is held
+  // there until the pool's reset, in words for readers too, and cy, on a Gemini model, is unmarked.
+  const mark = row("bo").getByTitle(/^antigravity limited for (1h 59m|2h 0m) on rig$/);
+  await expect(mark).toBeVisible();
+  await expect(mark).toHaveText(/antigravity limited for (1h 59m|2h 0m) on rig/);
+  await expect(row("cy")).toBeVisible();
+  await expect(row("cy").getByTitle(/^antigravity /)).toHaveCount(0);
+
+  // Each line names the windows of the citizen's own pool alone.
+  await page.goto("/citizen/bo");
+  const quota = view.locator("p", { hasText: /^antigravity quota/ });
+  await expect(quota).toHaveText(/^antigravity quota · rig limited for (1h 59m|2h 0m)$/);
+  await expect(quota.getByText(/^limited for/)).toHaveClass(/text-red-300/);
+  await page.goto("/citizen/cy");
+  await expect(quota).toHaveText(
+    "antigravity quota · rig 7d gemini models 12% · gemini models 30%",
+  );
+  await expect(quota.getByText(/^7d gemini models/)).toHaveClass(/text-fg-muted/);
+});
+
 test("the citizens list shows each citizen's tokens over a window, retired ones apart", async ({
   page,
 }) => {
